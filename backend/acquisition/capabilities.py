@@ -101,7 +101,7 @@ async def _registration_is_available(
     return patch_rc != 0 and registration.route_probe_error in patch_output
 
 
-def _anonymous_profile_available() -> bool:
+def _profile_available(profile_kind: str) -> bool:
     from backend.browser_pool import get_pool
 
     try:
@@ -109,7 +109,7 @@ def _anonymous_profile_available() -> bool:
     except RuntimeError:
         return False
     return any(
-        pool.get_profile_kind(endpoint) == "anonymous" for endpoint in pool.endpoints
+        pool.get_profile_kind(endpoint) == profile_kind for endpoint in pool.endpoints
     )
 
 
@@ -118,11 +118,11 @@ async def probe_capabilities() -> list[CapabilityDescriptor]:
     if not await _runtime_is_installed():
         return []
 
-    ready = _anonymous_profile_available()
     descriptors = []
     for registration in list_capability_registrations():
         if not await _registration_is_available(registration):
             continue
+        ready = _profile_available(registration.required_profile_kind)
         descriptors.append(
             CapabilityDescriptor(
                 capability_id=registration.capability_id,
@@ -130,7 +130,15 @@ async def probe_capabilities() -> list[CapabilityDescriptor]:
                 output_schema_version=registration.output_schema_version,
                 ready=ready,
                 runtime=registration.runtime_identity(),
-                unavailable_reason=None if ready else "no_clean_profile",
+                unavailable_reason=(
+                    None
+                    if ready
+                    else (
+                        "no_clean_profile"
+                        if registration.required_profile_kind == "anonymous"
+                        else f"no_{registration.required_profile_kind}_profile"
+                    )
+                ),
             )
         )
     return descriptors

@@ -14,6 +14,7 @@ from backend.acquisition.registry import get_capability_registration
 from backend.browser_pool import (
     LocalBrowserPool,
     NoCleanProfileError,
+    NoMatchingProfileError,
     RedisBrowserPool,
 )
 from backend.models.acquisition import AcquisitionExecution, AcquisitionExecutionStatus
@@ -301,16 +302,17 @@ async def run_acquisition_execution(
 
     from backend.security.url_guard import SSRFValidationError, avalidate_public_url
 
-    try:
-        input_payload["url"] = await avalidate_public_url(input_payload.get("url"))
-    except SSRFValidationError as exc:
-        await _fail_execution(
-            execution_id,
-            {"code": "ssrf_rejected", "message": str(exc)},
-            session_factory,
-            lease_owner,
-        )
-        return
+    if "url" in input_payload:
+        try:
+            input_payload["url"] = await avalidate_public_url(input_payload["url"])
+        except SSRFValidationError as exc:
+            await _fail_execution(
+                execution_id,
+                {"code": "ssrf_rejected", "message": str(exc)},
+                session_factory,
+                lease_owner,
+            )
+            return
 
     heartbeat_stop = asyncio.Event()
     lease_lost = asyncio.Event()
@@ -327,7 +329,7 @@ async def run_acquisition_execution(
     lease_lost_task = None
     try:
         pool = await _managed_browser_pool(session_factory)
-        endpoint = pool.select_anonymous_endpoint()
+        endpoint = pool.select_endpoint(registration.required_profile_kind)
         if channel is None:
             from backend.channels.opencli_channel import OpenCLIChannel
 
@@ -336,7 +338,7 @@ async def run_acquisition_execution(
         parameters = {
             **input_payload,
             "chrome_endpoint": endpoint,
-            "required_profile_kind": "anonymous",
+            "required_profile_kind": registration.required_profile_kind,
         }
         from backend.config import get_settings
 
@@ -358,7 +360,7 @@ async def run_acquisition_execution(
                 await collection_task
             return
         result = await collection_task
-    except NoCleanProfileError as exc:
+    except (NoCleanProfileError, NoMatchingProfileError) as exc:
         await _fail_execution(
             execution_id,
             {"code": exc.code, "message": str(exc)},
@@ -499,7 +501,7 @@ async def run_acquisition_execution(
                     ),
                     "browser": {
                         "endpoint": endpoint,
-                        "profile_kind": "anonymous",
+                        "profile_kind": registration.required_profile_kind,
                     },
                     "channel_metadata": result.metadata,
                 },

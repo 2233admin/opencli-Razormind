@@ -558,9 +558,13 @@ async def _collect_with_opencli_subprocess(
     try:
         returncode, stdout_text, stderr_text = await _run_opencli(cmd, env)
     except TimeoutError as exc:
+        from backend.config import get_settings
+
+        timeout = get_settings().opencli_timeout
         logger.error("opencli timeout | cmd=%s", " ".join(cmd))
         return ChannelResult.fail(
-            "opencli command timed out after 120s", error_type=type(exc).__name__
+            f"opencli command timed out after {timeout}s",
+            error_type=type(exc).__name__,
         )
     except FileNotFoundError as exc:
         logger.error("opencli binary not found: %s", cmd[0])
@@ -768,7 +772,9 @@ class OpenCLIChannel(AbstractChannel):
                 daemon_host = urlparse(cdp_endpoint).hostname or "agent-1"
                 env.pop("OPENCLI_CDP_ENDPOINT", None)
                 env["OPENCLI_DAEMON_HOST"] = daemon_host
-                env["OPENCLI_DAEMON_PORT"] = str(_DAEMON_PORT)
+                # OpenCLI 1.8.5 fixes Browser Bridge to localhost:19825 and
+                # rejects the legacy port override even when it is 19825.
+                env.pop("OPENCLI_DAEMON_PORT", None)
                 logger.info(
                     "opencli bridge | cmd=%s daemon=%s:%s",
                     " ".join(cmd),
