@@ -6,7 +6,7 @@ provider/模型网关 + OpenAI tool-calling) 决定调工具:
   - 只读工具 (list_sources) 直接执行, 喂回结果让 agent 继续推理。
   - 写工具 (toggle_source) **不立即落库**, 返回一个 proposal 让前端弹 diff 确认。
 
-确认后前端调 /chat/confirm, 这里才走现有 source_service 落库。写前确认是硬底线。
+确认后前端调 /chat/confirm, 这里才走统一 Agent Control 服务落库。写前确认是硬底线。
 
 v1 薄闭环: 唯一写动作 = 启停 source。验证通后按同模式扩 trigger_task / update_schedule。
 """
@@ -16,16 +16,16 @@ import logging
 import re
 from typing import Any, Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.control.agent_control import ACTION_REGISTRY, agent_control_service
 from backend.database import get_db
 from backend.models.provider import ModelProvider
 from backend.schemas.common import ApiResponse
-from backend.schemas.schedule import CronScheduleUpdate
-from backend.schemas.source import DataSourceUpdate
+from backend.security.identity import RequestIdentity, get_request_identity
 from backend.services import schedule_service, source_service, task_service
 from backend.skills.toolcall import _is_xml_tool_model, _parse_tool_use, _safe_json
 
@@ -142,7 +142,22 @@ TOOLS: list[dict[str, Any]] = [
     },
 ]
 
-WRITE_TOOLS = {"toggle_source", "trigger_task", "update_schedule", "update_provider"}
+WRITE_TOOLS = ACTION_REGISTRY.action_names
+
+
+async def _optional_request_identity(request: Request) -> RequestIdentity | None:
+    """Preserve unauthenticated read-chat compatibility; writes still fail closed."""
+
+    scheme, _, token = request.headers.get("authorization", "").partition(" ")
+    if scheme.lower() != "bearer" or not token:
+        return None
+    return await get_request_identity(request)
+
+
+def _require_write_identity(identity: RequestIdentity | None) -> RequestIdentity:
+    if identity is None:
+        raise HTTPException(status_code=401, detail="Bearer token required for write proposals")
+    return identity
 
 
 # ── request / response 模型 ─────────────────────────────────────────────────
@@ -163,6 +178,9 @@ class Proposal(BaseModel):
     args: dict[str, Any]
     summary: str
     diff: str
+    work_item_id: Optional[str] = None
+    workspace_id: Optional[str] = None
+    proposal_version: Optional[str] = None
 
 
 class ChatReply(BaseModel):
@@ -270,83 +288,65 @@ async def _run_read_tool(db: AsyncSession, name: str, args: dict[str, Any]) -> A
     return {"error": f"unknown read tool: {name}"}
 
 
-async def _build_proposal(db: AsyncSession, name: str, args: dict[str, Any]) -> Proposal:
-    if name == "toggle_source":
-        source_id = args.get("source_id", "")
-        enabled = bool(args.get("enabled"))
-        source = await source_service.get_source(db, source_id)
-        if not source:
-            raise HTTPException(status_code=404, detail=f"数据源 {source_id} 不存在")
-        verb = "启用" if enabled else "停用"
+def _workspace_id(context: dict[str, Any] | None) -> str | None:
+    if not context:
+        return None
+    value = context.get("workspace_id")
+    if not isinstance(value, str) or not value.strip():
+        return None
+    return value
+
+
+async def _build_proposal(
+    db: AsyncSession,
+    name: str,
+    args: dict[str, Any],
+    *,
+    identity: RequestIdentity | None = None,
+    workspace_id: str | None = None,
+) -> Proposal:
+    """Preview an action and, for authenticated transports, persist its proposal."""
+
+    if identity is None:
+        # Kept for internal callers that only need the existing preview shape.
+        preview = await agent_control_service.preview(db, name, args)
         return Proposal(
-            tool=name,
-            args={"source_id": source_id, "enabled": enabled},
-            summary=f"{verb}数据源「{source.name}」",
-            diff=f"{source.name}: enabled {source.enabled} → {enabled}",
+            tool=preview.action_name,
+            args=preview.args,
+            summary=preview.summary,
+            diff=preview.diff,
         )
-    if name == "trigger_task":
-        source_id = args.get("source_id", "")
-        source = await source_service.get_source(db, source_id)
-        if not source:
-            raise HTTPException(status_code=404, detail=f"数据源 {source_id} 不存在")
-        return Proposal(
-            tool=name,
-            args={"source_id": source_id},
-            summary=f"立即采集「{source.name}」",
-            diff=f"触发一次手动采集: {source.name} ({'已启用' if source.enabled else '已停用'})",
-        )
-    if name == "update_schedule":
-        schedule_id = args.get("schedule_id", "")
-        schedule = await schedule_service.get_schedule(db, schedule_id)
-        if not schedule:
-            raise HTTPException(status_code=404, detail=f"调度 {schedule_id} 不存在")
-        out_args: dict[str, Any] = {"schedule_id": schedule_id}
-        changes: list[str] = []
-        if args.get("cron_expression") is not None:
-            new_cron = str(args["cron_expression"])
-            if not schedule_service.validate_cron_expression(new_cron):
-                raise HTTPException(status_code=400, detail=f"非法 cron 表达式: {new_cron}")
-            out_args["cron_expression"] = new_cron
-            changes.append(f"cron {schedule.cron_expression} → {new_cron}")
-        if args.get("enabled") is not None:
-            out_args["enabled"] = bool(args["enabled"])
-            changes.append(f"enabled {schedule.enabled} → {bool(args['enabled'])}")
-        if not changes:
-            raise HTTPException(status_code=400, detail="update_schedule 未指定要改的字段 (cron_expression 或 enabled)")
-        return Proposal(
-            tool=name,
-            args=out_args,
-            summary=f"修改调度「{schedule.name}」",
-            diff="; ".join(changes),
-        )
-    if name == "update_provider":
-        provider_id = args.get("provider_id", "")
-        provider = await db.get(ModelProvider, provider_id)
-        if not provider:
-            raise HTTPException(status_code=404, detail=f"模型提供商 {provider_id} 不存在")
-        out_args: dict[str, Any] = {"provider_id": provider_id}
-        changes: list[str] = []
-        if args.get("default_model") is not None:
-            new_model = str(args["default_model"])
-            out_args["default_model"] = new_model
-            changes.append(f"default_model {provider.default_model} → {new_model}")
-        if args.get("enabled") is not None:
-            out_args["enabled"] = bool(args["enabled"])
-            state = "启用" if out_args["enabled"] else "停用"
-            changes.append(f"{state} (enabled {provider.enabled} → {out_args['enabled']})")
-        if not changes:
-            raise HTTPException(status_code=400, detail="update_provider 未指定要改的字段 (default_model 或 enabled)")
-        return Proposal(
-            tool=name,
-            args=out_args,
-            summary=f"配置 AI 模型提供商「{provider.name}」",
-            diff="; ".join(changes),
-        )
-    raise HTTPException(status_code=400, detail=f"unknown write tool: {name}")
+
+    resolved_workspace_id = await agent_control_service.resolve_workspace_id(
+        db,
+        identity,
+        workspace_id,
+    )
+    recorded = await agent_control_service.create_proposal(
+        db,
+        workspace_id=resolved_workspace_id,
+        identity=identity,
+        action_name=name,
+        args=args,
+        origin="chat",
+    )
+    return Proposal(
+        tool=recorded.preview.action_name,
+        args=recorded.preview.args,
+        summary=recorded.preview.summary,
+        diff=recorded.preview.diff,
+        work_item_id=recorded.work_item_id,
+        workspace_id=recorded.workspace_id,
+        proposal_version=recorded.proposal_version,
+    )
 
 
 @router.post("", response_model=ApiResponse[ChatReply])
-async def chat(body: ChatRequest, db: AsyncSession = Depends(get_db)) -> ApiResponse:
+async def chat(
+    body: ChatRequest,
+    identity: RequestIdentity | None = Depends(_optional_request_identity),
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse:
     provider = await _pick_provider(db, body.provider_id)
     client = await _build_client(provider)
     model = provider.default_model or "gpt-4o-mini"
@@ -356,7 +356,7 @@ async def chat(body: ChatRequest, db: AsyncSession = Depends(get_db)) -> ApiResp
         system += f"\n\n当前用户操作上下文 (JSON): {json.dumps(body.context, ensure_ascii=False)}"
 
     if _is_xml_tool_model(model):
-        return await _chat_xml(client, model, system, body, db)
+        return await _chat_xml(client, model, system, body, db, identity)
 
     messages: list[dict[str, Any]] = [{"role": "system", "content": system}]
     messages += [{"role": m.role, "content": m.content} for m in body.messages]
@@ -380,7 +380,13 @@ async def chat(body: ChatRequest, db: AsyncSession = Depends(get_db)) -> ApiResp
         for tc in tool_calls:
             if tc.function.name in WRITE_TOOLS:
                 args = _safe_json(tc.function.arguments)
-                proposal = await _build_proposal(db, tc.function.name, args)
+                proposal = await _build_proposal(
+                    db,
+                    tc.function.name,
+                    args,
+                    identity=_require_write_identity(identity),
+                    workspace_id=_workspace_id(body.context),
+                )
                 return ApiResponse.ok(ChatReply(type="proposal", proposal=proposal))
 
         # 只读工具 → 执行, 喂回结果, 继续循环
@@ -408,78 +414,53 @@ async def chat(body: ChatRequest, db: AsyncSession = Depends(get_db)) -> ApiResp
 
 
 @router.post("/confirm", response_model=ApiResponse[dict])
-async def confirm(body: ConfirmRequest, db: AsyncSession = Depends(get_db)) -> ApiResponse:
-    """Execute a confirmed proposal. Dispatches by tool; each writes via existing services."""
+async def confirm(
+    body: ConfirmRequest,
+    identity: RequestIdentity = Depends(get_request_identity),
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse:
+    """Execute a proposal only through the confirmed Agent Control path."""
     proposal = body.proposal
-    args = proposal.args
+    workspace_id = await agent_control_service.resolve_workspace_id(
+        db,
+        identity,
+        proposal.workspace_id,
+    )
+    work_item_id = proposal.work_item_id
+    proposal_version = proposal.proposal_version
 
-    if proposal.tool == "toggle_source":
-        source = await source_service.get_source(db, args.get("source_id", ""))
-        if not source:
-            raise HTTPException(status_code=404, detail="数据源不存在")
-        await source_service.update_source(db, source, DataSourceUpdate(enabled=bool(args.get("enabled"))))
-        await db.commit()
-        logger.info("chat confirm | toggle_source %s -> %s", source.id, args.get("enabled"))
-        return ApiResponse.ok({"applied": True, "tool": proposal.tool, "summary": proposal.summary})
-
-    if proposal.tool == "trigger_task":
-        source = await source_service.get_source(db, args.get("source_id", ""))
-        if not source:
-            raise HTTPException(status_code=404, detail="数据源不存在")
-        if not source.enabled:
-            raise HTTPException(status_code=400, detail="数据源已停用, 无法采集")
-        task = await task_service.create_task(
-            db, source_id=source.id, trigger_type="manual", parameters={}, priority=0, agent_id=None
+    if (work_item_id is None) != (proposal_version is None):
+        raise HTTPException(
+            status_code=409,
+            detail="Agent Control proposal metadata is incomplete",
         )
-        await db.commit()
-        from backend.executor import get_executor
-
-        try:
-            dispatch = await get_executor().dispatch_collection(task.id, {})
-        except Exception as exc:
-            # Task row is already committed; surface the dispatch failure instead
-            # of reporting applied=True with a silently dead task.
-            logger.exception("chat confirm | trigger_task dispatch failed source=%s task=%s", source.id, task.id)
-            raise HTTPException(
-                status_code=502, detail=f"任务已创建但派发失败 (task_id={task.id}), 请到工作项里重试"
-            ) from exc
-        logger.info("chat confirm | trigger_task source=%s task=%s", source.id, task.id)
-        return ApiResponse.ok(
-            {
-                "applied": True,
-                "tool": proposal.tool,
-                "task_id": task.id,
-                "summary": proposal.summary,
-                "dispatch": dispatch,
-            }
+    if work_item_id is None:
+        # Compatibility for clients that still send the original Proposal
+        # shape. The confirmation endpoint itself is the explicit gate, so
+        # persist the governed proposal immediately before executing it.
+        recorded = await agent_control_service.create_proposal(
+            db,
+            workspace_id=workspace_id,
+            identity=identity,
+            action_name=proposal.tool,
+            args=proposal.args,
+            origin="chat.confirm.compat",
         )
+        work_item_id = recorded.work_item_id
+        proposal_version = recorded.proposal_version
 
-    if proposal.tool == "update_schedule":
-        schedule = await schedule_service.get_schedule(db, args.get("schedule_id", ""))
-        if not schedule:
-            raise HTTPException(status_code=404, detail="调度不存在")
-        fields = {k: args[k] for k in ("cron_expression", "enabled") if k in args}
-        await schedule_service.update_schedule(db, schedule, CronScheduleUpdate(**fields))
-        await db.commit()
-        logger.info("chat confirm | update_schedule %s %s", schedule.id, fields)
-        return ApiResponse.ok({"applied": True, "tool": proposal.tool, "summary": proposal.summary})
-
-    if proposal.tool == "update_provider":
-        provider = await db.get(ModelProvider, args.get("provider_id", ""))
-        if not provider:
-            raise HTTPException(status_code=404, detail="模型提供商不存在")
-        if "default_model" in args:
-            provider.default_model = str(args["default_model"])
-        if "enabled" in args:
-            provider.enabled = bool(args["enabled"])
-        await db.commit()
-        logger.info(
-            "chat confirm | update_provider %s %s",
-            provider.id, {k: args[k] for k in ("default_model", "enabled") if k in args},
-        )
-        return ApiResponse.ok({"applied": True, "tool": proposal.tool, "summary": proposal.summary})
-
-    raise HTTPException(status_code=400, detail=f"unknown proposal tool: {proposal.tool}")
+    assert work_item_id is not None
+    assert proposal_version is not None
+    result = await agent_control_service.execute_confirmed(
+        db,
+        workspace_id=workspace_id,
+        identity=identity,
+        work_item_id=work_item_id,
+        proposal_version=proposal_version,
+        confirmation_path="chat.confirm",
+        expected_action=proposal.tool,
+    )
+    return ApiResponse.ok(result)
 
 
 # ── XML-style tool models (e.g. Qwable-v1: emits <tool_use> XML, not OpenAI tool_calls) ──
@@ -506,7 +487,14 @@ XML_TOOL_TEXT = (
 )
 
 
-async def _chat_xml(client: Any, model: str, system: str, body: ChatRequest, db: AsyncSession) -> ApiResponse:
+async def _chat_xml(
+    client: Any,
+    model: str,
+    system: str,
+    body: ChatRequest,
+    db: AsyncSession,
+    identity: RequestIdentity | None,
+) -> ApiResponse:
     """Tool loop for XML-style models (parse <tool_use> from content, feed results back as text)."""
     messages: list[dict[str, Any]] = [{"role": "system", "content": system + XML_TOOL_TEXT}]
     messages += [{"role": m.role, "content": m.content} for m in body.messages]
@@ -528,7 +516,13 @@ async def _chat_xml(client: Any, model: str, system: str, body: ChatRequest, db:
         # write tool hit → return proposal immediately
         for name, args in calls:
             if name in WRITE_TOOLS:
-                proposal = await _build_proposal(db, name, args)
+                proposal = await _build_proposal(
+                    db,
+                    name,
+                    args,
+                    identity=_require_write_identity(identity),
+                    workspace_id=_workspace_id(body.context),
+                )
                 return ApiResponse.ok(ChatReply(type="proposal", proposal=proposal))
 
         # read tools → execute, feed results back as <tool_result> text, loop
