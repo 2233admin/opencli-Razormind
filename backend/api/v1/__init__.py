@@ -24,6 +24,7 @@ from backend.api.v1 import (
     plans,
     plugins,
     presets,
+    project_source_bindings,
     providers,
     records,
     schedules,
@@ -37,6 +38,7 @@ from backend.api.v1 import (
     webhooks,
     workers,
     workflows,
+    workspace_sources,
     workspaces,
 )
 
@@ -77,3 +79,5 @@ v1_router.include_router(dashboard.router)
 v1_router.include_router(system.router)
 v1_router.include_router(identity.router)
 v1_router.include_router(workspaces.router)
+v1_router.include_router(workspace_sources.router)
+v1_router.include_router(project_source_bindings.router)

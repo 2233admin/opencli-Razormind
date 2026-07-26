@@ -46,6 +46,13 @@ from backend.models.record import CollectedRecord
 from backend.models.schedule import CronSchedule
 from backend.models.skill import Skill
 from backend.models.source import DataSource
+from backend.models.source_binding import (
+    Source,
+    SourceBinding,
+    SourceBindingRevision,
+    SourceLifecycleStatus,
+    SourceRevision,
+)
 from backend.models.source_credential import SourceCredential
 from backend.models.source_cursor import SourceCursor
 from backend.models.source_measurement import SourceMeasurement
@@ -102,6 +109,11 @@ __all__ = [
     "PlanSourceIndex",
     "PluginInstallation",
     "DataSource",
+    "Source",
+    "SourceRevision",
+    "SourceBinding",
+    "SourceBindingRevision",
+    "SourceLifecycleStatus",
     "SourceCredential",
     "SourceCursor",
     "SourceMeasurement",
