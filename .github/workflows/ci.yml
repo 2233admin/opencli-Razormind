@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  frontend:
+  frontend-nextjs:
     runs-on: ubuntu-latest
     name: Frontend (Next.js)
     defaults:
@@ -28,7 +28,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
 
@@ -99,8 +99,8 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: Install workflow contract dependency
-        run: python -m pip install "pydantic>=2.10.0"
+      - name: Install workflow compiler dependencies
+        run: python -m pip install -e ..
 
       - name: Install dependencies
         run: |

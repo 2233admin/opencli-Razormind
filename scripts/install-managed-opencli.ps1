@@ -8,8 +8,11 @@ param(
 
 $ErrorActionPreference = "Stop"
 $OpenCliVersion = "1.8.5"
-$OhMyOpenCliCommit = "73cc60c83586ef2c95469b3b70d6cfc80fa5bc53"
-$CapabilitySourceCommit = "73cc60c83586ef2c95469b3b70d6cfc80fa5bc53"
+$OhMyOpenCliCommit = "b0fdd513f64899b068103ddd7ff0de957d778b5c"
+$CapabilitySourceCommits = @(
+    "73cc60c83586ef2c95469b3b70d6cfc80fa5bc53",
+    "b0fdd513f64899b068103ddd7ff0de957d778b5c"
+)
 $requestHeaders = @{}
 if ($ApiAuthToken) {
     $requestHeaders = @{ Authorization = "Bearer $ApiAuthToken" }
@@ -35,9 +38,11 @@ if (Test-Path $OhMyOpenCliRoot) {
 }
 git clone $OhMyOpenCliRepo $OhMyOpenCliRoot
 git -C $OhMyOpenCliRoot checkout --detach $OhMyOpenCliCommit
-git -C $OhMyOpenCliRoot merge-base --is-ancestor $CapabilitySourceCommit HEAD
-if ($LASTEXITCODE -ne 0) {
-    throw "official-site capability source commit is absent from the pinned checkout"
+foreach ($CapabilitySourceCommit in $CapabilitySourceCommits) {
+    git -C $OhMyOpenCliRoot merge-base --is-ancestor $CapabilitySourceCommit HEAD
+    if ($LASTEXITCODE -ne 0) {
+        throw "managed capability source commit $CapabilitySourceCommit is absent from the pinned checkout"
+    }
 }
 Push-Location $OhMyOpenCliRoot
 try {

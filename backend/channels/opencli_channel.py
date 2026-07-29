@@ -1,9 +1,6 @@
 """OpenCLI channel: invokes opencli CLI tool and parses its output."""
 
 import asyncio
-import csv
-import io
-import json
 import logging
 import os
 import re
@@ -15,6 +12,8 @@ from urllib.parse import urlparse
 import yaml
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import backend.channels.opencli_support as _opencli_support
+import backend.opencli_runtime as _opencli_runtime
 from backend.channels.base import (
     AbstractChannel,
     Capabilities,
@@ -23,7 +22,17 @@ from backend.channels.base import (
     FetchResult,
 )
 from backend.channels.registry import register_channel
-from backend.opencli_runtime import configured_opencli_bin, resolve_opencli_bin
+
+_artifact_sha256 = _opencli_support.artifact_sha256
+_browser_endpoint_lease = _opencli_support.browser_endpoint_lease
+_extract_opencli_error = _opencli_support.extract_opencli_error
+_parse_csv = _opencli_support.parse_csv
+_parse_json = _opencli_support.parse_json
+_parse_markdown = _opencli_support.parse_markdown
+_parse_table = _opencli_support.parse_table
+_parse_yaml = _opencli_support.parse_yaml
+configured_opencli_bin = _opencli_runtime.configured_opencli_bin
+resolve_opencli_bin = _opencli_runtime.resolve_opencli_bin
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +82,13 @@ def _split_routing_parameters(
     cli_parameters = {
         key: value
         for key, value in parameters.items()
-        if key not in {"chrome_endpoint", "required_profile_kind", "execution_id"}
+        if key
+        not in {
+            "chrome_endpoint",
+            "required_profile_kind",
+            "execution_id",
+            "_endpoint_preacquired",
+        }
     }
     return (chrome_endpoint, required_profile_kind), cli_parameters
 
@@ -250,65 +265,6 @@ async def _command_requires_browser(bin_path: str, site: str, command: str) -> b
 
 def _resolve_bin(mode: str) -> str:  # noqa: ARG001 — mode unused, kept for call-site compat
     return resolve_opencli_bin()
-
-
-def _parse_json(raw: str) -> list[dict]:
-    json_start = next((i for i, ch in enumerate(raw) if ch in ("{", "[")), None)
-    if json_start is None:
-        raise ValueError(f"No JSON found in output: {raw[:200]!r}")
-    data = json.loads(raw[json_start:])
-    return data if isinstance(data, list) else [data]
-
-
-def _parse_yaml(raw: str) -> list[dict]:
-    data = yaml.safe_load(raw)
-    if isinstance(data, list):
-        return data
-    if isinstance(data, dict):
-        return [data]
-    return [{"content": str(data)}]
-
-
-def _parse_csv(raw: str) -> list[dict]:
-    reader = csv.DictReader(io.StringIO(raw.strip()))
-    return [row for row in reader]
-
-
-def _parse_table(raw: str) -> list[dict]:
-    """Parse cli-table3 Unicode box-drawing table into list of dicts."""
-    lines = raw.splitlines()
-    data_lines = [line for line in lines if line.strip().startswith("│")]
-    if not data_lines:
-        return [{"content": raw}]
-
-    def split_row(line: str) -> list[str]:
-        return [cell.strip() for cell in line.strip().strip("│").split("│")]
-
-    headers = split_row(data_lines[0])
-    rows = []
-    for line in data_lines[1:]:
-        cells = split_row(line)
-        if len(cells) == len(headers):
-            rows.append(dict(zip(headers, cells)))
-    return rows if rows else [{"content": raw}]
-
-
-def _parse_markdown(raw: str) -> list[dict]:
-    """Parse markdown table into list of dicts."""
-    lines = [line.strip() for line in raw.splitlines() if line.strip().startswith("|")]
-    if len(lines) < 2:
-        return [{"content": raw}]
-
-    def split_row(line: str) -> list[str]:
-        return [cell.strip() for cell in line.strip().strip("|").split("|")]
-
-    headers = split_row(lines[0])
-    rows = []
-    for line in lines[2:]:
-        cells = split_row(line)
-        if len(cells) == len(headers):
-            rows.append(dict(zip(headers, cells)))
-    return rows if rows else [{"content": raw}]
 
 
 _PARSERS = {
@@ -539,7 +495,7 @@ async def _run_opencli(cmd: list[str], env: dict) -> tuple[int, str, str]:
         from backend.config import get_settings
         timeout = get_settings().opencli_timeout
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-        return proc.returncode, stdout.decode(), stderr.decode().strip()
+        return int(proc.returncode or 0), stdout.decode(), stderr.decode().strip()
     except (TimeoutError, asyncio.CancelledError):
         await _kill_subprocess(proc)
         raise
@@ -578,7 +534,12 @@ async def _collect_with_opencli_subprocess(
 
     if returncode != 0:
         logger.error("opencli exit=%d | stderr=%s", returncode, stderr_text[:500])
-        return ChannelResult.fail(f"opencli exited with code {returncode}: {stderr_text}")
+        source_code, source_message = _extract_opencli_error(stderr_text)
+        message = source_message or stderr_text or "OpenCLI command failed"
+        return ChannelResult.fail(
+            f"opencli exited with code {returncode}: {message}",
+            error_type=source_code,
+        )
 
     raw = stdout_text
     logger.debug("opencli stdout | %d chars | preview=%s", len(raw), raw[:200])
@@ -609,7 +570,11 @@ async def _collect_with_opencli_subprocess(
         metadata["chrome_mode"] = chrome_mode
     trace_match = re.search(r"OpenCLI trace artifact:\s*([^\r\n]+)", stderr_text)
     if trace_match:
-        metadata["trace_artifact"] = trace_match.group(1).strip()
+        trace_artifact = trace_match.group(1).strip()
+        metadata["trace_artifact"] = trace_artifact
+        trace_sha256 = await asyncio.to_thread(_artifact_sha256, trace_artifact)
+        if trace_sha256:
+            metadata["trace_sha256"] = trace_sha256
     return ChannelResult.ok(items, **metadata)
 
 
@@ -645,6 +610,7 @@ class OpenCLIChannel(AbstractChannel):
         output_format = config.get("format", "json")
 
         execution_id = parameters.get("execution_id") or None
+        endpoint_preacquired = parameters.get("_endpoint_preacquired") is True
         (chrome_endpoint, required_profile_kind), cli_params = (
             _split_routing_parameters(parameters)
         )
@@ -720,10 +686,12 @@ class OpenCLIChannel(AbstractChannel):
                     "No registered agent nodes available. Please add an agent node first."
                 )
 
-        acquire_kwargs: dict[str, Any] = {"endpoint": _acquire_endpoint}
-        if required_profile_kind:
-            acquire_kwargs["required_profile_kind"] = required_profile_kind
-        async with pool.acquire(**acquire_kwargs) as cdp_endpoint:
+        async with _browser_endpoint_lease(
+            pool,
+            _acquire_endpoint,
+            required_profile_kind,
+            preacquired=endpoint_preacquired,
+        ) as cdp_endpoint:
             mode = pool.get_mode(cdp_endpoint)
             # Agent mode: dispatch to remote edge node
             if settings.collection_mode == "agent":
@@ -732,7 +700,10 @@ class OpenCLIChannel(AbstractChannel):
                     if isinstance(pool, LocalBrowserPool)
                     else "http"
                 )
-                agent_url = pool.get_agent_url(cdp_endpoint) or cdp_endpoint
+                get_agent_url = getattr(pool, "get_agent_url", None)
+                agent_url = (
+                    get_agent_url(cdp_endpoint) if get_agent_url else None
+                ) or cdp_endpoint
                 if not protocol:
                     return ChannelResult.fail(
                         f"Endpoint {cdp_endpoint} has no registered agent. "
@@ -782,6 +753,8 @@ class OpenCLIChannel(AbstractChannel):
                         bridge_err,
                     )
             else:
+                env.pop("OPENCLI_DAEMON_HOST", None)
+                env.pop("OPENCLI_DAEMON_PORT", None)
                 env["OPENCLI_CDP_ENDPOINT"] = cdp_endpoint
                 logger.info("opencli cdp | cmd=%s cdp=%s", " ".join(cmd), cdp_endpoint)
 

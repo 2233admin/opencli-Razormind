@@ -36,12 +36,14 @@ RUN npm install -g @jackwener/opencli@${OPENCLI_VERSION} \
 # identities separate: the latter is the behavior change, while the former is
 # the exact checkout certified by this image.
 ARG OHMYOPENCLI_REPO=https://github.com/2233admin/OhMyOpenCLI.git
-ARG OHMYOPENCLI_COMMIT=73cc60c83586ef2c95469b3b70d6cfc80fa5bc53
+ARG OHMYOPENCLI_COMMIT=b0fdd513f64899b068103ddd7ff0de957d778b5c
 ARG OFFICIAL_SITE_CAPABILITY_COMMIT=73cc60c83586ef2c95469b3b70d6cfc80fa5bc53
+ARG DOUBAO_CAPABILITY_COMMIT=b0fdd513f64899b068103ddd7ff0de957d778b5c
 RUN git clone ${OHMYOPENCLI_REPO} /opt/ohmyopencli \
     && cd /opt/ohmyopencli \
     && git checkout --detach ${OHMYOPENCLI_COMMIT} \
     && git merge-base --is-ancestor ${OFFICIAL_SITE_CAPABILITY_COMMIT} HEAD \
+    && git merge-base --is-ancestor ${DOUBAO_CAPABILITY_COMMIT} HEAD \
     && npm ci \
     && test "$(git rev-parse HEAD)" = "${OHMYOPENCLI_COMMIT}"
 

@@ -7,6 +7,7 @@ httpx POST calls, and the `additional_headers` -> `extra_headers` fallback in
 """
 
 import json
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import HTTPException
@@ -40,6 +41,81 @@ def test_resolve_bin_treats_empty_opencli_bin_as_default(monkeypatch):
     monkeypatch.setattr(agent_server.shutil, "which", lambda name: None)
 
     assert agent_server._resolve_bin("cdp") == "opencli"
+
+
+@pytest.mark.asyncio
+async def test_runtime_lineage_uses_the_dispatched_adapter_source(monkeypatch):
+    calls = []
+    outputs = iter(
+        [
+            b"runtime-commit\n",
+            b"doubao-source-commit\n",
+            b"opencli 1.8.5\n",
+        ]
+    )
+
+    class Process:
+        returncode = 0
+
+        async def communicate(self):
+            return next(outputs), b""
+
+    async def create(*args, **kwargs):
+        calls.append((args, kwargs))
+        return Process()
+
+    monkeypatch.setattr(agent_server.asyncio, "create_subprocess_exec", create)
+    monkeypatch.setenv("OPENCLI_DAEMON_HOST", "legacy-bridge")
+    monkeypatch.setenv("OPENCLI_DAEMON_PORT", "19825")
+
+    lineage = await agent_server._runtime_lineage(
+        "opencli", "doubao", "capture"
+    )
+
+    assert lineage == {
+        "ohmyopencli_repo_commit": "runtime-commit",
+        "capability_source_commit": "doubao-source-commit",
+        "opencli_version": "1.8.5",
+    }
+    assert calls[1][0][-2:] == ("--", "adapters/doubao/capture.js")
+    assert all("OPENCLI_DAEMON_HOST" not in call[1]["env"] for call in calls)
+    assert all("OPENCLI_DAEMON_PORT" not in call[1]["env"] for call in calls)
+
+
+@pytest.mark.asyncio
+async def test_cdp_collect_removes_inherited_bridge_environment(monkeypatch):
+    captured_env = {}
+
+    class Process:
+        returncode = 0
+
+        async def communicate(self):
+            return b"[]", b""
+
+    async def create(*_args, **kwargs):
+        captured_env.update(kwargs["env"])
+        return Process()
+
+    monkeypatch.setenv("OPENCLI_DAEMON_HOST", "legacy-bridge")
+    monkeypatch.setenv("OPENCLI_DAEMON_PORT", "19825")
+    monkeypatch.setattr(agent_server.asyncio, "create_subprocess_exec", create)
+    monkeypatch.setattr(agent_server, "_snapshot_tab_ids", AsyncMock(return_value=set()))
+    monkeypatch.setattr(agent_server, "_cleanup_cdp_tabs", AsyncMock())
+    monkeypatch.setattr(agent_server, "_runtime_lineage", AsyncMock(return_value={}))
+
+    result = await agent_server.collect(
+        agent_server.CollectRequest(
+            site="doubao",
+            command="session-probe",
+            mode="cdp",
+            cdp_endpoint="http://chrome:9222",
+        )
+    )
+
+    assert result["success"] is True
+    assert captured_env["OPENCLI_CDP_ENDPOINT"] == "http://chrome:9222"
+    assert "OPENCLI_DAEMON_HOST" not in captured_env
+    assert "OPENCLI_DAEMON_PORT" not in captured_env
 
 
 # ── _auth_headers ────────────────────────────────────────────────────────────

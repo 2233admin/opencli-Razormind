@@ -51,7 +51,19 @@ async def _validate_capability(body: AcquisitionSubmission) -> CapabilityDescrip
                 "message": body.output_schema_version,
             },
         )
-    capability = matching_schema[0]
+    requested_target = body.input.get("target")
+    matching_target = [
+        c for c in matching_schema if c.target == requested_target
+    ]
+    if not matching_target:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "target_not_registered",
+                "message": str(requested_target or ""),
+            },
+        )
+    capability = matching_target[0]
     if not capability.ready:
         raise HTTPException(
             status_code=409,

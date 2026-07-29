@@ -23,6 +23,65 @@ _LEASE_DURATION = timedelta(seconds=30)
 _HEARTBEAT_INTERVAL_SECONDS = 5
 logger = logging.getLogger(__name__)
 
+
+def _capability_failure_code(message: str, source_code: str | None = None) -> str:
+    typed_codes = {
+        "DOUBAO_CAPTURE_LOGIN_WALL": "login_required",
+        "DOUBAO_CAPTURE_CAPTCHA": "captcha_required",
+        "DOUBAO_CAPTURE_TIMEOUT": "capture_timeout",
+        "DOUBAO_CAPTURE_REFUSAL": "model_refusal",
+        "DOUBAO_CAPTURE_EMPTY_ANSWER": "empty_answer",
+        "DOUBAO_CAPTURE_PAGE_DRIFT": "page_contract_drift",
+    }
+    if source_code and source_code.upper() in typed_codes:
+        return typed_codes[source_code.upper()]
+    normalized = message.lower()
+    if "cdp not reachable" in normalized:
+        return "browser_route_unavailable"
+    if any(
+        marker in normalized
+        for marker in (
+            "login-required",
+            "doubao_capture_login_wall",
+            "logged-in browser session",
+        )
+    ):
+        return "login_required"
+    if any(
+        marker in normalized
+        for marker in (
+            "captcha",
+            "doubao_capture_captcha",
+            "verification challenge",
+        )
+    ):
+        return "captcha_required"
+    if "timed out" in normalized or "doubao_capture_timeout" in normalized:
+        return "capture_timeout"
+    if any(
+        marker in normalized
+        for marker in (
+            "refusal",
+            "refused",
+            "doubao_capture_refusal",
+        )
+    ):
+        return "model_refusal"
+    if "empty answer" in normalized or "doubao_capture_empty_answer" in normalized:
+        return "empty_answer"
+    if any(
+        marker in normalized
+        for marker in (
+            "composer-unavailable",
+            "could not submit",
+            "page drift",
+            "doubao_capture_page_drift",
+        )
+    ):
+        return "page_contract_drift"
+    return "capability_execution_failed"
+
+
 async def _managed_browser_pool(
     session_factory: async_sessionmaker[AsyncSession],
 ):
@@ -282,7 +341,10 @@ async def run_acquisition_execution(
         required_artifacts = list(execution.required_artifacts)
 
     registration = get_capability_registration(
-        capability_id, capability_version, output_schema_version
+        capability_id,
+        capability_version,
+        output_schema_version,
+        input_payload.get("target"),
     )
     if registration is None:
         await _fail_execution(
@@ -301,16 +363,33 @@ async def run_acquisition_execution(
 
     from backend.security.url_guard import SSRFValidationError, avalidate_public_url
 
-    try:
-        input_payload["url"] = await avalidate_public_url(input_payload.get("url"))
-    except SSRFValidationError as exc:
-        await _fail_execution(
-            execution_id,
-            {"code": "ssrf_rejected", "message": str(exc)},
-            session_factory,
-            lease_owner,
-        )
-        return
+    if registration.url_input_field is not None:
+        raw_url = input_payload.get(registration.url_input_field)
+        if not isinstance(raw_url, str) or not raw_url.strip():
+            await _fail_execution(
+                execution_id,
+                {
+                    "code": "invalid_capability_input",
+                    "message": (
+                        f"{registration.url_input_field} must be a non-empty URL string"
+                    ),
+                },
+                session_factory,
+                lease_owner,
+            )
+            return
+        try:
+            input_payload[registration.url_input_field] = await avalidate_public_url(
+                raw_url
+            )
+        except SSRFValidationError as exc:
+            await _fail_execution(
+                execution_id,
+                {"code": "ssrf_rejected", "message": str(exc)},
+                session_factory,
+                lease_owner,
+            )
+            return
 
     heartbeat_stop = asyncio.Event()
     lease_lost = asyncio.Event()
@@ -327,41 +406,96 @@ async def run_acquisition_execution(
     lease_lost_task = None
     try:
         pool = await _managed_browser_pool(session_factory)
-        endpoint = pool.select_anonymous_endpoint()
-        if channel is None:
-            from backend.channels.opencli_channel import OpenCLIChannel
-
-            channel = OpenCLIChannel()
-
-        parameters = {
-            **input_payload,
-            "chrome_endpoint": endpoint,
-            "required_profile_kind": "anonymous",
-        }
-        from backend.config import get_settings
-
-        if get_settings().collection_mode == "agent":
-            parameters["execution_id"] = execution_id
-        if required_artifacts:
-            parameters["trace"] = "on"
-        collection_task = asyncio.create_task(
-            channel.collect(registration.invocation, parameters)
-        )
-        lease_lost_task = asyncio.create_task(lease_lost.wait())
-        done, _ = await asyncio.wait(
-            {collection_task, lease_lost_task},
-            return_when=asyncio.FIRST_COMPLETED,
-        )
-        if lease_lost_task in done:
-            collection_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await collection_task
+        candidates = [
+            candidate
+            for candidate in pool.endpoints
+            if pool.get_profile_kind(candidate) == registration.required_profile_kind
+        ]
+        if not candidates:
+            code = (
+                "no_clean_profile"
+                if registration.required_profile_kind == "anonymous"
+                else f"no_{registration.required_profile_kind}_profile"
+            )
+            await _fail_execution(
+                execution_id,
+                {"code": code, "message": code},
+                session_factory,
+                lease_owner,
+            )
             return
-        result = await collection_task
-    except NoCleanProfileError as exc:
+        endpoint = next(
+            (
+                candidate
+                for candidate in candidates
+                if pool.available_for(candidate)
+            ),
+            candidates[0],
+        )
+        async with pool.acquire(
+            endpoint=endpoint,
+            required_profile_kind=registration.required_profile_kind,
+        ) as leased_endpoint:
+            if registration.session_probe_args:
+                from backend.acquisition.capabilities import _session_is_ready
+
+                if not await _session_is_ready(registration, pool, leased_endpoint):
+                    await _fail_execution(
+                        execution_id,
+                        {
+                            "code": "session_not_qualified",
+                            "message": (
+                                f"{registration.target or capability_id} session "
+                                "failed the execution-time readiness probe"
+                            ),
+                        },
+                        session_factory,
+                        lease_owner,
+                    )
+                    return
+            if channel is None:
+                from backend.channels.opencli_channel import OpenCLIChannel
+
+                channel = OpenCLIChannel()
+
+            capability_input = {
+                key: value for key, value in input_payload.items() if key != "target"
+            }
+            parameters = {
+                **capability_input,
+                "chrome_endpoint": leased_endpoint,
+                "required_profile_kind": registration.required_profile_kind,
+                "_endpoint_preacquired": True,
+            }
+            from backend.config import get_settings
+
+            if get_settings().collection_mode == "agent":
+                parameters["execution_id"] = execution_id
+            if required_artifacts:
+                parameters["trace"] = "on"
+            collection_task = asyncio.create_task(
+                channel.collect(registration.invocation, parameters)
+            )
+            lease_lost_task = asyncio.create_task(lease_lost.wait())
+            done, _ = await asyncio.wait(
+                {collection_task, lease_lost_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if lease_lost_task in done:
+                collection_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await collection_task
+                return
+            result = await collection_task
+    except NoCleanProfileError:
+        code = (
+            "no_clean_profile"
+            if registration.required_profile_kind == "anonymous"
+            else f"no_{registration.required_profile_kind}_profile"
+        )
         await _fail_execution(
             execution_id,
-            {"code": exc.code, "message": str(exc)},
+            {"code": code, "message": code},
             session_factory,
             lease_owner,
         )
@@ -425,13 +559,11 @@ async def run_acquisition_execution(
             execution.status = AcquisitionExecutionStatus.FAILED
             message = result.error or "Capability returned no payload"
             execution.failure = {
-                "code": (
-                    "browser_route_unavailable"
-                    if "CDP not reachable" in message
-                    else "capability_execution_failed"
-                ),
+                "code": _capability_failure_code(message, result.error_type),
                 "message": message,
             }
+            if result.error_type:
+                execution.failure["source_code"] = result.error_type
         else:
             payload = result.items[0]
             from backend.config import get_settings
@@ -453,6 +585,14 @@ async def run_acquisition_execution(
                 payload.get("capabilityId") == capability_id
                 and payload.get("capabilityVersion") == capability_version
                 and payload.get("outputSchemaVersion") == output_schema_version
+                and (
+                    registration.target is None
+                    or payload.get("target") == registration.target
+                )
+                and (
+                    "prompt" not in input_payload
+                    or payload.get("prompt") == input_payload["prompt"]
+                )
             )
             if not identity_matches:
                 execution.status = AcquisitionExecutionStatus.FAILED
@@ -465,9 +605,15 @@ async def run_acquisition_execution(
                 await db.commit()
                 return
 
-            returned_artifact_kinds = {
-                "trace" for value in [result.metadata.get("trace_artifact")] if value
-            }
+            trace_artifact = result.metadata.get("trace_artifact")
+            trace_sha256 = result.metadata.get("trace_sha256")
+            valid_trace = bool(
+                trace_artifact
+                and isinstance(trace_sha256, str)
+                and len(trace_sha256) == 64
+                and all(char in "0123456789abcdef" for char in trace_sha256.lower())
+            )
+            returned_artifact_kinds = {"trace"} if valid_trace else set()
             missing_artifacts = [
                 kind for kind in required_artifacts if kind not in returned_artifact_kinds
             ]
@@ -499,17 +645,21 @@ async def run_acquisition_execution(
                     ),
                     "browser": {
                         "endpoint": endpoint,
-                        "profile_kind": "anonymous",
+                        "profile_kind": registration.required_profile_kind,
                     },
                     "channel_metadata": result.metadata,
                 },
             }
             artifacts = payload.get("artifacts", [])
             artifact_refs = artifacts if isinstance(artifacts, list) else []
-            if result.metadata.get("trace_artifact"):
+            if trace_artifact and trace_sha256:
                 artifact_refs = [
                     *artifact_refs,
-                    {"kind": "trace", "ref": result.metadata["trace_artifact"]},
+                    {
+                        "kind": "trace",
+                        "ref": trace_artifact,
+                        "sha256": trace_sha256,
+                    },
                 ]
             execution.artifact_refs = artifact_refs
             execution.failure = None

@@ -31,6 +31,7 @@ class CapabilityDescriptor(BaseModel):
     capability_id: str
     capability_version: str
     output_schema_version: str
+    target: str | None = None
     ready: bool
     runtime: dict[str, str] = Field(default_factory=dict)
     unavailable_reason: str | None = None

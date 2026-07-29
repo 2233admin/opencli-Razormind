@@ -5,6 +5,10 @@ from unittest.mock import AsyncMock
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from backend.acquisition.registry import (
+    OFFICIAL_SITE_CAPABILITY_COMMIT,
+    OHMYOPENCLI_COMMIT,
+)
 from backend.browser_pool import init_pool
 from backend.channels.base import ChannelResult
 from backend.models.acquisition import AcquisitionExecutionStatus
@@ -18,9 +22,7 @@ def _public_url_guard(monkeypatch):
     async def validate(url, **_kwargs):
         return url
 
-    monkeypatch.setattr(
-        "backend.security.url_guard.avalidate_public_url", validate
-    )
+    monkeypatch.setattr("backend.security.url_guard.avalidate_public_url", validate)
 
 
 def _submission() -> AcquisitionSubmission:
@@ -28,10 +30,7 @@ def _submission() -> AcquisitionSubmission:
         {
             "request_id": "request-1",
             "idempotency_key": "attempt-1",
-            "capability": {
-                "id": "official-site.observe",
-                "version": "1.0.0",
-            },
+            "capability": {"id": "official-site.observe", "version": "1.0.0"},
             "output_schema_version": "1",
             "input": {"url": "https://example.com"},
             "environment": {"locale": "zh-CN", "region": "CN"},
@@ -39,6 +38,24 @@ def _submission() -> AcquisitionSubmission:
             "geo_refs": {"attempt_id": "attempt-1"},
         }
     )
+
+
+@pytest.mark.parametrize(
+    ("message", "code"),
+    [
+        ("DOUBAO_CAPTURE_LOGIN_WALL", "login_required"),
+        ("DOUBAO_CAPTURE_CAPTCHA", "captcha_required"),
+        ("DOUBAO_CAPTURE_TIMEOUT", "capture_timeout"),
+        ("DOUBAO_CAPTURE_REFUSAL", "model_refusal"),
+        ("DOUBAO_CAPTURE_EMPTY_ANSWER", "empty_answer"),
+        ("DOUBAO_CAPTURE_PAGE_DRIFT", "page_contract_drift"),
+    ],
+)
+def test_doubao_typed_failures_are_preserved(message, code):
+    from backend.acquisition.runner import _capability_failure_code
+
+    assert _capability_failure_code(message) == code
+    assert _capability_failure_code("generic adapter failure", message) == code
 
 
 @pytest.mark.asyncio
@@ -142,6 +159,7 @@ async def test_duplicate_delivery_claims_a_queued_execution_only_once(db_engine)
                 }
             ],
             trace_artifact="artifact://trace/1",
+            trace_sha256="f" * 64,
         )
 
     channel = AsyncMock()
@@ -190,6 +208,7 @@ async def test_expired_worker_cannot_overwrite_a_new_lease_owner(db_engine):
                 }
             ],
             trace_artifact="artifact://trace/1",
+            trace_sha256="f" * 64,
         )
 
     task = asyncio.create_task(
@@ -397,6 +416,44 @@ async def test_required_trace_must_be_returned_by_the_channel(db_engine):
 
 
 @pytest.mark.asyncio
+async def test_required_trace_must_include_a_content_hash(db_engine):
+    from backend.acquisition.runner import run_acquisition_execution
+
+    sessions = async_sessionmaker(
+        db_engine, class_=AsyncSession, expire_on_commit=False
+    )
+    async with sessions() as db:
+        outcome = await acquisition_service.submit_execution(db, _submission())
+        await acquisition_service.queue_execution(db, outcome.execution)
+        execution_id = outcome.execution.id
+
+    endpoint = "http://unhashed-trace-profile:9222"
+    pool = init_pool([endpoint], use_redis=False)
+    pool.set_profile_kind(endpoint, "anonymous")
+    channel = AsyncMock()
+    channel.collect.return_value = ChannelResult.ok(
+        [
+            {
+                "capabilityId": "official-site.observe",
+                "capabilityVersion": "1.0.0",
+                "outputSchemaVersion": "1",
+            }
+        ],
+        trace_artifact="artifact://trace/unhashed",
+    )
+
+    await run_acquisition_execution(
+        execution_id, session_factory=sessions, channel=channel
+    )
+
+    async with sessions() as db:
+        execution = await acquisition_service.get_execution(db, execution_id)
+        assert execution is not None
+        assert execution.status == AcquisitionExecutionStatus.FAILED
+        assert execution.failure["code"] == "required_artifact_missing"
+
+
+@pytest.mark.asyncio
 async def test_unknown_capability_invocation_fails_closed(db_engine):
     from backend.acquisition.runner import run_acquisition_execution
 
@@ -439,13 +496,20 @@ def test_dispatch_registry_contains_only_real_versioned_capabilities():
     registrations = list_capability_registrations()
 
     assert [registration.identity for registration in registrations] == [
-        ("official-site.observe", "1.0.0", "1")
+        ("official-site.observe", "1.0.0", "1", None),
+        ("chat-ai.capture", "1.0.0", "1", "doubao"),
     ]
     assert registrations[0].invocation == {
         "site": "official-site",
         "command": "observe",
         "format": "json",
     }
+    assert registrations[1].invocation == {
+        "site": "doubao",
+        "command": "capture",
+        "format": "json",
+    }
+    assert registrations[1].required_profile_kind == "authenticated"
 
 
 @pytest.mark.asyncio
@@ -540,6 +604,7 @@ async def test_redis_worker_registers_a_dynamic_anonymous_profile_before_dispatc
             }
         ],
         trace_artifact="artifact://trace/1",
+        trace_sha256="f" * 64,
     )
 
     monkeypatch.setattr(pool, "_client", lambda: redis_cm)
@@ -588,6 +653,7 @@ async def test_official_site_execution_preserves_payload_in_versioned_envelope(
         command="observe",
         chrome_mode="cdp",
         trace_artifact="artifact://trace/1",
+        trace_sha256="f" * 64,
     )
 
     await run_acquisition_execution(
@@ -602,6 +668,7 @@ async def test_official_site_execution_preserves_payload_in_versioned_envelope(
             "url": "https://example.com",
             "chrome_endpoint": "http://clean-profile:9222",
             "required_profile_kind": "anonymous",
+            "_endpoint_preacquired": True,
             "trace": "on",
         },
     )
@@ -616,12 +683,8 @@ async def test_official_site_execution_preserves_payload_in_versioned_envelope(
             "payload": payload,
             "operational": {
                 "runtime": {
-                    "ohmyopencli_repo_commit": (
-                        "73cc60c83586ef2c95469b3b70d6cfc80fa5bc53"
-                    ),
-                    "capability_source_commit": (
-                        "73cc60c83586ef2c95469b3b70d6cfc80fa5bc53"
-                    ),
+                    "ohmyopencli_repo_commit": OHMYOPENCLI_COMMIT,
+                    "capability_source_commit": OFFICIAL_SITE_CAPABILITY_COMMIT,
                     "opencli_version": "1.8.5",
                 },
                 "browser": {
@@ -633,12 +696,17 @@ async def test_official_site_execution_preserves_payload_in_versioned_envelope(
                     "command": "observe",
                     "chrome_mode": "cdp",
                     "trace_artifact": "artifact://trace/1",
+                    "trace_sha256": "f" * 64,
                 },
             },
         }
         assert execution.artifact_refs == [
             *payload["artifacts"],
-            {"kind": "trace", "ref": "artifact://trace/1"},
+            {
+                "kind": "trace",
+                "ref": "artifact://trace/1",
+                "sha256": "f" * 64,
+            },
         ]
         assert execution.trace_ref == "artifact://trace/1"
 
