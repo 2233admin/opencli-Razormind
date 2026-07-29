@@ -45,12 +45,14 @@ RUN npm install -g @jackwener/opencli@${OPENCLI_VERSION} \
     && rm -rf /root/.npm
 
 ARG OHMYOPENCLI_REPO=https://github.com/2233admin/OhMyOpenCLI.git
-ARG OHMYOPENCLI_COMMIT=73cc60c83586ef2c95469b3b70d6cfc80fa5bc53
+ARG OHMYOPENCLI_COMMIT=bfe1c25b4b12661058dd6e9980c562a09f230cc7
 ARG OFFICIAL_SITE_CAPABILITY_COMMIT=73cc60c83586ef2c95469b3b70d6cfc80fa5bc53
+ARG DOUBAO_CAPABILITY_COMMIT=bfe1c25b4b12661058dd6e9980c562a09f230cc7
 RUN git clone ${OHMYOPENCLI_REPO} /opt/ohmyopencli \
     && cd /opt/ohmyopencli \
     && git checkout --detach ${OHMYOPENCLI_COMMIT} \
     && git merge-base --is-ancestor ${OFFICIAL_SITE_CAPABILITY_COMMIT} HEAD \
+    && git merge-base --is-ancestor ${DOUBAO_CAPABILITY_COMMIT} HEAD \
     && npm ci \
     && test "$(git rev-parse HEAD)" = "${OHMYOPENCLI_COMMIT}"
 

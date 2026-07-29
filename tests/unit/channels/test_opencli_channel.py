@@ -14,7 +14,10 @@ from backend.channels.base import (
 )
 from backend.channels.opencli_channel import (
     OpenCLIChannel,
+    _artifact_sha256,
+    _browser_endpoint_lease,
     _collect_via_agent,
+    _extract_opencli_error,
     _get_named_options,
     _kill_subprocess,
     _parse_csv,
@@ -29,6 +32,46 @@ from backend.pipeline.error_taxonomy import effective_error_type, is_retryable
 
 def _sessionmaker(db_engine):
     return async_sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
+
+
+def test_extract_opencli_error_reads_typed_yaml_envelope():
+    code, message = _extract_opencli_error(
+        "ok: false\n"
+        "error:\n"
+        "  code: DOUBAO_CAPTURE_LOGIN_WALL\n"
+        "  message: Doubao capture requires a logged-in browser session\n"
+    )
+
+    assert code == "DOUBAO_CAPTURE_LOGIN_WALL"
+    assert message == "Doubao capture requires a logged-in browser session"
+
+
+def test_extract_opencli_error_keeps_code_when_update_notice_follows_yaml():
+    code, message = _extract_opencli_error(
+        "ok: false\n"
+        "error:\n"
+        "  code: DOUBAO_CAPTURE_CAPTCHA\n"
+        "  message: Doubao capture was blocked by a verification challenge\n\n"
+        "Update available: v1.8.5 -> v1.8.6\n"
+    )
+
+    assert code == "DOUBAO_CAPTURE_CAPTCHA"
+    assert message == "Doubao capture was blocked by a verification challenge"
+
+
+def test_trace_artifact_hash_covers_relative_paths_and_content(tmp_path):
+    (tmp_path / "events.json").write_text('{"event":"answer"}', encoding="utf-8")
+    nested = tmp_path / "screens"
+    nested.mkdir()
+    (nested / "final.txt").write_text("doubao-final", encoding="utf-8")
+
+    first = _artifact_sha256(str(tmp_path))
+    (nested / "final.txt").write_text("changed", encoding="utf-8")
+    second = _artifact_sha256(str(tmp_path))
+
+    assert first is not None and len(first) == 64
+    assert second is not None and len(second) == 64
+    assert first != second
 
 
 @pytest.mark.asyncio
@@ -277,12 +320,28 @@ def test_managed_profile_requirement_is_not_forwarded_as_a_cli_argument():
         {
             "chrome_endpoint": "http://clean:9222",
             "required_profile_kind": "anonymous",
+            "_endpoint_preacquired": True,
             "url": "https://example.com",
         }
     )
 
     assert routing == ("http://clean:9222", "anonymous")
     assert cli == {"url": "https://example.com"}
+
+
+@pytest.mark.asyncio
+async def test_preacquired_browser_endpoint_is_reused_without_nested_pool_acquire():
+    pool = MagicMock()
+
+    async with _browser_endpoint_lease(
+        pool,
+        "http://leased:9222",
+        "authenticated",
+        preacquired=True,
+    ) as endpoint:
+        assert endpoint == "http://leased:9222"
+
+    pool.acquire.assert_not_called()
 
 
 # ── Pure parser function tests ─────────────────────────────────────────────────

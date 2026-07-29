@@ -45,6 +45,7 @@ Environment variables:
 
 import asyncio
 import csv
+import hashlib
 import io
 import json
 import logging
@@ -55,6 +56,7 @@ import signal
 import socket
 import subprocess
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
@@ -87,6 +89,27 @@ def _resolve_bin(mode: str) -> str:  # noqa: ARG001
             if resolved:
                 return resolved
     return shutil.which(configured) or configured
+
+
+def _artifact_sha256(artifact_ref: str) -> str | None:
+    root = Path(artifact_ref)
+    if not root.exists():
+        return None
+    files = [root] if root.is_file() else sorted(
+        (path for path in root.rglob("*") if path.is_file()),
+        key=lambda path: path.as_posix(),
+    )
+    digest = hashlib.sha256()
+    base = root.parent if root.is_file() else root
+    for path in files:
+        digest.update(path.relative_to(base).as_posix().encode())
+        digest.update(b"\0")
+        with path.open("rb") as handle:
+            while chunk := handle.read(1024 * 1024):
+                digest.update(chunk)
+    return digest.hexdigest()
+
+
 _DEFAULT_CDP = os.environ.get("OPENCLI_CDP_ENDPOINT", "http://localhost:19222")
 _BROWSER_PROFILE_KIND = os.environ.get(
     "OPENCLI_BROWSER_PROFILE_KIND", "authenticated"
@@ -165,7 +188,11 @@ async def _kill_process_tree(proc: asyncio.subprocess.Process) -> None:
     await proc.wait()
 
 
-async def _runtime_lineage(bin_path: str) -> dict[str, str]:
+async def _runtime_lineage(
+    bin_path: str,
+    site: str,
+    command: str,
+) -> dict[str, str]:
     """Measure the binaries/source used by this node; never echo declarations."""
     async def output(*argv: str, cwd: str | None = None) -> str:
         try:
@@ -178,8 +205,9 @@ async def _runtime_lineage(bin_path: str) -> dict[str, str]:
             return ""
 
     repo_commit = await output("git", "rev-parse", "HEAD", cwd=_OHMYOPENCLI_ROOT)
+    adapter_path = f"adapters/{site}/{command}.js"
     source_commit = await output(
-        "git", "log", "-1", "--format=%H", "--", "adapters/official-site/observe.js",
+        "git", "log", "-1", "--format=%H", "--", adapter_path,
         cwd=_OHMYOPENCLI_ROOT,
     )
     version_text = await output(bin_path, "--version")
@@ -699,9 +727,15 @@ async def collect(req: CollectRequest) -> dict:
 
     logger.info("done | site=%s cmd=%s items=%d", req.site, req.command, len(items))
     trace_match = re.search(r"OpenCLI trace artifact:\s*([^\r\n]+)", stderr_str)
-    metadata: dict[str, Any] = {"runtime": await _runtime_lineage(bin_path)}
+    metadata: dict[str, Any] = {
+        "runtime": await _runtime_lineage(bin_path, req.site, req.command)
+    }
     if trace_match:
-        metadata["trace_artifact"] = trace_match.group(1)
+        trace_artifact = trace_match.group(1).strip()
+        metadata["trace_artifact"] = trace_artifact
+        trace_sha256 = await asyncio.to_thread(_artifact_sha256, trace_artifact)
+        if trace_sha256:
+            metadata["trace_sha256"] = trace_sha256
     return {
         "success": True,
         "items": items,

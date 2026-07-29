@@ -2,6 +2,7 @@
 
 import asyncio
 import csv
+import hashlib
 import io
 import json
 import logging
@@ -9,6 +10,8 @@ import os
 import re
 import subprocess
 import time
+from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
@@ -73,9 +76,37 @@ def _split_routing_parameters(
     cli_parameters = {
         key: value
         for key, value in parameters.items()
-        if key not in {"chrome_endpoint", "required_profile_kind", "execution_id"}
+        if key
+        not in {
+            "chrome_endpoint",
+            "required_profile_kind",
+            "execution_id",
+            "_endpoint_preacquired",
+        }
     }
     return (chrome_endpoint, required_profile_kind), cli_parameters
+
+
+@asynccontextmanager
+async def _browser_endpoint_lease(
+    pool: Any,
+    endpoint: str | None,
+    required_profile_kind: str | None,
+    *,
+    preacquired: bool,
+):
+    """Reuse a runner-owned endpoint lease or acquire one for legacy callers."""
+    if preacquired:
+        if not endpoint:
+            raise ValueError("A pre-acquired browser lease requires chrome_endpoint")
+        yield endpoint
+        return
+
+    acquire_kwargs: dict[str, Any] = {"endpoint": endpoint}
+    if required_profile_kind:
+        acquire_kwargs["required_profile_kind"] = required_profile_kind
+    async with pool.acquire(**acquire_kwargs) as leased_endpoint:
+        yield leased_endpoint
 
 
 async def _site_bound_agent_endpoint(pool: Any, site: str, session: AsyncSession) -> str | None:
@@ -539,10 +570,57 @@ async def _run_opencli(cmd: list[str], env: dict) -> tuple[int, str, str]:
         from backend.config import get_settings
         timeout = get_settings().opencli_timeout
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-        return proc.returncode, stdout.decode(), stderr.decode().strip()
+        return int(proc.returncode or 0), stdout.decode(), stderr.decode().strip()
     except (TimeoutError, asyncio.CancelledError):
         await _kill_subprocess(proc)
         raise
+
+
+def _extract_opencli_error(stderr_text: str) -> tuple[str | None, str | None]:
+    """Read OpenCLI's structured error envelope without depending on its prose."""
+    try:
+        envelope = yaml.safe_load(stderr_text)
+    except yaml.YAMLError:
+        envelope = None
+    if isinstance(envelope, dict) and isinstance(envelope.get("error"), dict):
+        error = envelope["error"]
+        code = str(error.get("code") or "").strip() or None
+        message = str(error.get("message") or "").strip() or None
+        return code, message
+
+    # OpenCLI may append a human update notice after the YAML envelope. Retain
+    # the typed code even when that makes the complete stderr invalid YAML.
+    code_match = re.search(
+        r"(?m)^\s+code:\s*['\"]?([A-Za-z0-9_-]+)['\"]?\s*$",
+        stderr_text,
+    )
+    message_match = re.search(
+        r"(?m)^\s+message:\s*(.+?)\s*$",
+        stderr_text,
+    )
+    code = code_match.group(1) if code_match else None
+    message = message_match.group(1).strip(" '\"") if message_match else None
+    return code, message
+
+
+def _artifact_sha256(artifact_ref: str) -> str | None:
+    """Hash a trace file/directory so its persisted reference is auditable."""
+    root = Path(artifact_ref)
+    if not root.exists():
+        return None
+    files = [root] if root.is_file() else sorted(
+        (path for path in root.rglob("*") if path.is_file()),
+        key=lambda path: path.as_posix(),
+    )
+    digest = hashlib.sha256()
+    base = root.parent if root.is_file() else root
+    for path in files:
+        digest.update(path.relative_to(base).as_posix().encode())
+        digest.update(b"\0")
+        with path.open("rb") as handle:
+            while chunk := handle.read(1024 * 1024):
+                digest.update(chunk)
+    return digest.hexdigest()
 
 
 async def _collect_with_opencli_subprocess(
@@ -578,7 +656,12 @@ async def _collect_with_opencli_subprocess(
 
     if returncode != 0:
         logger.error("opencli exit=%d | stderr=%s", returncode, stderr_text[:500])
-        return ChannelResult.fail(f"opencli exited with code {returncode}: {stderr_text}")
+        source_code, source_message = _extract_opencli_error(stderr_text)
+        message = source_message or stderr_text or "OpenCLI command failed"
+        return ChannelResult.fail(
+            f"opencli exited with code {returncode}: {message}",
+            error_type=source_code,
+        )
 
     raw = stdout_text
     logger.debug("opencli stdout | %d chars | preview=%s", len(raw), raw[:200])
@@ -609,7 +692,11 @@ async def _collect_with_opencli_subprocess(
         metadata["chrome_mode"] = chrome_mode
     trace_match = re.search(r"OpenCLI trace artifact:\s*([^\r\n]+)", stderr_text)
     if trace_match:
-        metadata["trace_artifact"] = trace_match.group(1).strip()
+        trace_artifact = trace_match.group(1).strip()
+        metadata["trace_artifact"] = trace_artifact
+        trace_sha256 = await asyncio.to_thread(_artifact_sha256, trace_artifact)
+        if trace_sha256:
+            metadata["trace_sha256"] = trace_sha256
     return ChannelResult.ok(items, **metadata)
 
 
@@ -645,6 +732,7 @@ class OpenCLIChannel(AbstractChannel):
         output_format = config.get("format", "json")
 
         execution_id = parameters.get("execution_id") or None
+        endpoint_preacquired = parameters.get("_endpoint_preacquired") is True
         (chrome_endpoint, required_profile_kind), cli_params = (
             _split_routing_parameters(parameters)
         )
@@ -720,10 +808,12 @@ class OpenCLIChannel(AbstractChannel):
                     "No registered agent nodes available. Please add an agent node first."
                 )
 
-        acquire_kwargs: dict[str, Any] = {"endpoint": _acquire_endpoint}
-        if required_profile_kind:
-            acquire_kwargs["required_profile_kind"] = required_profile_kind
-        async with pool.acquire(**acquire_kwargs) as cdp_endpoint:
+        async with _browser_endpoint_lease(
+            pool,
+            _acquire_endpoint,
+            required_profile_kind,
+            preacquired=endpoint_preacquired,
+        ) as cdp_endpoint:
             mode = pool.get_mode(cdp_endpoint)
             # Agent mode: dispatch to remote edge node
             if settings.collection_mode == "agent":
@@ -732,7 +822,10 @@ class OpenCLIChannel(AbstractChannel):
                     if isinstance(pool, LocalBrowserPool)
                     else "http"
                 )
-                agent_url = pool.get_agent_url(cdp_endpoint) or cdp_endpoint
+                get_agent_url = getattr(pool, "get_agent_url", None)
+                agent_url = (
+                    get_agent_url(cdp_endpoint) if get_agent_url else None
+                ) or cdp_endpoint
                 if not protocol:
                     return ChannelResult.fail(
                         f"Endpoint {cdp_endpoint} has no registered agent. "

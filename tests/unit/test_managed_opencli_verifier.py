@@ -4,7 +4,7 @@ import pytest
 
 from scripts.verify_managed_opencli_runtime import VerificationError, verify_runtime
 
-PINNED_COMMIT = "73cc60c83586ef2c95469b3b70d6cfc80fa5bc53"
+PINNED_COMMIT = "bfe1c25b4b12661058dd6e9980c562a09f230cc7"
 
 
 def _completed(args, returncode=0, stdout="", stderr=""):
@@ -18,8 +18,15 @@ def test_contract_verifier_accepts_the_pinned_real_command(tmp_path):
             _completed([], stdout=f"{PINNED_COMMIT}\n"),
             _completed([]),
             _completed([]),
+            _completed([]),
             _completed([], stdout="opencli 1.8.5\n"),
             _completed([], stdout="Usage: opencli official-site observe"),
+            _completed([], stdout="Usage: opencli doubao capture"),
+            _completed(
+                [],
+                returncode=1,
+                stderr="CDP not reachable at http://127.0.0.1:9",
+            ),
             _completed(
                 [],
                 returncode=1,
@@ -40,12 +47,32 @@ def test_contract_verifier_accepts_the_pinned_real_command(tmp_path):
 
     assert report["contract_ready"] is True
     assert report["trace_ready"] is False
-    assert calls[4][0] == [
+    assert calls[5][0] == [
         "managed-opencli",
         "official-site",
         "observe",
         "--help",
     ]
+    assert calls[6][0] == ["managed-opencli", "doubao", "capture", "--help"]
+    assert report["capability_contracts"]["chat-ai.capture:doubao"] is True
+
+
+def test_contract_verifier_rejects_a_missing_doubao_capture_command(tmp_path):
+    def run(args, **kwargs):
+        if args[-3:] == ["doubao", "capture", "--help"]:
+            return _completed(args, returncode=1, stderr="unknown command")
+        if args[-2:] == ["rev-parse", "HEAD"]:
+            return _completed(args, stdout=f"{PINNED_COMMIT}\n")
+        if args[-1:] == ["--version"]:
+            return _completed(args, stdout="opencli 1.8.5\n")
+        return _completed(args)
+
+    with pytest.raises(VerificationError, match="doubao capture --help"):
+        verify_runtime(
+            ohmyopencli_root=tmp_path,
+            opencli_bin="managed-opencli",
+            run=run,
+        )
 
 
 def test_live_verifier_requires_a_real_versioned_payload_and_trace(tmp_path):
@@ -56,8 +83,15 @@ def test_live_verifier_requires_a_real_versioned_payload_and_trace(tmp_path):
             _completed([], stdout=f"{PINNED_COMMIT}\n"),
             _completed([]),
             _completed([]),
+            _completed([]),
             _completed([], stdout="opencli 1.8.5\n"),
             _completed([], stdout="Usage: opencli official-site observe"),
+            _completed([], stdout="Usage: opencli doubao capture"),
+            _completed(
+                [],
+                returncode=1,
+                stderr="CDP not reachable at http://127.0.0.1:9",
+            ),
             _completed(
                 [],
                 returncode=1,
@@ -94,8 +128,15 @@ def test_live_verifier_rejects_success_without_a_trace(tmp_path):
             _completed([], stdout=f"{PINNED_COMMIT}\n"),
             _completed([]),
             _completed([]),
+            _completed([]),
             _completed([], stdout="opencli 1.8.5\n"),
             _completed([], stdout="Usage: opencli official-site observe"),
+            _completed([], stdout="Usage: opencli doubao capture"),
+            _completed(
+                [],
+                returncode=1,
+                stderr="CDP not reachable at http://127.0.0.1:9",
+            ),
             _completed(
                 [],
                 returncode=1,

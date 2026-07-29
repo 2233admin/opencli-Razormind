@@ -8,6 +8,10 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from backend.acquisition.registry import (
+    OFFICIAL_SITE_CAPABILITY_COMMIT,
+    OHMYOPENCLI_COMMIT,
+)
 from backend.database import get_db
 from backend.main import create_app
 from backend.schemas.acquisition import CapabilityDescriptor
@@ -25,12 +29,8 @@ def _official_site_runtime_is_probed(monkeypatch):
                 output_schema_version="1",
                 ready=True,
                 runtime={
-                    "ohmyopencli_repo_commit": (
-                        "73cc60c83586ef2c95469b3b70d6cfc80fa5bc53"
-                    ),
-                    "capability_source_commit": (
-                        "73cc60c83586ef2c95469b3b70d6cfc80fa5bc53"
-                    ),
+                    "ohmyopencli_repo_commit": OHMYOPENCLI_COMMIT,
+                    "capability_source_commit": OFFICIAL_SITE_CAPABILITY_COMMIT,
                     "opencli_version": "1.8.5",
                 },
             )
@@ -84,14 +84,11 @@ async def test_geo_can_discover_submit_observe_and_cancel_an_execution(
                 "capability_id": "official-site.observe",
                 "capability_version": "1.0.0",
                 "output_schema_version": "1",
+                "target": None,
                 "ready": True,
                 "runtime": {
-                    "ohmyopencli_repo_commit": (
-                        "73cc60c83586ef2c95469b3b70d6cfc80fa5bc53"
-                    ),
-                    "capability_source_commit": (
-                        "73cc60c83586ef2c95469b3b70d6cfc80fa5bc53"
-                    ),
+                    "ohmyopencli_repo_commit": OHMYOPENCLI_COMMIT,
+                    "capability_source_commit": OFFICIAL_SITE_CAPABILITY_COMMIT,
                     "opencli_version": "1.8.5",
                 },
                 "unavailable_reason": None,
@@ -268,6 +265,42 @@ async def test_unknown_or_mismatched_versions_are_rejected(
 
     assert response.status_code == 422
     assert response.json()["detail"]["code"] == code
+
+
+@pytest.mark.asyncio
+async def test_chat_ai_target_must_match_a_registered_adapter(
+    client,
+    monkeypatch,
+    acquisition_executor,
+):
+    async def doubao_capability():
+        return [
+            CapabilityDescriptor(
+                capability_id="chat-ai.capture",
+                capability_version="1.0.0",
+                output_schema_version="1",
+                target="doubao",
+                ready=True,
+            )
+        ]
+
+    monkeypatch.setattr(
+        "backend.api.v1.geo_acquisition.probe_capabilities",
+        doubao_capability,
+    )
+    request = _request(
+        capability={"id": "chat-ai.capture", "version": "1.0.0"},
+        input={"target": "chatgpt", "prompt": "prompt"},
+    )
+
+    response = await client.post(f"{BASE}/executions", json=request)
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == {
+        "code": "target_not_registered",
+        "message": "chatgpt",
+    }
+    acquisition_executor.dispatch_acquisition.assert_not_awaited()
 
 
 @pytest.mark.asyncio

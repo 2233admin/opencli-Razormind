@@ -12,8 +12,9 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-OHMYOPENCLI_COMMIT = "73cc60c83586ef2c95469b3b70d6cfc80fa5bc53"
-CAPABILITY_SOURCE_COMMIT = "73cc60c83586ef2c95469b3b70d6cfc80fa5bc53"
+OHMYOPENCLI_COMMIT = "bfe1c25b4b12661058dd6e9980c562a09f230cc7"
+OFFICIAL_SITE_CAPABILITY_COMMIT = "73cc60c83586ef2c95469b3b70d6cfc80fa5bc53"
+DOUBAO_CAPABILITY_COMMIT = "bfe1c25b4b12661058dd6e9980c562a09f230cc7"
 OPENCLI_VERSION = "1.8.5"
 
 
@@ -63,17 +64,21 @@ def verify_runtime(
     commit = checked(["git", "-C", root, "rev-parse", "HEAD"]).stdout.strip()
     if commit != OHMYOPENCLI_COMMIT:
         raise VerificationError(f"unexpected OhMyOpenCLI commit: {commit}")
-    checked(
-        [
-            "git",
-            "-C",
-            root,
-            "merge-base",
-            "--is-ancestor",
-            CAPABILITY_SOURCE_COMMIT,
-            "HEAD",
-        ]
-    )
+    for source_commit in (
+        OFFICIAL_SITE_CAPABILITY_COMMIT,
+        DOUBAO_CAPABILITY_COMMIT,
+    ):
+        checked(
+            [
+                "git",
+                "-C",
+                root,
+                "merge-base",
+                "--is-ancestor",
+                source_commit,
+                "HEAD",
+            ]
+        )
     dirty = checked(
         ["git", "-C", root, "status", "--porcelain", "--untracked-files=no"]
     ).stdout.strip()
@@ -84,10 +89,11 @@ def verify_runtime(
     if OPENCLI_VERSION not in re.findall(r"\d+\.\d+\.\d+", version_output):
         raise VerificationError(f"unexpected OpenCLI version: {version_output.strip()}")
     checked([opencli_bin, "official-site", "observe", "--help"])
+    checked([opencli_bin, "doubao", "capture", "--help"])
 
     dead_env = os.environ.copy()
     dead_env["OPENCLI_CDP_ENDPOINT"] = "http://127.0.0.1:9"
-    dead = run(
+    dead_route_commands = (
         [
             opencli_bin,
             "official-site",
@@ -97,15 +103,32 @@ def verify_runtime(
             "-f",
             "json",
         ],
-        capture_output=True,
-        text=True,
-        timeout=30,
-        check=False,
-        env=dead_env,
+        [
+            opencli_bin,
+            "doubao",
+            "capture",
+            "managed-runtime-route-probe",
+            "-f",
+            "json",
+        ],
     )
-    dead_output = (dead.stdout or "") + (dead.stderr or "")
-    if dead.returncode == 0 or "CDP not reachable at http://127.0.0.1:9" not in dead_output:
-        raise VerificationError("explicit dead CDP route did not fail closed")
+    for dead_command in dead_route_commands:
+        dead = run(
+            dead_command,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+            env=dead_env,
+        )
+        dead_output = (dead.stdout or "") + (dead.stderr or "")
+        if (
+            dead.returncode == 0
+            or "CDP not reachable at http://127.0.0.1:9" not in dead_output
+        ):
+            raise VerificationError(
+                f"explicit dead CDP route did not fail closed: {' '.join(dead_command)}"
+            )
 
     report: dict[str, Any] = {
         "platform": platform.system(),
@@ -113,8 +136,15 @@ def verify_runtime(
         "trace_ready": False,
         "runtime": {
             "ohmyopencli_repo_commit": commit,
-            "capability_source_commit": CAPABILITY_SOURCE_COMMIT,
+            "capability_source_commits": {
+                "official-site.observe": OFFICIAL_SITE_CAPABILITY_COMMIT,
+                "chat-ai.capture:doubao": DOUBAO_CAPABILITY_COMMIT,
+            },
             "opencli_version": OPENCLI_VERSION,
+        },
+        "capability_contracts": {
+            "official-site.observe": True,
+            "chat-ai.capture:doubao": True,
         },
     }
     if not cdp_endpoint:

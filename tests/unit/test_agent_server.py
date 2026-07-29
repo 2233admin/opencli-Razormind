@@ -42,6 +42,41 @@ def test_resolve_bin_treats_empty_opencli_bin_as_default(monkeypatch):
     assert agent_server._resolve_bin("cdp") == "opencli"
 
 
+@pytest.mark.asyncio
+async def test_runtime_lineage_uses_the_dispatched_adapter_source(monkeypatch):
+    calls = []
+    outputs = iter(
+        [
+            b"runtime-commit\n",
+            b"doubao-source-commit\n",
+            b"opencli 1.8.5\n",
+        ]
+    )
+
+    class Process:
+        returncode = 0
+
+        async def communicate(self):
+            return next(outputs), b""
+
+    async def create(*args, **kwargs):
+        calls.append((args, kwargs))
+        return Process()
+
+    monkeypatch.setattr(agent_server.asyncio, "create_subprocess_exec", create)
+
+    lineage = await agent_server._runtime_lineage(
+        "opencli", "doubao", "capture"
+    )
+
+    assert lineage == {
+        "ohmyopencli_repo_commit": "runtime-commit",
+        "capability_source_commit": "doubao-source-commit",
+        "opencli_version": "1.8.5",
+    }
+    assert calls[1][0][-2:] == ("--", "adapters/doubao/capture.js")
+
+
 # ── _auth_headers ────────────────────────────────────────────────────────────
 
 

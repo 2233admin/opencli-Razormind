@@ -5,6 +5,10 @@ from unittest.mock import AsyncMock
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from backend.acquisition.registry import (
+    OFFICIAL_SITE_CAPABILITY_COMMIT,
+    OHMYOPENCLI_COMMIT,
+)
 from backend.browser_pool import init_pool
 from backend.channels.base import ChannelResult
 from backend.models.acquisition import AcquisitionExecutionStatus
@@ -39,6 +43,24 @@ def _submission() -> AcquisitionSubmission:
             "geo_refs": {"attempt_id": "attempt-1"},
         }
     )
+
+
+@pytest.mark.parametrize(
+    ("message", "code"),
+    [
+        ("DOUBAO_CAPTURE_LOGIN_WALL", "login_required"),
+        ("DOUBAO_CAPTURE_CAPTCHA", "captcha_required"),
+        ("DOUBAO_CAPTURE_TIMEOUT", "capture_timeout"),
+        ("DOUBAO_CAPTURE_REFUSAL", "model_refusal"),
+        ("DOUBAO_CAPTURE_EMPTY_ANSWER", "empty_answer"),
+        ("DOUBAO_CAPTURE_PAGE_DRIFT", "page_contract_drift"),
+    ],
+)
+def test_doubao_typed_failures_are_preserved(message, code):
+    from backend.acquisition.runner import _capability_failure_code
+
+    assert _capability_failure_code(message) == code
+    assert _capability_failure_code("generic adapter failure", message) == code
 
 
 @pytest.mark.asyncio
@@ -142,6 +164,7 @@ async def test_duplicate_delivery_claims_a_queued_execution_only_once(db_engine)
                 }
             ],
             trace_artifact="artifact://trace/1",
+            trace_sha256="f" * 64,
         )
 
     channel = AsyncMock()
@@ -190,6 +213,7 @@ async def test_expired_worker_cannot_overwrite_a_new_lease_owner(db_engine):
                 }
             ],
             trace_artifact="artifact://trace/1",
+            trace_sha256="f" * 64,
         )
 
     task = asyncio.create_task(
@@ -397,6 +421,44 @@ async def test_required_trace_must_be_returned_by_the_channel(db_engine):
 
 
 @pytest.mark.asyncio
+async def test_required_trace_must_include_a_content_hash(db_engine):
+    from backend.acquisition.runner import run_acquisition_execution
+
+    sessions = async_sessionmaker(
+        db_engine, class_=AsyncSession, expire_on_commit=False
+    )
+    async with sessions() as db:
+        outcome = await acquisition_service.submit_execution(db, _submission())
+        await acquisition_service.queue_execution(db, outcome.execution)
+        execution_id = outcome.execution.id
+
+    endpoint = "http://unhashed-trace-profile:9222"
+    pool = init_pool([endpoint], use_redis=False)
+    pool.set_profile_kind(endpoint, "anonymous")
+    channel = AsyncMock()
+    channel.collect.return_value = ChannelResult.ok(
+        [
+            {
+                "capabilityId": "official-site.observe",
+                "capabilityVersion": "1.0.0",
+                "outputSchemaVersion": "1",
+            }
+        ],
+        trace_artifact="artifact://trace/unhashed",
+    )
+
+    await run_acquisition_execution(
+        execution_id, session_factory=sessions, channel=channel
+    )
+
+    async with sessions() as db:
+        execution = await acquisition_service.get_execution(db, execution_id)
+        assert execution is not None
+        assert execution.status == AcquisitionExecutionStatus.FAILED
+        assert execution.failure["code"] == "required_artifact_missing"
+
+
+@pytest.mark.asyncio
 async def test_unknown_capability_invocation_fails_closed(db_engine):
     from backend.acquisition.runner import run_acquisition_execution
 
@@ -439,13 +501,271 @@ def test_dispatch_registry_contains_only_real_versioned_capabilities():
     registrations = list_capability_registrations()
 
     assert [registration.identity for registration in registrations] == [
-        ("official-site.observe", "1.0.0", "1")
+        ("official-site.observe", "1.0.0", "1", None),
+        ("chat-ai.capture", "1.0.0", "1", "doubao"),
     ]
     assert registrations[0].invocation == {
         "site": "official-site",
         "command": "observe",
         "format": "json",
     }
+    assert registrations[1].invocation == {
+        "site": "doubao",
+        "command": "capture",
+        "format": "json",
+    }
+    assert registrations[1].required_profile_kind == "authenticated"
+
+
+@pytest.mark.asyncio
+async def test_doubao_execution_uses_authenticated_profile_and_frozen_prompt(
+    db_engine,
+    monkeypatch,
+):
+    from backend.acquisition import capabilities
+    from backend.acquisition.runner import run_acquisition_execution
+
+    sessions = async_sessionmaker(
+        db_engine, class_=AsyncSession, expire_on_commit=False
+    )
+    submission_data = _submission().model_dump()
+    submission_data.update(
+        {
+            "request_id": "doubao-request-1",
+            "idempotency_key": "doubao-attempt-1",
+            "capability": {"id": "chat-ai.capture", "version": "1.0.0"},
+            "input": {
+                "target": "doubao",
+                "prompt": "黑白调电竞椅值得买吗？",
+            },
+        }
+    )
+    submission = AcquisitionSubmission.model_validate(submission_data)
+    async with sessions() as db:
+        outcome = await acquisition_service.submit_execution(db, submission)
+        await acquisition_service.queue_execution(db, outcome.execution)
+        execution_id = outcome.execution.id
+
+    endpoint = "http://doubao-profile:9222"
+    pool = init_pool([endpoint], use_redis=False)
+    pool.set_mode(endpoint, "cdp")
+    pool.set_profile_kind(endpoint, "authenticated")
+    payload = {
+        "capabilityId": "chat-ai.capture",
+        "capabilityVersion": "1.0.0",
+        "outputSchemaVersion": "1",
+        "target": "doubao",
+        "prompt": "黑白调电竞椅值得买吗？",
+        "completionState": "complete",
+        "answer": {"text": "真实回答", "sha256": "a" * 64},
+        "citations": [],
+        "displayedUrl": "https://www.doubao.com/chat/1",
+        "finalUrl": "https://www.doubao.com/chat/1",
+        "pageState": "answer",
+        "artifacts": [],
+    }
+    channel = AsyncMock()
+    session_probe = AsyncMock(return_value=True)
+    monkeypatch.setattr(capabilities, "_session_is_ready", session_probe)
+
+    async def collect_while_leased(*_args, **_kwargs):
+        assert pool.available_for(endpoint) is False
+        return ChannelResult.ok(
+            [payload],
+            trace_artifact="artifact://trace/doubao-1",
+            trace_sha256="f" * 64,
+        )
+
+    channel.collect.side_effect = collect_while_leased
+
+    await run_acquisition_execution(
+        execution_id, session_factory=sessions, channel=channel
+    )
+
+    channel.collect.assert_awaited_once_with(
+        {"site": "doubao", "command": "capture", "format": "json"},
+        {
+            "prompt": "黑白调电竞椅值得买吗？",
+            "chrome_endpoint": endpoint,
+            "required_profile_kind": "authenticated",
+            "_endpoint_preacquired": True,
+            "trace": "on",
+        },
+    )
+    assert session_probe.await_args.args[2] == endpoint
+    async with sessions() as db:
+        execution = await acquisition_service.get_execution(db, execution_id)
+        assert execution is not None
+        assert execution.status == AcquisitionExecutionStatus.SUCCEEDED
+        assert execution.result_payload["payload"] == payload
+        assert execution.result_payload["operational"]["browser"] == {
+            "endpoint": endpoint,
+            "profile_kind": "authenticated",
+        }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("target", "chatgpt"),
+        ("prompt", "a different prompt"),
+    ],
+)
+async def test_doubao_rejects_target_or_prompt_drift(
+    db_engine,
+    monkeypatch,
+    field,
+    value,
+):
+    from backend.acquisition import capabilities
+    from backend.acquisition.runner import run_acquisition_execution
+
+    sessions = async_sessionmaker(
+        db_engine, class_=AsyncSession, expire_on_commit=False
+    )
+    submission_data = _submission().model_dump()
+    submission_data.update(
+        {
+            "request_id": f"doubao-drift-{field}",
+            "idempotency_key": f"doubao-drift-{field}",
+            "capability": {"id": "chat-ai.capture", "version": "1.0.0"},
+            "input": {
+                "target": "doubao",
+                "prompt": "黑白调电竞椅值得买吗？",
+            },
+        }
+    )
+    async with sessions() as db:
+        outcome = await acquisition_service.submit_execution(
+            db, AcquisitionSubmission.model_validate(submission_data)
+        )
+        await acquisition_service.queue_execution(db, outcome.execution)
+        execution_id = outcome.execution.id
+
+    endpoint = "http://doubao-drift-profile:9222"
+    pool = init_pool([endpoint], use_redis=False)
+    pool.set_profile_kind(endpoint, "authenticated")
+    monkeypatch.setattr(
+        capabilities,
+        "_session_is_ready",
+        AsyncMock(return_value=True),
+    )
+    payload = {
+        "capabilityId": "chat-ai.capture",
+        "capabilityVersion": "1.0.0",
+        "outputSchemaVersion": "1",
+        "target": "doubao",
+        "prompt": "黑白调电竞椅值得买吗？",
+    }
+    payload[field] = value
+    channel = AsyncMock()
+    channel.collect.return_value = ChannelResult.ok([payload])
+
+    await run_acquisition_execution(
+        execution_id, session_factory=sessions, channel=channel
+    )
+
+    async with sessions() as db:
+        execution = await acquisition_service.get_execution(db, execution_id)
+        assert execution is not None
+        assert execution.status == AcquisitionExecutionStatus.FAILED
+        assert execution.failure["code"] == "invalid_capability_envelope"
+
+
+@pytest.mark.asyncio
+async def test_doubao_execution_fails_closed_without_authenticated_profile(db_engine):
+    from backend.acquisition.runner import run_acquisition_execution
+
+    sessions = async_sessionmaker(
+        db_engine, class_=AsyncSession, expire_on_commit=False
+    )
+    submission_data = _submission().model_dump()
+    submission_data.update(
+        {
+            "request_id": "doubao-request-2",
+            "idempotency_key": "doubao-attempt-2",
+            "capability": {"id": "chat-ai.capture", "version": "1.0.0"},
+            "input": {
+                "target": "doubao",
+                "prompt": "黑白调电竞椅值得买吗？",
+            },
+        }
+    )
+    async with sessions() as db:
+        outcome = await acquisition_service.submit_execution(
+            db, AcquisitionSubmission.model_validate(submission_data)
+        )
+        await acquisition_service.queue_execution(db, outcome.execution)
+        execution_id = outcome.execution.id
+
+    endpoint = "http://anonymous-profile:9222"
+    pool = init_pool([endpoint], use_redis=False)
+    pool.set_profile_kind(endpoint, "anonymous")
+    channel = AsyncMock()
+
+    await run_acquisition_execution(
+        execution_id, session_factory=sessions, channel=channel
+    )
+
+    channel.collect.assert_not_awaited()
+    async with sessions() as db:
+        execution = await acquisition_service.get_execution(db, execution_id)
+        assert execution is not None
+        assert execution.failure == {
+            "code": "no_authenticated_profile",
+            "message": "no_authenticated_profile",
+        }
+
+
+@pytest.mark.asyncio
+async def test_doubao_rechecks_the_selected_session_before_prompt_submission(
+    db_engine,
+    monkeypatch,
+):
+    from backend.acquisition import capabilities
+    from backend.acquisition.runner import run_acquisition_execution
+
+    sessions = async_sessionmaker(
+        db_engine, class_=AsyncSession, expire_on_commit=False
+    )
+    submission_data = _submission().model_dump()
+    submission_data.update(
+        {
+            "request_id": "doubao-request-3",
+            "idempotency_key": "doubao-attempt-3",
+            "capability": {"id": "chat-ai.capture", "version": "1.0.0"},
+            "input": {"target": "doubao", "prompt": "黑白调电竞椅值得买吗？"},
+        }
+    )
+    async with sessions() as db:
+        outcome = await acquisition_service.submit_execution(
+            db, AcquisitionSubmission.model_validate(submission_data)
+        )
+        await acquisition_service.queue_execution(db, outcome.execution)
+        execution_id = outcome.execution.id
+
+    endpoint = "http://expired-doubao-profile:9222"
+    pool = init_pool([endpoint], use_redis=False)
+    pool.set_profile_kind(endpoint, "authenticated")
+    session_probe = AsyncMock(return_value=False)
+    monkeypatch.setattr(capabilities, "_session_is_ready", session_probe)
+    channel = AsyncMock()
+
+    await run_acquisition_execution(
+        execution_id, session_factory=sessions, channel=channel
+    )
+
+    session_probe.assert_awaited_once()
+    assert session_probe.await_args.args[2] == endpoint
+    channel.collect.assert_not_awaited()
+    async with sessions() as db:
+        execution = await acquisition_service.get_execution(db, execution_id)
+        assert execution is not None
+        assert execution.failure == {
+            "code": "session_not_qualified",
+            "message": "doubao session failed the execution-time readiness probe",
+        }
 
 
 @pytest.mark.asyncio
@@ -540,6 +860,7 @@ async def test_redis_worker_registers_a_dynamic_anonymous_profile_before_dispatc
             }
         ],
         trace_artifact="artifact://trace/1",
+        trace_sha256="f" * 64,
     )
 
     monkeypatch.setattr(pool, "_client", lambda: redis_cm)
@@ -588,6 +909,7 @@ async def test_official_site_execution_preserves_payload_in_versioned_envelope(
         command="observe",
         chrome_mode="cdp",
         trace_artifact="artifact://trace/1",
+        trace_sha256="f" * 64,
     )
 
     await run_acquisition_execution(
@@ -602,6 +924,7 @@ async def test_official_site_execution_preserves_payload_in_versioned_envelope(
             "url": "https://example.com",
             "chrome_endpoint": "http://clean-profile:9222",
             "required_profile_kind": "anonymous",
+            "_endpoint_preacquired": True,
             "trace": "on",
         },
     )
@@ -616,12 +939,8 @@ async def test_official_site_execution_preserves_payload_in_versioned_envelope(
             "payload": payload,
             "operational": {
                 "runtime": {
-                    "ohmyopencli_repo_commit": (
-                        "73cc60c83586ef2c95469b3b70d6cfc80fa5bc53"
-                    ),
-                    "capability_source_commit": (
-                        "73cc60c83586ef2c95469b3b70d6cfc80fa5bc53"
-                    ),
+                    "ohmyopencli_repo_commit": OHMYOPENCLI_COMMIT,
+                    "capability_source_commit": OFFICIAL_SITE_CAPABILITY_COMMIT,
                     "opencli_version": "1.8.5",
                 },
                 "browser": {
@@ -633,12 +952,17 @@ async def test_official_site_execution_preserves_payload_in_versioned_envelope(
                     "command": "observe",
                     "chrome_mode": "cdp",
                     "trace_artifact": "artifact://trace/1",
+                    "trace_sha256": "f" * 64,
                 },
             },
         }
         assert execution.artifact_refs == [
             *payload["artifacts"],
-            {"kind": "trace", "ref": "artifact://trace/1"},
+            {
+                "kind": "trace",
+                "ref": "artifact://trace/1",
+                "sha256": "f" * 64,
+            },
         ]
         assert execution.trace_ref == "artifact://trace/1"
 
