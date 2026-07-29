@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  frontend:
+  frontend-nextjs:
     runs-on: ubuntu-latest
     name: Frontend (Next.js)
     defaults:
