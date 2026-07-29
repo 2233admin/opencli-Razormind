@@ -8,10 +8,10 @@ param(
 
 $ErrorActionPreference = "Stop"
 $OpenCliVersion = "1.8.5"
-$OhMyOpenCliCommit = "bfe1c25b4b12661058dd6e9980c562a09f230cc7"
+$OhMyOpenCliCommit = "b0fdd513f64899b068103ddd7ff0de957d778b5c"
 $CapabilitySourceCommits = @(
     "73cc60c83586ef2c95469b3b70d6cfc80fa5bc53",
-    "bfe1c25b4b12661058dd6e9980c562a09f230cc7"
+    "b0fdd513f64899b068103ddd7ff0de957d778b5c"
 )
 $requestHeaders = @{}
 if ($ApiAuthToken) {

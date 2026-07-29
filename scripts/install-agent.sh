@@ -333,9 +333,9 @@ install_python() {
 
   # Install the exact project-owned managed-acquisition capability package.
   OHMYOPENCLI_ROOT="$AGENT_DIR/ohmyopencli"
-  OHMYOPENCLI_COMMIT="bfe1c25b4b12661058dd6e9980c562a09f230cc7"
+  OHMYOPENCLI_COMMIT="b0fdd513f64899b068103ddd7ff0de957d778b5c"
   OFFICIAL_SITE_CAPABILITY_COMMIT="73cc60c83586ef2c95469b3b70d6cfc80fa5bc53"
-  DOUBAO_CAPABILITY_COMMIT="bfe1c25b4b12661058dd6e9980c562a09f230cc7"
+  DOUBAO_CAPABILITY_COMMIT="b0fdd513f64899b068103ddd7ff0de957d778b5c"
   command -v git >/dev/null 2>&1 || die "git is required to install OhMyOpenCLI"
   [[ -e "$OHMYOPENCLI_ROOT" ]] && die \
     "Managed OhMyOpenCLI target already exists; archive it explicitly before reinstalling: $OHMYOPENCLI_ROOT"

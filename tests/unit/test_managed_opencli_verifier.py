@@ -4,7 +4,7 @@ import pytest
 
 from scripts.verify_managed_opencli_runtime import VerificationError, verify_runtime
 
-PINNED_COMMIT = "bfe1c25b4b12661058dd6e9980c562a09f230cc7"
+PINNED_COMMIT = "b0fdd513f64899b068103ddd7ff0de957d778b5c"
 
 
 def _completed(args, returncode=0, stdout="", stderr=""):

@@ -151,7 +151,7 @@ async def test_catalog_publishes_doubao_only_after_authenticated_session_probe(
     ("protocol", "collector_name"),
     [("http", "_collect_via_agent"), ("ws", "_collect_via_ws_agent")],
 )
-async def test_agent_mode_probes_the_selected_remote_browser_route(
+async def test_agent_mode_accepts_ready_session_before_send_button_is_rendered(
     monkeypatch,
     protocol,
     collector_name,
@@ -177,7 +177,7 @@ async def test_agent_mode_probes_the_selected_remote_browser_route(
                     "unattendedReady": True,
                     "loginDetected": False,
                     "promptInputDetected": True,
-                    "sendButtonDetected": True,
+                    "sendButtonDetected": False,
                     "url": "https://www.doubao.com/chat/",
                 }
             ]
@@ -216,6 +216,7 @@ async def test_runtime_probe_uses_the_configured_opencli_binary(monkeypatch):
 
     configured_bin = r"C:\managed\opencli.cmd"
     monkeypatch.setenv("OPENCLI_BIN", configured_bin)
+    monkeypatch.setenv("OPENCLI_DAEMON_PORT", "19825")
     command = _runtime_command(capabilities)
     monkeypatch.setattr(capabilities, "_command", command)
 
@@ -224,6 +225,7 @@ async def test_runtime_probe_uses_the_configured_opencli_binary(monkeypatch):
         call for call in command.await_args_list if call.args[-1] == "--version"
     )
     assert version_call.args == (configured_bin, "--version")
+    assert "OPENCLI_DAEMON_PORT" not in version_call.kwargs["env"]
     registration = capabilities.list_capability_registrations()[0]
     assert await capabilities._registration_is_available(registration) is True
     help_call = next(

@@ -19,6 +19,18 @@ from backend.schemas.acquisition import CapabilityDescriptor
 COMMAND_TIMEOUT_SECONDS = 15.0
 
 
+def _opencli_environment(*, cdp_endpoint: str | None = None) -> dict[str, str]:
+    """Build one unambiguous OpenCLI browser-routing environment."""
+    env = os.environ.copy()
+    env.pop("OPENCLI_DAEMON_HOST", None)
+    env.pop("OPENCLI_DAEMON_PORT", None)
+    if cdp_endpoint is None:
+        env.pop("OPENCLI_CDP_ENDPOINT", None)
+    else:
+        env["OPENCLI_CDP_ENDPOINT"] = cdp_endpoint
+    return env
+
+
 async def _command(*args: str, env: dict[str, str] | None = None) -> tuple[int, str]:
     try:
         process = await asyncio.create_subprocess_exec(
@@ -76,7 +88,11 @@ async def _runtime_is_installed() -> bool:
         return False
 
     opencli_bin = resolve_opencli_bin()
-    version_rc, version_output = await _command(opencli_bin, "--version")
+    version_rc, version_output = await _command(
+        opencli_bin,
+        "--version",
+        env=_opencli_environment(),
+    )
     versions = re.findall(r"\d+\.\d+\.\d+", version_output)
     if version_rc != 0 or OPENCLI_VERSION not in versions:
         return False
@@ -89,13 +105,14 @@ async def _registration_is_available(
 ) -> bool:
     opencli_bin = resolve_opencli_bin()
     command_rc, command_output = await _command(
-        opencli_bin, *registration.probe_args
+        opencli_bin,
+        *registration.probe_args,
+        env=_opencli_environment(),
     )
     if command_rc != 0 or registration.help_marker not in command_output:
         return False
 
-    patch_env = os.environ.copy()
-    patch_env["OPENCLI_CDP_ENDPOINT"] = "http://127.0.0.1:9"
+    patch_env = _opencli_environment(cdp_endpoint="http://127.0.0.1:9")
     patch_rc, patch_output = await _command(
         opencli_bin,
         *registration.route_probe_args,
@@ -197,7 +214,6 @@ async def _session_is_ready(
         and payload.get("unattendedReady") is True
         and payload.get("loginDetected") is False
         and payload.get("promptInputDetected") is True
-        and payload.get("sendButtonDetected") is True
         and (
             registration.session_expected_host is None
             or urlparse(str(payload.get("url", ""))).hostname

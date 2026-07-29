@@ -17,11 +17,11 @@ def test_agent_image_pins_managed_acquisition_runtime():
     assert "ARG OPENCLI_VERSION=1.8.5" in dockerfile
     assert (
         "ARG OHMYOPENCLI_COMMIT="
-        "bfe1c25b4b12661058dd6e9980c562a09f230cc7"
+        "b0fdd513f64899b068103ddd7ff0de957d778b5c"
     ) in dockerfile
     assert (
         "ARG DOUBAO_CAPABILITY_COMMIT="
-        "bfe1c25b4b12661058dd6e9980c562a09f230cc7"
+        "b0fdd513f64899b068103ddd7ff0de957d778b5c"
     ) in dockerfile
     assert "git checkout --detach ${OHMYOPENCLI_COMMIT}" in dockerfile
     assert "npm ci" in dockerfile

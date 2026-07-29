@@ -753,6 +753,8 @@ class OpenCLIChannel(AbstractChannel):
                         bridge_err,
                     )
             else:
+                env.pop("OPENCLI_DAEMON_HOST", None)
+                env.pop("OPENCLI_DAEMON_PORT", None)
                 env["OPENCLI_CDP_ENDPOINT"] = cdp_endpoint
                 logger.info("opencli cdp | cmd=%s cdp=%s", " ".join(cmd), cdp_endpoint)
 

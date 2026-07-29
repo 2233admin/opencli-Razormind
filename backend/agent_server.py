@@ -194,10 +194,18 @@ async def _runtime_lineage(
     command: str,
 ) -> dict[str, str]:
     """Measure the binaries/source used by this node; never echo declarations."""
+    lineage_env = os.environ.copy()
+    lineage_env.pop("OPENCLI_DAEMON_HOST", None)
+    lineage_env.pop("OPENCLI_DAEMON_PORT", None)
+
     async def output(*argv: str, cwd: str | None = None) -> str:
         try:
             proc = await asyncio.create_subprocess_exec(
-                *argv, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, cwd=cwd
+                *argv,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=cwd,
+                env=lineage_env,
             )
             stdout, _ = await proc.communicate()
             return stdout.decode(errors="replace").strip() if proc.returncode == 0 else ""
@@ -671,6 +679,8 @@ async def collect(req: CollectRequest) -> dict:
         # running in Docker without bundled Chrome.
         if _AGENT_DEPLOY_TYPE == "docker" and not _AGENT_HAS_CHROME:
             cdp_ep = re.sub(r"(localhost|127\.0\.0\.1)", "host.docker.internal", cdp_ep)
+        env.pop("OPENCLI_DAEMON_HOST", None)
+        env.pop("OPENCLI_DAEMON_PORT", None)
         env["OPENCLI_CDP_ENDPOINT"] = cdp_ep
         logger.info("cdp | cmd=%s cdp=%s", " ".join(cmd), cdp_ep)
 
