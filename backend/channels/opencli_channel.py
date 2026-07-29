@@ -1,23 +1,19 @@
 """OpenCLI channel: invokes opencli CLI tool and parses its output."""
 
 import asyncio
-import csv
-import hashlib
-import io
-import json
 import logging
 import os
 import re
 import subprocess
 import time
-from contextlib import asynccontextmanager
-from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
 import yaml
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import backend.channels.opencli_support as _opencli_support
+import backend.opencli_runtime as _opencli_runtime
 from backend.channels.base import (
     AbstractChannel,
     Capabilities,
@@ -26,7 +22,17 @@ from backend.channels.base import (
     FetchResult,
 )
 from backend.channels.registry import register_channel
-from backend.opencli_runtime import configured_opencli_bin, resolve_opencli_bin
+
+_artifact_sha256 = _opencli_support.artifact_sha256
+_browser_endpoint_lease = _opencli_support.browser_endpoint_lease
+_extract_opencli_error = _opencli_support.extract_opencli_error
+_parse_csv = _opencli_support.parse_csv
+_parse_json = _opencli_support.parse_json
+_parse_markdown = _opencli_support.parse_markdown
+_parse_table = _opencli_support.parse_table
+_parse_yaml = _opencli_support.parse_yaml
+configured_opencli_bin = _opencli_runtime.configured_opencli_bin
+resolve_opencli_bin = _opencli_runtime.resolve_opencli_bin
 
 logger = logging.getLogger(__name__)
 
@@ -85,28 +91,6 @@ def _split_routing_parameters(
         }
     }
     return (chrome_endpoint, required_profile_kind), cli_parameters
-
-
-@asynccontextmanager
-async def _browser_endpoint_lease(
-    pool: Any,
-    endpoint: str | None,
-    required_profile_kind: str | None,
-    *,
-    preacquired: bool,
-):
-    """Reuse a runner-owned endpoint lease or acquire one for legacy callers."""
-    if preacquired:
-        if not endpoint:
-            raise ValueError("A pre-acquired browser lease requires chrome_endpoint")
-        yield endpoint
-        return
-
-    acquire_kwargs: dict[str, Any] = {"endpoint": endpoint}
-    if required_profile_kind:
-        acquire_kwargs["required_profile_kind"] = required_profile_kind
-    async with pool.acquire(**acquire_kwargs) as leased_endpoint:
-        yield leased_endpoint
 
 
 async def _site_bound_agent_endpoint(pool: Any, site: str, session: AsyncSession) -> str | None:
@@ -281,65 +265,6 @@ async def _command_requires_browser(bin_path: str, site: str, command: str) -> b
 
 def _resolve_bin(mode: str) -> str:  # noqa: ARG001 — mode unused, kept for call-site compat
     return resolve_opencli_bin()
-
-
-def _parse_json(raw: str) -> list[dict]:
-    json_start = next((i for i, ch in enumerate(raw) if ch in ("{", "[")), None)
-    if json_start is None:
-        raise ValueError(f"No JSON found in output: {raw[:200]!r}")
-    data = json.loads(raw[json_start:])
-    return data if isinstance(data, list) else [data]
-
-
-def _parse_yaml(raw: str) -> list[dict]:
-    data = yaml.safe_load(raw)
-    if isinstance(data, list):
-        return data
-    if isinstance(data, dict):
-        return [data]
-    return [{"content": str(data)}]
-
-
-def _parse_csv(raw: str) -> list[dict]:
-    reader = csv.DictReader(io.StringIO(raw.strip()))
-    return [row for row in reader]
-
-
-def _parse_table(raw: str) -> list[dict]:
-    """Parse cli-table3 Unicode box-drawing table into list of dicts."""
-    lines = raw.splitlines()
-    data_lines = [line for line in lines if line.strip().startswith("│")]
-    if not data_lines:
-        return [{"content": raw}]
-
-    def split_row(line: str) -> list[str]:
-        return [cell.strip() for cell in line.strip().strip("│").split("│")]
-
-    headers = split_row(data_lines[0])
-    rows = []
-    for line in data_lines[1:]:
-        cells = split_row(line)
-        if len(cells) == len(headers):
-            rows.append(dict(zip(headers, cells)))
-    return rows if rows else [{"content": raw}]
-
-
-def _parse_markdown(raw: str) -> list[dict]:
-    """Parse markdown table into list of dicts."""
-    lines = [line.strip() for line in raw.splitlines() if line.strip().startswith("|")]
-    if len(lines) < 2:
-        return [{"content": raw}]
-
-    def split_row(line: str) -> list[str]:
-        return [cell.strip() for cell in line.strip().strip("|").split("|")]
-
-    headers = split_row(lines[0])
-    rows = []
-    for line in lines[2:]:
-        cells = split_row(line)
-        if len(cells) == len(headers):
-            rows.append(dict(zip(headers, cells)))
-    return rows if rows else [{"content": raw}]
 
 
 _PARSERS = {
@@ -574,53 +499,6 @@ async def _run_opencli(cmd: list[str], env: dict) -> tuple[int, str, str]:
     except (TimeoutError, asyncio.CancelledError):
         await _kill_subprocess(proc)
         raise
-
-
-def _extract_opencli_error(stderr_text: str) -> tuple[str | None, str | None]:
-    """Read OpenCLI's structured error envelope without depending on its prose."""
-    try:
-        envelope = yaml.safe_load(stderr_text)
-    except yaml.YAMLError:
-        envelope = None
-    if isinstance(envelope, dict) and isinstance(envelope.get("error"), dict):
-        error = envelope["error"]
-        code = str(error.get("code") or "").strip() or None
-        message = str(error.get("message") or "").strip() or None
-        return code, message
-
-    # OpenCLI may append a human update notice after the YAML envelope. Retain
-    # the typed code even when that makes the complete stderr invalid YAML.
-    code_match = re.search(
-        r"(?m)^\s+code:\s*['\"]?([A-Za-z0-9_-]+)['\"]?\s*$",
-        stderr_text,
-    )
-    message_match = re.search(
-        r"(?m)^\s+message:\s*(.+?)\s*$",
-        stderr_text,
-    )
-    code = code_match.group(1) if code_match else None
-    message = message_match.group(1).strip(" '\"") if message_match else None
-    return code, message
-
-
-def _artifact_sha256(artifact_ref: str) -> str | None:
-    """Hash a trace file/directory so its persisted reference is auditable."""
-    root = Path(artifact_ref)
-    if not root.exists():
-        return None
-    files = [root] if root.is_file() else sorted(
-        (path for path in root.rglob("*") if path.is_file()),
-        key=lambda path: path.as_posix(),
-    )
-    digest = hashlib.sha256()
-    base = root.parent if root.is_file() else root
-    for path in files:
-        digest.update(path.relative_to(base).as_posix().encode())
-        digest.update(b"\0")
-        with path.open("rb") as handle:
-            while chunk := handle.read(1024 * 1024):
-                digest.update(chunk)
-    return digest.hexdigest()
 
 
 async def _collect_with_opencli_subprocess(
