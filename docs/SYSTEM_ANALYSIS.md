@@ -140,10 +140,10 @@ Step 5: notifier_dispatch.py → Webhook/飞书/钉钉/企微/Email
 
 | 文档 | 说明 |
 |------|------|
-| `PLAN_product_positioning.md` | 产品定位与市场叙事 |
-| `PLAN_ui_reskin.md` | UI 改版计划 |
-| `PLAN_collection_nodes.md` | 节点页面重构（已完成） |
-| `ARCHITECTURE.md` | 架构设计详细文档 |
+| `README.md` | 产品定位、能力与安装入口 |
+| `CONTEXT.md` | 当前代码与系统上下文 |
+| `DESIGN.md` | 架构与产品设计 |
+| `docs/adr/` | 长期架构决策记录 |
 | `docs/PROJECT_MANAGEMENT.md` | 项目管理规范 |
 
 ---

@@ -1,6 +1,4 @@
-"""BrowserActChannel — the generic browser-act pack manifest interpreter
-(GOAL-7 PR-C/PR-E; see GOAL-7.md architecture decisions #1, #4, #5, #6, #7,
-#8, #10).
+"""BrowserActChannel — the generic browser-act pack manifest interpreter.
 
 Drives a vendored pack (backend/browser_act_packs/<category>/<pack>/,
 PR-A) through its channel.manifest.json (PR-A schema, backend/
@@ -138,7 +136,7 @@ def _stop_when_triggered(stop_when: str | None, page_item_count: int) -> bool:
     is NOT recognized as a stop signal here -- callers must still rely on
     ``max_pages`` and the "a page returned 0 items" fallback to terminate
     pagination for stop_when expressions this can't interpret (documented
-    limitation, GOAL-7 PR-C -- full stop_when grammar is out of scope).
+    limitation, Browser Act integration PR-C -- full stop_when grammar is out of scope).
     """
     if not stop_when:
         return False

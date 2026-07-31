@@ -704,7 +704,7 @@ async def test_fetch_client_404_classified_permanent(channel):
     assert exc_info.value.error_type == "PermanentHTTPStatus"
 
 
-# ── health_check (GOAL-4 PR-E: real per-source probe) ───────────────────────────
+# ── health_check (runtime-hardening phase PR-E: real per-source probe) ───────────────────────────
 
 @pytest.mark.asyncio
 async def test_health_check_no_config_is_liveness_only(channel):

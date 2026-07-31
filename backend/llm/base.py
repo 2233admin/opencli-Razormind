@@ -1,4 +1,4 @@
-"""``ProviderAdapter`` ABC (GOAL-6 PR-B).
+"""``ProviderAdapter`` ABC (model-provider runtime PR-B).
 
 Every concrete adapter (:class:`~backend.llm.openai_compat.OpenAICompatAdapter`,
 :class:`~backend.llm.anthropic.AnthropicAdapter`) implements the same three
@@ -55,7 +55,7 @@ class LlmAdapterError(Exception):
     bug in the adapter that raised it, not something this class can enforce
     on its own.
 
-    ``retryable`` (GOAL-6 PR-D, decision #7) tells
+    ``retryable`` (model-provider runtime PR-D, decision #7) tells
     :class:`~backend.llm.resolver.ProviderResolver` whether this failure is
     connection-level (connect error / timeout / 5xx — the provider is
     unreachable or broken right now, worth failing over to the next
@@ -75,7 +75,7 @@ class LlmAdapterError(Exception):
 
 def classify_retryable(exc: BaseException) -> bool:
     """Classify a caught SDK/transport exception as connection-level
-    (``True``) vs business-level (``False``) for GOAL-6 decision #7.
+    (``True``) vs business-level (``False``) for model-provider runtime decision #7.
 
     Connection-level (worth a failover): stdlib/httpx transport timeouts and
     connection failures, and each SDK's own connection/timeout/5xx exception

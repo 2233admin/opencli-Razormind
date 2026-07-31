@@ -1,4 +1,4 @@
-"""backend.llm — self-built model-provider runtime (GOAL-6 decision #1).
+"""backend.llm — self-built model-provider runtime (model-provider runtime decision #1).
 
 No litellm: this package owns provider-agnostic building blocks for
 chat/list_models/test_connection dispatch across ``model_providers`` rows.
@@ -29,7 +29,7 @@ from backend.llm.resolver import ProviderResolver, ResolverError, resolver
 #: a plain string so future embedding/rerank rows don't need a migration.
 VALID_MODEL_TYPES = frozenset({"llm"})
 
-#: model_defaults.role — the three consumption points GOAL-6 collapses onto
+#: model_defaults.role — the three consumption points model-provider runtime collapses onto
 #: ModelProvider (decision #4): agent dock chat, skill_channel's cheap
 #: executor model, pipeline enrichment fallback.
 VALID_ROLES = frozenset({"chat", "executor", "enrichment"})

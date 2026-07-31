@@ -1,4 +1,4 @@
-"""Adapter factory (GOAL-6 PR-B, decision #6): dispatch a
+"""Adapter factory (model-provider runtime PR-B, decision #6): dispatch a
 :class:`~backend.models.provider.ModelProvider` row to its
 :class:`~backend.llm.base.ProviderAdapter` by ``provider_type``.
 
@@ -29,7 +29,7 @@ _ADAPTERS: dict[str, type[ProviderAdapter]] = {
 }
 
 #: provider_type -> litellm provider-name prefix (crawl4ai_channel's
-#: LLMConfig, GOAL-6 PR-E decision #8's crawl4ai exception). Mirrors
+#: LLMConfig, model-provider runtime PR-E decision #8's crawl4ai exception). Mirrors
 #: _ADAPTERS' family grouping 1:1 (openai/local share the openai wire
 #: protocol, claude is Anthropic's own) so the two mappings can't quietly
 #: drift apart by being hand-maintained in two files.
@@ -59,7 +59,7 @@ def get_adapter(provider: Any) -> ProviderAdapter:
 
 def litellm_prefix_for(provider_type: str | None) -> str:
     """Map a ``ModelProvider.provider_type`` to the litellm provider-name
-    prefix ``crawl4ai_channel``'s ``LLMConfig`` needs (GOAL-6 PR-E, decision
+    prefix ``crawl4ai_channel``'s ``LLMConfig`` needs (model-provider runtime PR-E, decision
     #8's crawl4ai exception): the litellm client/call itself stays untouched
     there, but *which* prefix a given ``provider_type`` maps to is now
     decided here — the same place :func:`get_adapter` dispatches from —
@@ -81,7 +81,7 @@ def _provider_view(
 ) -> Any:
     """Build a minimal read-only stand-in for a
     :class:`~backend.models.provider.ModelProvider` row from already-resolved
-    field values (GOAL-6 PR-E).
+    field values (model-provider runtime PR-E).
 
     ``OpenAICompatAdapter``/``AnthropicAdapter`` only ever read
     ``provider.provider_type`` / ``.base_url`` / ``.api_key`` /
@@ -102,7 +102,7 @@ def _provider_view(
 
     Each PR-E call site keeps resolving its OWN fields first (attribute vs
     dict-get, its own env-var fallback name, its own default) exactly as it
-    did before GOAL-6 — this only removes the duplicated *client
+    did before model-provider runtime — this only removes the duplicated *client
     construction* step, not each caller's field-resolution rules.
     """
     return SimpleNamespace(
@@ -121,7 +121,7 @@ def build_openai_compat_adapter(
     provider_type: str | None = None,
 ) -> OpenAICompatAdapter:
     """Build an :class:`OpenAICompatAdapter` from already-resolved field
-    values (GOAL-6 PR-E) — for ``chat.py``/``skill_channel``/the ``openai``
+    values (model-provider runtime PR-E) — for ``chat.py``/``skill_channel``/the ``openai``
     processor, which need the guarded ``AsyncOpenAI`` client construction
     this adapter implements, but whose ``provider`` is either a live ORM row
     (chat.py) or a plain config ``dict`` (skill_channel, the processors), not
@@ -155,7 +155,7 @@ def build_anthropic_adapter(
     default_model: str | None = None,
 ) -> AnthropicAdapter:
     """Build an :class:`AnthropicAdapter` from already-resolved field values
-    (GOAL-6 PR-E) — for the ``claude`` processor. See
+    (model-provider runtime PR-E) — for the ``claude`` processor. See
     :func:`build_openai_compat_adapter` / :func:`_provider_view` for why this
     takes field values rather than a real provider object.
     """

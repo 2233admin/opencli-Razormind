@@ -1,4 +1,4 @@
-"""Unit tests for ModelDefault (GOAL-6 PR-A, decision #4): the per-role
+"""Unit tests for ModelDefault (model-provider runtime PR-A, decision #4): the per-role
 system default candidates table (role UNIQUE) and the Pydantic schemas'
 closed-set validation for role.
 """

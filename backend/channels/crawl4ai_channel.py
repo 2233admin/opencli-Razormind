@@ -175,7 +175,7 @@ class Crawl4AIChannel(AbstractChannel):
         """Same autonomous-default convention as backend.pipeline.runner: an
         explicit provider_id wins, otherwise the first enabled ModelProvider.
 
-        GOAL-6 PR-E exception (decision #8): crawl4ai's LLM calls go through
+        model-provider runtime PR-E exception (decision #8): crawl4ai's LLM calls go through
         its own ``litellm``-backed ``LLMExtractionStrategy`` /
         ``AsyncWebCrawler`` — an internal client this module has no clean
         seam to route through ``backend.llm``'s adapters/resolver, so that

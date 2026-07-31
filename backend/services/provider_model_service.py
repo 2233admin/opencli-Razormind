@@ -1,4 +1,4 @@
-"""Service-layer logic for GOAL-6 PR-C: provider model catalog (sync + CRUD)
+"""Service-layer logic for model-provider runtime PR-C: provider model catalog (sync + CRUD)
 and model_defaults (get/put), plus provider-delete catalog cleanup.
 
 Kept out of ``backend/api/v1/providers.py`` / ``backend/api/v1/model_defaults.py``
@@ -124,7 +124,7 @@ async def delete_provider_models(db: AsyncSession, provider_id: str) -> int:
     """Wipe a provider's whole catalog. Returns the number of rows deleted.
 
     Called from the providers router's ``DELETE /providers/{id}`` BEFORE the
-    provider row itself is deleted (GOAL-6 PR-A note, decision #3): this
+    provider row itself is deleted (model-provider runtime PR-A note, decision #3): this
     repo's runtime engine (``backend/database.py``) never issues ``PRAGMA
     foreign_keys=ON``, so ``provider_models.provider_id``'s ``ondelete=
     CASCADE`` clause never actually fires against the production sqlite file

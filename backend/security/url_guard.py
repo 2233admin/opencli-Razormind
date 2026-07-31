@@ -135,7 +135,7 @@ def is_ip_blocked(
     ``reserved`` are still always blocked — no legitimate provider endpoint
     lives there, so there is no reason to ever allow them.
 
-    This is a narrow, explicit opt-in (GOAL-6 PR-B, decision #6). It exists
+    This is a narrow, explicit opt-in (model-provider runtime PR-B, decision #6). It exists
     because ``url_guard`` had **no** existing localhost/private-IP exemption
     mechanism, yet self-hosted LLM providers (``ModelProvider.provider_type
     == "local"`` — ollama on loopback, model-hotel on the NetBird fleet mesh)

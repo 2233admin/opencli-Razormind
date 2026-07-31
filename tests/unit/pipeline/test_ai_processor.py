@@ -59,7 +59,7 @@ async def test_process_with_ai_enriches_records():
     assert result == 2
 
 
-# ─── GOAL-6 PR-F (decision #9): DataSource.ai_config <-> ModelProvider ─────
+# ─── model-provider runtime PR-F (decision #9): DataSource.ai_config <-> ModelProvider ─────
 # soft dual-track convergence at the ai_config -> processor-config seam.
 
 

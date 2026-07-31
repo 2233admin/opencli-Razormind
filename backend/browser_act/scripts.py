@@ -1,6 +1,7 @@
-"""run_pack_script — the SECOND subprocess hop for a browser-act pack
-(GOAL-7 PR-C). The first hop is browser-act's own CLI (backend/browser_act/
-cli.py, PR-B); this one runs a vendored pack's scripts/*.py, which are pure
+"""run_pack_script — the second subprocess hop for a browser-act pack.
+
+The first hop is browser-act's own CLI (backend/browser_act/cli.py); this one
+runs a vendored pack's scripts/*.py, which are pure
 JS emitters (argparse -> print(js_string), no LLM/no network/no file I/O --
 see backend/browser_act_packs/VENDOR.md).
 
@@ -9,8 +10,8 @@ backend/browser_act/cli.py's _run(): asyncio.create_subprocess_exec +
 asyncio.wait_for(timeout) + TimeoutError -> proc.kill() + await proc.wait()
 so a timed-out script is never orphaned.
 
-Architecture decision #6 (GOAL-7.md): BOTH subprocess hops are argv-only,
-never shell. This hop invokes ``sys.executable <script_path> <args...>`` via
+Both subprocess hops are argv-only, never shell. This hop invokes
+``sys.executable <script_path> <args...>`` via
 create_subprocess_exec -- caller params travel as separate argv elements,
 never string-interpolated into a shell command.
 """

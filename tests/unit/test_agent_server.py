@@ -1,5 +1,5 @@
 """Unit tests for backend/agent_server.py fleet-auth header attachment (ADR-0005)
-and streaming agent-task dispatch (`_handle_ws_agent_task`, GOAL-agent-runtimes.md §4).
+and streaming agent-task dispatch (`_handle_ws_agent_task`).
 
 Covers `_auth_headers()`, the Authorization header on `_register_with_center`'s
 httpx POST calls, and the `additional_headers` -> `extra_headers` fallback in

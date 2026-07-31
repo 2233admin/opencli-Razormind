@@ -34,7 +34,7 @@ def available_runtimes() -> list[str]:
     sync ``is_available()`` classmethod. This is what the ws register
     handshake advertises to the center — never the full registry, since a
     node may not have every runtime's binary installed (Docker image
-    layering, GOAL doc §6)."""
+    layering, design notes §6)."""
     available: list[str] = []
     for runtime_type, instance in _REGISTRY.items():
         is_available = getattr(type(instance), "is_available", None)

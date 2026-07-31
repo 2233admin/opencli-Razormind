@@ -1,4 +1,4 @@
-"""CRUD endpoints for model providers, plus GOAL-6 PR-C's provider-scoped
+"""CRUD endpoints for model providers, plus model-provider runtime PR-C's provider-scoped
 API: test-connection, model-catalog sync, and model catalog CRUD (decision
 #10). DB logic for the PR-C additions lives in
 ``backend.services.provider_model_service`` (thin-endpoint convention); this
@@ -235,7 +235,7 @@ async def delete_provider(provider_id: str, db: AsyncSession = Depends(get_db)) 
     provider = result.scalar_one_or_none()
     if not provider:
         raise HTTPException(status_code=404, detail="Provider not found")
-    # GOAL-6 PR-C (decision #3 / PR-A note): sqlite here never runs with
+    # model-provider runtime PR-C (decision #3 / PR-A note): sqlite here never runs with
     # PRAGMA foreign_keys=ON, so provider_models' ondelete=CASCADE never
     # fires at runtime -- clean up the catalog explicitly or it orphans.
     await provider_model_service.delete_provider_models(db, provider_id)
@@ -245,7 +245,7 @@ async def delete_provider(provider_id: str, db: AsyncSession = Depends(get_db)) 
 
 
 # ---------------------------------------------------------------------------
-# GOAL-6 PR-C: test connection / model catalog sync + CRUD (decision #10)
+# model-provider runtime PR-C: test connection / model catalog sync + CRUD (decision #10)
 # ---------------------------------------------------------------------------
 
 

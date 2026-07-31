@@ -1,4 +1,4 @@
-"""Integration tests for GOAL-6 PR-C's ``GET|PUT /model-defaults`` (decision
+"""Integration tests for model-provider runtime PR-C's ``GET|PUT /model-defaults`` (decision
 #10): role closed-set validation and candidate (provider_id, model_id)
 existence validation, both enforced before a row is ever stored.
 """

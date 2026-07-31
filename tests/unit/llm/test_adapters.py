@@ -1,4 +1,4 @@
-"""Unit tests for backend.llm's runtime adapters (GOAL-6 PR-B).
+"""Unit tests for backend.llm's runtime adapters (model-provider runtime PR-B).
 
 Every SDK client (openai.AsyncOpenAI / anthropic.AsyncAnthropic) is mocked at
 the class level — these tests never make a real network call. The two

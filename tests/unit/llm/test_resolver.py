@@ -1,4 +1,4 @@
-"""Unit tests for GOAL-6 PR-D: ``backend.llm.resolver`` (failover) and
+"""Unit tests for model-provider runtime PR-D: ``backend.llm.resolver`` (failover) and
 ``backend.llm.base.classify_retryable`` (decision #7's connection-vs-business
 error split).
 
@@ -30,7 +30,7 @@ SECRET_KEY = "sk-resolver-test-secret-do-not-leak"
 
 
 class FakeClock:
-    """Injectable monotonic clock (GOAL-6 PR-D): starts at 0.0, only moves
+    """Injectable monotonic clock (model-provider runtime PR-D): starts at 0.0, only moves
     when the test calls :meth:`advance` — no real sleeps anywhere here."""
 
     def __init__(self) -> None:

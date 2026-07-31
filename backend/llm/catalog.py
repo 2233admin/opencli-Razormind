@@ -1,4 +1,4 @@
-"""Anthropic model catalog (GOAL-6 decision #5).
+"""Anthropic model catalog (model-provider runtime decision #5).
 
 Anthropic has no ``GET /v1/models``-style discovery endpoint the way
 OpenAI-compatible providers do (PR-B's ``OpenAICompatAdapter`` hits

@@ -430,7 +430,7 @@ async def run_pipeline(
                 new_records,
                 effective_ai_config,
                 source_id=source.id,
-                # GOAL-6 PR-F decision #9 dual-track resolution only applies to
+                # model-provider runtime PR-F decision #9 dual-track resolution only applies to
                 # DataSource.ai_config; an agent_config override already went
                 # through its own (untouched) ai_agents.provider_id resolution
                 # in backend.pipeline.runner phase 2, so it's used as-is.

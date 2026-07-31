@@ -1,4 +1,4 @@
-"""Unit tests for backend.llm (GOAL-6 PR-A): closed-set vocabulary shared by
+"""Unit tests for backend.llm (model-provider runtime PR-A): closed-set vocabulary shared by
 the model-provider data layer, plus the hardcoded Anthropic model catalog
 (decision #5 — Anthropic has no /v1/models discovery endpoint)."""
 

@@ -1,6 +1,6 @@
 """PackCatalog — scans the vendored browser-act pack tree for SKILL.md files.
 
-Domain/capability derivation (kept simple, per GOAL-7 decision #2/#5): the
+Domain/capability derivation (kept simple, per Browser Act integration decision #2/#5): the
 SKILL.md frontmatter itself only declares ``name``/``description``, it does
 not declare a domain/capability split. Rather than invent a second taxonomy,
 this catalog derives domain/capability straight from the directory layout

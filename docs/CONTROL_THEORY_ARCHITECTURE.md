@@ -1,8 +1,7 @@
 # opencli-admin as a Data Acquisition Control System
 
 > 工程控制论(钱学森)视角的架构原则 + 落地路线。
-> 与 2026-07-02 系统审计(`AUDIT-cybernetic-remediation.md`)是同一透镜的两端:
-> 审计做**诊断**(哪些反馈回路断了),本文档做**运行**(如何把系统建成自稳定控制系统)。
+> 本文同时覆盖**诊断**(哪些反馈回路断了)与**运行**(如何把系统建成自稳定控制系统)。
 >
 > 核心命题:opencli-admin 不是"多数据源采集平台",而是
 > **可观测、可反馈、可自稳定的数据采集控制系统**。RSS/API/CLI/Web/skill 看似不同,

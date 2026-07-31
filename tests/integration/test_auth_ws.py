@@ -124,7 +124,7 @@ def test_nodes_ws_query_token_accepted(test_client, auth_enabled):
         assert reply["type"] == "registered"
 
 
-# ── runtime advertisement (P0 work package B, GOAL-agent-runtimes.md §4) ───
+# ── runtime advertisement ─────────────────────────────────────────────────
 #
 # nodes.py's node_ws_endpoint opens its own backend.database.AsyncSessionLocal
 # session per-call (not the `get_db` dependency TestClient normally overrides

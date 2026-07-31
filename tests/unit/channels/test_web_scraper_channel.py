@@ -349,7 +349,7 @@ async def test_collect_custom_headers_sent(channel):
     assert "User-Agent" in captured_headers
 
 
-# ── GOAL-4 PR-D: fetch() thick contract (ctx.http path — rate limit/retry) ──────
+# ── runtime-hardening phase PR-D: fetch() thick contract (ctx.http path — rate limit/retry) ──────
 
 
 @pytest.mark.asyncio
@@ -414,7 +414,7 @@ async def test_collect_still_delegates_to_fetch_without_ctx_http(channel):
     assert result.success is True
 
 
-# ── health_check (GOAL-4 PR-E: real per-source probe) ───────────────────────────
+# ── health_check (runtime-hardening phase PR-E: real per-source probe) ───────────────────────────
 
 
 @pytest.mark.asyncio

@@ -212,7 +212,7 @@ async def _pick_provider(db: AsyncSession, provider_id: Optional[str]) -> ModelP
 async def _build_client(provider: ModelProvider):
     """Build the agent dock's OpenAI-compatible tool-calling client.
 
-    GOAL-6 PR-E: consolidates what used to be a private ``AsyncOpenAI(...)``
+    model-provider runtime PR-E: consolidates what used to be a private ``AsyncOpenAI(...)``
     construction here into :class:`~backend.llm.openai_compat.OpenAICompatAdapter`
     via :func:`~backend.llm.factory.build_openai_compat_adapter` — the same
     guarded client :class:`OpenAICompatAdapter` gives every other PR-E

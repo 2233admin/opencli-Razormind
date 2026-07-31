@@ -1,4 +1,4 @@
-"""PackManifest — the ``channel.manifest.json`` schema (GOAL-7 decision #5).
+"""PackManifest — the ``channel.manifest.json`` schema (Browser Act integration decision #5).
 
 This is the machine-readable execution contract that ``BrowserActChannel``
 (PR-C) interprets generically: ``steps`` is a sequence of browser-act
@@ -33,7 +33,7 @@ class ParamSpec(BaseModel):
     enum: Optional[list[str]] = None
 
 
-#: The browser-act operations a manifest step can drive. See GOAL-7 decision
+#: The browser-act operations a manifest step can drive. See Browser Act integration decision
 #: #1/#6: the channel drives these deterministically, argv-only, no shell.
 StepOp = Literal["navigate", "wait", "eval_script", "click", "input"]
 

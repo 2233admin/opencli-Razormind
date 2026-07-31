@@ -1,4 +1,4 @@
-"""Unit tests for ProviderModel (GOAL-6 PR-A, decision #3): the model catalog
+"""Unit tests for ProviderModel (model-provider runtime PR-A, decision #3): the model catalog
 table, its real FK to ModelProvider (ondelete CASCADE — unlike
 AIAgent.provider_id, which stays a loose string per decision #9), the
 (provider_id, model_id) uniqueness constraint, and the Pydantic schemas'

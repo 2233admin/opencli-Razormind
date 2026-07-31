@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 
 async def _resolve_llm_config(ai_config: dict[str, Any], source_id: Any) -> dict[str, Any]:
-    """GOAL-6 PR-F (decision #9): soft dual-track convergence between
+    """model-provider runtime PR-F (decision #9): soft dual-track convergence between
     ``DataSource.ai_config``'s legacy inline ``api_key``/``base_url`` and the
     governed ``ModelProvider`` catalog (``backend.models.provider``).
 
@@ -86,7 +86,7 @@ async def process_with_ai(
         processor_type: claude | openai | local
         model: model name
         prompt_template: Jinja2 template
-        provider_id: GOAL-6 PR-F — governed ModelProvider reference; wins
+        provider_id: model-provider runtime PR-F — governed ModelProvider reference; wins
             over inline api_key/base_url when both are present (decision #9)
         ...processor-specific options
 

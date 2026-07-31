@@ -1,4 +1,4 @@
-"""GET/PUT endpoints for ``model_defaults`` (GOAL-6 PR-C, decision #10).
+"""GET/PUT endpoints for ``model_defaults`` (model-provider runtime PR-C, decision #10).
 
 A top-level resource, not nested under ``/providers/{id}`` — a role's
 candidate list can reference any provider, so it doesn't belong under one

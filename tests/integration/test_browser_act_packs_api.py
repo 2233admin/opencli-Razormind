@@ -1,4 +1,4 @@
-"""HTTP-seam tests for GET /api/v1/browser-act/packs (GOAL-7 PR-E, decision
+"""HTTP-seam tests for GET /api/v1/browser-act/packs (Browser Act integration PR-E, decision
 #9): the real vendored catalog (backend/browser_act_packs/), no fixture
 override -- this is a static file-tree scan, deterministic regardless of
 test order/host, same as PackCatalog's own unit tests.

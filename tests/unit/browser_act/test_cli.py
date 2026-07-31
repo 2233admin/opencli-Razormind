@@ -1,4 +1,4 @@
-"""Unit tests for backend.browser_act.cli (GOAL-7 PR-B).
+"""Unit tests for backend.browser_act.cli (Browser Act integration PR-B).
 
 Mirrors tests/unit/channels/test_cli_channel.py conventions: patch
 asyncio.create_subprocess_exec / asyncio.wait_for with AsyncMock, and use a

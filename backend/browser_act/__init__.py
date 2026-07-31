@@ -1,4 +1,4 @@
-"""backend.browser_act — browser-act CLI subprocess wrapper (GOAL-7 PR-B).
+"""backend.browser_act — browser-act CLI subprocess wrapper (Browser Act integration PR-B).
 
 Distinct from both:
 - ``backend/cli.py`` — the opencli-skill HTTP client (unrelated tool).

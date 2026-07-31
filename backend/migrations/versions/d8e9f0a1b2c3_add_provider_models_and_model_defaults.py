@@ -4,7 +4,7 @@ Revision ID: d8e9f0a1b2c3
 Revises: a7v8w9x0y1z2
 Create Date: 2026-07-09
 
-GOAL-6 PR-A (model-provider-mgmt, decisions #3/#4): the model catalog
+model-provider runtime PR-A (model-provider-mgmt, decisions #3/#4): the model catalog
 (``provider_models`` — one row per model a provider exposes, sourced from
 discovery sync or manual entry) and system default candidates per
 consumption role (``model_defaults``). Adds ONLY these two tables — no

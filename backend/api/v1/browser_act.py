@@ -1,5 +1,5 @@
 """GET /api/v1/browser-act/packs — read-only catalog listing for the
-BrowserAct channel's frontend surfacing (GOAL-7 PR-E, decision #9).
+BrowserAct channel's frontend surfacing (Browser Act integration PR-E, decision #9).
 
 Reuses ``PackCatalog`` (PR-A) + ``load_manifest`` (PR-A schema / PR-D seeds)
 — no new catalog mechanism, no DB table. Read-only, no auth (matches the

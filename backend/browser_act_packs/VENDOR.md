@@ -30,7 +30,7 @@ time; see `catalog.py`'s scan for the live count).
 (kept out of the category tree so it isn't mistaken for a pack). The upstream
 `LICENSE` was copied unchanged to `backend/browser_act_packs/LICENSE`.
 
-**Not vendored** (see GOAL-7.md, YAGNI list):
+**Not vendored**:
 - the `browser-act` CLI itself (external PyPI tool, `uv tool install browser-act-cli`)
 - `browser-act-skill-forge` (pack generator, out of scope)
 
@@ -45,7 +45,7 @@ re-copy `solutions/**`), or override in code outside this tree.
 
 - `catalog.py`, `manifest.py`, `__init__.py` — new code, not vendored.
 - `channel.manifest.json` files (one per pack, machine-readable execution
-  contract) are **our addition**, authored in PR-D of GOAL-7 — they do not
+  contract) are **our addition**, authored in PR-D of Browser Act integration — they do not
   exist upstream and are not part of the BrowserAct skills repo. PR-A (this
   vendor drop) defines only the `PackManifest` schema/loader; it does not
   write any `channel.manifest.json` content.
@@ -63,7 +63,7 @@ To pull upstream updates:
 ## Seed manifests (PR-D)
 
 Two of the 78 vendored packs got a hand-authored `channel.manifest.json`
-(GOAL-7 decision #5), chosen as the pair that can be validated end-to-end
+(Browser Act integration decision #5), chosen as the pair that can be validated end-to-end
 without a logged-in session: `search-research/google-search-serp` (a
 login-free public search) and `ecommerce/taobao-keyword-search` (a
 login-free public listing search page). Both translations below were
@@ -154,7 +154,7 @@ SKILL.md prose → manifest:
    enhancement (e.g. a `pagination.mode` that lets a manifest declare an
    offset formula), not something this seed pretends to support.
 3. **The other ~76 vendored packs have no `channel.manifest.json` yet.**
-   Seeding is intentionally incremental (GOAL-7 PR-D scope: 2 packs to prove
+   Seeding is intentionally incremental (Browser Act integration PR-D scope: 2 packs to prove
    the pipeline, not full coverage) — `backend/browser_act_packs/manifest.py`
    (`PackManifest`) is the extension point; add a `channel.manifest.json`
    next to a pack's `SKILL.md` as each one is needed, translating its prose

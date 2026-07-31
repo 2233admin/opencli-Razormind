@@ -32,7 +32,6 @@ Modify:
 - `backend/api/v1/__init__.py:5-63`
 - `backend/workflow/capability_projection.py`
 - `backend/workflow/node_registry.py`
-- `PLAN_plugin_system.md:24-34` after implementation, to close decided questions
 
 ## Persistence
 

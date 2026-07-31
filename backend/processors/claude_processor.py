@@ -63,7 +63,7 @@ class ClaudeProcessor(AbstractProcessor):
             model, max_tokens, len(records), request_timeout, max_concurrency,
         )
 
-        # GOAL-6 PR-E: client construction consolidated through
+        # model-provider runtime PR-E: client construction consolidated through
         # backend.llm.anthropic.AnthropicAdapter (via
         # backend.llm.factory.build_anthropic_adapter). This processor never
         # configured a base_url (Anthropic's endpoint is effectively fixed),

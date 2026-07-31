@@ -12,7 +12,7 @@ Grounding:
 - Workflow compile seam: `backend/workflow/compiler.py:121-200`
 - Runtime binding registry: `backend/workflow/runtime_registry.py:36-53,85-150`
 - Run/event projection: `backend/workflow/opencli_hda_tracer.py:213-390,1240-1363`
-- Plugin direction: `PLAN_plugin_system.md:5-34`
+- Plugin direction: `docs/adr/0014-datafoundry-backed-analysis-as-an-optional-plugin.md`, `docs/adr/0015-plugin-ui-is-declarative-and-platform-rendered.md`, `docs/adr/0019-locked-plugin-node-definitions-and-project-owned-derivatives.md`
 - External runtime boundary: `docs/adr/0010-native-runtime-nodes-and-managed-external-graphs.md:1-17`
 - Architecture decision: `docs/adr/0026-run-dify-workflows-through-a-pinned-graphon-sidecar.md`
 

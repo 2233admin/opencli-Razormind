@@ -1,4 +1,4 @@
-"""Provider resolver + failover (GOAL-6 PR-D, decision #7).
+"""Provider resolver + failover (model-provider runtime PR-D, decision #7).
 
 Reads a role's ``model_defaults.candidates`` (PR-A) — an ordered list of
 ``{"provider_id", "model_id"}`` dicts — and dispatches through

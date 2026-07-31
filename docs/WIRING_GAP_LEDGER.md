@@ -33,7 +33,7 @@ ADR 0010-0025 (企业工作流平台愿景) 大片 UNIMPLEMENTED, 这些是**没
 - ADR-0022 Ephemeral Execution Grants (无 Connection/Binding/Grant 链, 现是扁平 per-source 凭证)
 - ADR-0021 Delivery 业务结果 vs 提交 (无 BusinessOutcome, webhook_delivery 只到传输层, 200 ≠ 业务成功)
 - ADR-0024 Recovery Cases 统一 inbox (无 RecoveryCase model; /inbox 页存在但活查三端点, 没串成案子) — **半接线, 比其他愿景更接近**
-- ADR-0014/0015/0019 plugin 系统 (DataFoundry/声明式 plugin UI/locked node def 均无) — PLAN_plugin_system 已点最小起步 (executor mode Literal→str)
+- ADR-0014/0015/0019 plugin 系统 (DataFoundry/声明式 plugin UI/locked node def 均无)
 - ADR-0016 Setup Center (无 readiness 聚合面, 相对便宜)
 - ADR-0023 幂等 Operation ID (仅 acquisition 有 idempotency_key, 未泛化成跨 plugin 契约)
 - ADR-0025 乐观锁 guard (模式已在 source_cursor 证明, 但目标对象 Project/Proposal 未存在, 无处可挂)
@@ -41,7 +41,7 @@ ADR 0010-0025 (企业工作流平台愿景) 大片 UNIMPLEMENTED, 这些是**没
 ## D. 文档 stale (低成本清理, 防误导)
 
 - `CONTROL_THEORY_ARCHITECTURE.md` **低估**: 写"拟新增 control 层", 实际 19 文件已建好在跑
-- `PLAN_ui_reskin.md` / `PLAN_collection_nodes.md` 描述已整体换掉的 Vite+React18 树 (现 Next.js 16+React19)
+- 旧 Vite+React18 阶段计划已删除，当前实现为 Next.js 16+React19
 - ADR-0001 (FlowGram) / 0002 (Radix) 已被 xyflow / base-ui **superseded**, ADR 文件无标注
 
 ---

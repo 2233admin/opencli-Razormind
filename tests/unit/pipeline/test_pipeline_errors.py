@@ -107,7 +107,7 @@ async def test_pipeline_with_ai_failure_still_returns_success(db_session):
     assert result.success is True
 
 
-# ── GOAL-4 PR-B: retryable errors propagate instead of being swallowed ──────────
+# ── runtime-hardening phase PR-B: retryable errors propagate instead of being swallowed ──────────
 
 @pytest.mark.asyncio
 async def test_pipeline_collect_retryable_exception_propagates(db_session):

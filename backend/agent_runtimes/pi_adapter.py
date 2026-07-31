@@ -36,12 +36,12 @@ CONFIRMED from packages/coding-agent/docs/rpc.md and usage.md:
     ``text_delta`` such as ``thinking_delta``/``toolcall_delta``) is skipped
     with a debug log — NOT invented into a new event type, per the closed
     event-set rule in ``base.py``.
-  * ``PI_CODING_AGENT_DIR`` (assumed in the original GOAL doc as a "provider
+  * ``PI_CODING_AGENT_DIR`` (assumed in the original design as a "provider
     override" env var) DOES NOT EXIST in pi's actual settings/providers docs.
     The real, documented env var for redirecting pi's persistent state is
     ``PI_CODING_AGENT_SESSION_DIR`` (overrides the ``sessionDir`` setting;
     default is under the user's home directory). This adapter's
-    ``provider_dir`` config key is kept (GOAL doc's name) but is wired to the
+    ``provider_dir`` config key is kept (design notes's name) but is wired to the
     real ``PI_CODING_AGENT_SESSION_DIR`` env var — see ``_compose_env``. If a
     future pi release adds a true provider/model-config directory override,
     fix the one line in ``_compose_env``.

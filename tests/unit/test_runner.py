@@ -504,7 +504,7 @@ async def test_run_pipeline_with_agent_id():
 
 @pytest.mark.asyncio
 async def test_run_pipeline_agent_processor_config_overrides_provider_base():
-    """GOAL-6 PR-E / decision #8: provider supplies BASE fields (api_key,
+    """model-provider runtime PR-E / decision #8: provider supplies BASE fields (api_key,
     base_url) via provider_config; agent.processor_config is layered on top
     and WINS on any overlapping key. test_run_pipeline_with_agent_id (above)
     only asserts the pipeline succeeds — it never inspects the merged
@@ -590,7 +590,7 @@ async def test_run_pipeline_agent_processor_config_overrides_provider_base():
     assert agent_config["model"] == "claude-3-haiku"
 
 
-# ── GOAL-4 PR-B: retryable run_pipeline failure records then re-propagates ──────
+# ── runtime-hardening phase PR-B: retryable run_pipeline failure records then re-propagates ──────
 
 
 @pytest.mark.asyncio

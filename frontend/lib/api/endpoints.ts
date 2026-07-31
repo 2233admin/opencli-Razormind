@@ -654,7 +654,7 @@ export const buildFeedProviderWorkflowNode = (
     )
     .then((r) => r.data.data)
 
-// ── Model defaults (GOAL-6 — role-based failover candidate lists) ───────────────
+// ── Model defaults (model-provider runtime — role-based failover candidate lists) ───────────────
 // A role can be entirely absent from the list on a fresh install — that's a
 // legitimate "no candidates configured yet" state, not an error.
 export const listModelDefaults = () =>
@@ -763,7 +763,7 @@ export const updateChromeEndpointMode = (endpoint: string, mode: 'bridge' | 'cdp
 export const listPresets = () =>
   apiClient.get<ApiResponse<PresetsGrouped>>('/presets').then((r) => r.data.data)
 
-// ── BrowserAct packs (GOAL-7 PR-E, decision #9) ─────────────────────────────────
+// ── BrowserAct packs (Browser Act integration PR-E, decision #9) ─────────────────────────────────
 // Read-only vendored-pack catalog for the 'browser_act' channel's one-click
 // config preset (pack picker) — never carries a credential/api_key.
 export const listBrowserActPacks = () =>

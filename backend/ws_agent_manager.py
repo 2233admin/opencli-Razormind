@@ -8,7 +8,7 @@ Two independent request/response families share the same connection:
 
 - ``collect`` / ``result`` — single-shot opencli collection tasks (unchanged).
 - ``agent_task`` / ``agent_event`` (0..N) / ``agent_result`` — streaming
-  agent-runtime task dispatch (GOAL-agent-runtimes.md §4, P0 work package B).
+  agent-runtime task dispatch.
 
 Wire protocol — every reverse-channel message type, one-line field shapes:
 
@@ -183,7 +183,7 @@ def resolve_response(request_id: str, result: dict[str, Any]) -> None:
 # ── Streaming agent-task dispatch ───────────────────────────────────────────
 # Alongside the collect/result single-shot path above: agent_task/agent_event/
 # agent_result support a long-running streaming task with N intermediate
-# events before the terminal result (GOAL-agent-runtimes.md §4).
+# events before the terminal result.
 
 
 async def send_agent_task(

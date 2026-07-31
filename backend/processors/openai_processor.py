@@ -66,7 +66,7 @@ class OpenAIProcessor(AbstractProcessor):
             request_timeout, max_concurrency,
         )
 
-        # GOAL-6 PR-E: client construction (SSRF guard + DNS-rebind pinning)
+        # model-provider runtime PR-E: client construction (SSRF guard + DNS-rebind pinning)
         # is consolidated through backend.llm.openai_compat.OpenAICompatAdapter
         # (via backend.llm.factory.build_openai_compat_adapter) — this used to
         # be a verbatim duplicate of the same wiring in chat.py/skill_channel.

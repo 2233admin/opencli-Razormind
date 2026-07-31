@@ -1,5 +1,5 @@
 """Unit tests for PackManifest (backend/browser_act_packs/manifest.py) —
-GOAL-7 decision #5 schema + loader. PR-A defines schema only, no seed content."""
+Browser Act integration decision #5 schema + loader. PR-A defines schema only, no seed content."""
 
 import json
 

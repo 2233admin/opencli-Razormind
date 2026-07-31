@@ -143,7 +143,7 @@ class Settings(BaseSettings):
     # Managed acquisition runtime. The commit/version are code-owned pins;
     # this path merely locates the installed checkout on every platform.
     ohmyopencli_root: str = "/opt/ohmyopencli"
-    # browser-act CLI subprocess execution timeout, per call (GOAL-7 PR-B).
+    # browser-act CLI subprocess execution timeout, per call (Browser Act integration PR-B).
     # Binary path is BROWSER_ACT_BIN env var (mirrors OPENCLI_BIN), not a
     # Settings field — this is only the per-call timeout default.
     browser_act_timeout: int = 120

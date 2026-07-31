@@ -4,8 +4,7 @@ Revision ID: c9d0e1f2a3b4
 Revises: b8c9d0e1f2a3
 Create Date: 2026-07-03
 
-P0 work package B (GOAL-agent-runtimes.md §4): the ws register handshake now
-optionally advertises the agent-runtime types available on that edge node
+The ws register handshake optionally advertises the agent-runtime types available on that edge node
 (e.g. ["pi"]) via ``backend.agent_runtimes.registry.available_runtimes()``.
 Persisted as a nullable JSON list so older nodes / handshakes that omit the
 field leave the column NULL rather than forcing an empty-list default.

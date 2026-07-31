@@ -1,4 +1,4 @@
-"""OpenAI-compatible adapter (GOAL-6 PR-B) — ``provider_type in {"openai",
+"""OpenAI-compatible adapter (model-provider runtime PR-B) — ``provider_type in {"openai",
 "local"}`` (decision #2: both are the same wire protocol, just different
 trust levels for the target address).
 """
@@ -106,7 +106,7 @@ class OpenAICompatAdapter(ProviderAdapter):
             self._pinned_http_client = None
 
     async def get_client(self) -> Any:
-        """Public accessor for the guarded ``AsyncOpenAI`` client (GOAL-6
+        """Public accessor for the guarded ``AsyncOpenAI`` client (model-provider runtime
         PR-E).
 
         ``chat.py``'s agent-dock tool-calling loop and ``skill_channel``'s

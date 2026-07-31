@@ -1,4 +1,4 @@
-"""Integration tests for GOAL-7 PR-D seed manifests.
+"""Integration tests for Browser Act integration PR-D seed manifests.
 
 Exercises the two hand-authored ``channel.manifest.json`` seeds
 (``search-research/google-search-serp``, ``ecommerce/taobao-keyword-search``)

@@ -7,7 +7,7 @@ from backend.models.base import TimestampMixin
 
 
 class ProviderModel(TimestampMixin):
-    """One model in a provider's catalog (GOAL-6 decision #3).
+    """One model in a provider's catalog (model-provider runtime decision #3).
 
     Populated either by discovery sync (``source="discovered"`` — OpenAI-compat
     ``GET {base_url}/v1/models``, or the Anthropic hardcoded catalog for
@@ -16,7 +16,7 @@ class ProviderModel(TimestampMixin):
     delete a ``manual`` row (PR-C concern; this table only defines the shape).
 
     ``provider_id`` is a real FK — unlike ``AIAgent.provider_id``, which stays
-    a loose string column per GOAL-6 decision #9 (the migration cost isn't
+    a loose string column per model-provider runtime decision #9 (the migration cost isn't
     worth it there) — so deleting a ``ModelProvider`` cascades its whole
     catalog away instead of leaving orphan rows.
     """

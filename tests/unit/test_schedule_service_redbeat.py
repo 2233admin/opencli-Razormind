@@ -1,4 +1,4 @@
-"""Unit tests for schedule_service's redbeat sync gating (GOAL-4 PR-C).
+"""Unit tests for schedule_service's redbeat sync gating (runtime-hardening phase PR-C).
 
 Existing tests in test_schedules_crud.py run under the default
 task_executor="local" and never touch redbeat at all (the gate short-circuits)

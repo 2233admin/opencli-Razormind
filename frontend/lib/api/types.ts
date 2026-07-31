@@ -21,7 +21,7 @@ export interface WorkspaceSettingsRead {
   updated_at: string | null
 }
 
-// Self-hosted LLM-provider runtime (GOAL-6, backend/llm/, no litellm) — mirrors
+// Self-hosted LLM-provider runtime (model-provider runtime, backend/llm/, no litellm) — mirrors
 // backend.schemas.provider.ModelProviderRead.from_model exactly. The raw
 // api_key is NEVER returned by the backend (from_model explicitly masks it) —
 // only has_api_key / api_key_preview (e.g. "sk-...wxyz", null if unset) ever
@@ -916,7 +916,7 @@ export interface PlanHealthRead {
   recorded_at: string
 }
 
-// ── BrowserAct packs (GOAL-7 PR-E, decision #9) ──────────────────────────────
+// ── BrowserAct packs (Browser Act integration PR-E, decision #9) ──────────────────────────────
 // Mirrors backend.api.v1.browser_act.BrowserActPackRead. Read-only vendored
 // pack catalog for the 'browser_act' channel's config preset — never carries
 // any credential/api_key (the BrowserAct API key is a SourceCredential,

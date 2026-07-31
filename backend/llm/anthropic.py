@@ -1,4 +1,4 @@
-"""Anthropic adapter (GOAL-6 PR-B) — ``provider_type == "claude"`` (decision
+"""Anthropic adapter (model-provider runtime PR-B) — ``provider_type == "claude"`` (decision
 #2)."""
 
 from __future__ import annotations
@@ -87,7 +87,7 @@ class AnthropicAdapter(ProviderAdapter):
             self._pinned_http_client = None
 
     async def get_client(self) -> Any:
-        """Public accessor for the guarded ``AsyncAnthropic`` client (GOAL-6
+        """Public accessor for the guarded ``AsyncAnthropic`` client (model-provider runtime
         PR-E) — mirrors :meth:`OpenAICompatAdapter.get_client`. Used by
         ``claude_processor`` to consolidate client construction while keeping
         its own per-record loop + usage-token logging (which needs the raw

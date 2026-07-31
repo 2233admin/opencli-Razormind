@@ -1,4 +1,4 @@
-"""GOAL-6 PR-E: consumer client-construction consolidation tests.
+"""model-provider runtime PR-E: consumer client-construction consolidation tests.
 
 Covers chat.py / skill_channel.py / the openai+claude processors' switch from
 each hand-rolling its own AsyncOpenAI/AsyncAnthropic + SSRF-guard wiring to

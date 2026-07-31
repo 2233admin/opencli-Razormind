@@ -1,5 +1,4 @@
-"""Unit tests for backend/api/v1/nodes.py's `_upsert_node` runtimes handling
-(P0 work package B, GOAL-agent-runtimes.md §4).
+"""Unit tests for backend/api/v1/nodes.py's `_upsert_node` runtimes handling.
 
 Uses the shared async `db_session` fixture (tests/conftest.py) directly —
 no WS/HTTP layer involved — so persistence of the new nullable

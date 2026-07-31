@@ -2,16 +2,15 @@
 
 Mirrors ``backend/channels/base.py``'s split: a frozen ``Capabilities`` dataclass
 the caller branches on (never ``isinstance``), a small task/result value-object
-pair, and an ``ABC`` adapters implement. See ``GOAL-agent-runtimes.md`` §2 for
-the design rationale — the short version: the three target frameworks
+pair, and an ``ABC`` adapters implement. The three target frameworks
 (LangGraph, VoltAgent, pi) span two languages and three transport shapes, so
 the abstraction has to be a *process/protocol* contract, not a Python import.
 Each adapter owns exactly one framework's native stream and translates it into
 the closed event set below; nothing outside the adapter ever sees a
 framework-native shape.
 
-Event design note (OpenAlice lesson, cited in the GOAL doc): normalize the
-*protocol*, not the output. The event set is intentionally tiny and closed —
+Event design note: normalize the *protocol*, not the output. The event set is
+intentionally tiny and closed —
 ``EVENT_TYPES`` — so adapters cannot invent new shapes ad hoc. Use the
 ``event_*`` helper constructors below rather than hand-building event dicts;
 that is what prevents typos in ``type`` strings and missing ``task_id`` fields

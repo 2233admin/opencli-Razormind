@@ -1,4 +1,4 @@
-"""browser-act CLI subprocess wrapper (GOAL-7 PR-B).
+"""browser-act CLI subprocess wrapper.
 
 Distinct from both ``backend/cli.py`` (the opencli-skill HTTP client) and
 ``backend/browser_act_packs/`` (PR-A's vendored SKILL.md packs). This module
@@ -9,8 +9,8 @@ Subprocess safety mirrors ``backend/channels/cli_channel.py`` exactly:
 ``TimeoutError`` -> ``proc.kill()`` + ``await proc.wait()`` so a timed-out
 child is never orphaned.
 
-Architecture decision #6 (GOAL-7.md): both hops (this CLI, and the
-scripts/*.py -> eval-js hop the future channel drives) are argv-only. Never
+Both hops (this CLI, and the scripts/*.py -> eval-js hop the future channel
+drives) are argv-only. Never
 ``asyncio.create_subprocess_shell``, never ``shell=True``, never a
 string-joined command. User-controlled values (URLs, JS, input text) always
 travel as individual argv elements so they can never be interpreted by a
@@ -187,7 +187,7 @@ async def session(
 ) -> AsyncIterator[BrowserActSession]:
     """Scope a browser-act session name/env for a block of calls.
 
-    Deliberately MINIMAL lifecycle (GOAL-7 architecture decision #10): this
+    Deliberately MINIMAL lifecycle (Browser Act integration architecture decision #10): this
     does NOT call ``browser open`` on enter nor ``session close`` on exit.
     Browser creation/deletion carries BrowserAct's own confirmation-gate
     concern, and owning that gate is PR-C's job (the manifest-interpreter

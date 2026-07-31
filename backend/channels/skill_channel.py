@@ -210,7 +210,7 @@ async def _build_model_call(provider: dict[str, Any]) -> Any:
     model. ``reply`` is the raw OpenAI chat object the loop already knows how to
     normalize (both ``tool_calls`` and the Qwen XML ``<tool_use>`` path).
 
-    GOAL-6 PR-E: client construction is consolidated through
+    model-provider runtime PR-E: client construction is consolidated through
     :class:`~backend.llm.openai_compat.OpenAICompatAdapter` (via
     :func:`~backend.llm.factory.build_openai_compat_adapter`) — the same
     guarded ``AsyncOpenAI`` construction ``chat.py`` and the ``openai``

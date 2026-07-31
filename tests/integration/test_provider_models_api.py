@@ -1,4 +1,4 @@
-"""Integration tests for GOAL-6 PR-C's provider-scoped API (decision #10):
+"""Integration tests for model-provider runtime PR-C's provider-scoped API (decision #10):
 ``POST /providers/{id}/test``, ``POST /providers/{id}/models/sync``, and
 ``GET|POST|PATCH|DELETE /providers/{id}/models``.
 
@@ -154,7 +154,7 @@ async def test_sync_creates_discovered_rows(client, provider_data):
 
 @pytest.mark.asyncio
 async def test_sync_idempotent_and_manual_preserved(client, provider_data):
-    """The scenario from GOAL-6 PR-C's spec: seed provider, sync [m1, m2] ->
+    """The scenario from model-provider runtime PR-C's spec: seed provider, sync [m1, m2] ->
     2 discovered rows; add manual m3; sync again with only [m1] -> m3
     (manual) survives untouched, m2 (stale discovered) is pruned, m1 is not
     duplicated (idempotent)."""

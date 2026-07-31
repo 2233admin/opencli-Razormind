@@ -1,4 +1,4 @@
-"""Unit tests for BrowserActChannel (GOAL-7 PR-C/PR-E).
+"""Unit tests for BrowserActChannel (Browser Act integration PR-C/PR-E).
 
 Builds a SYNTHETIC pack under tmp_path so these tests never depend on a real
 PR-D manifest or a real browser: the browser-act CLI hop is mocked at
@@ -356,7 +356,7 @@ async def test_run_pack_script_injection_safety(tmp_path):
     assert output.strip() == dangerous
 
 
-# ── credentials (GOAL-7 PR-E, decision #7) ────────────────────────────────
+# ── credentials (Browser Act integration PR-E, decision #7) ────────────────────────────────
 #
 # AuthManager.store()/.resolve() open their own session via
 # backend.database.AsyncSessionLocal -- these tests point that at a per-test

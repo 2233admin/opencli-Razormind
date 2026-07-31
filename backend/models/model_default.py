@@ -5,14 +5,14 @@ from backend.models.base import TimestampMixin
 
 
 class ModelDefault(TimestampMixin):
-    """System default model candidates for one consumption role (GOAL-6
+    """System default model candidates for one consumption role (model-provider runtime
     decision #4).
 
     One row per role (``role`` is UNIQUE): ``candidates`` is an ordered list
     of ``{"provider_id": ..., "model_id": ...}`` dicts — index 0 is the
     primary pick, the rest are failover order tried in sequence by the
     resolver (PR-D; this table only defines the shape, no resolve logic
-    lives here). Roles map to the three consumption points GOAL-6 collapses
+    lives here). Roles map to the three consumption points model-provider runtime collapses
     onto ModelProvider (decision #4): ``chat`` (agent dock conversation),
     ``executor`` (skill_channel's cheap execution model), ``enrichment``
     (pipeline processor fallback).

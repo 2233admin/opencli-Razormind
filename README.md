@@ -209,7 +209,7 @@ v0.4.0 同时发布 <code>linux/amd64</code> 和 <code>linux/arm64</code>：
 - [开发规范](docs/DEVELOPMENT_STANDARD.md)
 - [架构决策记录](docs/adr)
 
-Issue 与 PR 均在本仓库公开协作。提交功能前请先运行与改动范围对应的最小测试，再运行前端 lint / typecheck / build 或后端测试。
+Issue 与 PR 均在本仓库公开协作；开发计划和任务统一进入 GitHub Issues，长期架构决策进入 `docs/adr`。提交功能前请先运行与改动范围对应的最小测试，再运行前端 lint / typecheck / build 或后端测试。
 
 ## License
 

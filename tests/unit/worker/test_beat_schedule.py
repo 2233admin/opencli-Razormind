@@ -1,6 +1,6 @@
 """Unit tests for backend/worker/beat_schedule.py — the surviving
 parse_cron_expression helper (its former build_beat_schedule() was dead code,
-removed in GOAL-4 PR-C, superseded by worker/redbeat_sync.py)."""
+removed in runtime-hardening phase PR-C, superseded by worker/redbeat_sync.py)."""
 
 import pytest
 from celery.schedules import crontab

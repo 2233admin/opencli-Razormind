@@ -9,9 +9,21 @@ These rules apply only to this repository. They extend the workspace rules in
   affected scope, and the smallest check that can prove completion.
 - Keep changes small and reversible. Reuse existing project patterns and
   dependencies before adding abstractions or packages.
+- Prefer deletion, the standard library, native platform features, and already
+  installed dependencies before adding code or dependencies.
+- Never simplify away trust-boundary validation, data-loss protection,
+  security controls, or accessibility basics.
 - Do not claim completion without fresh evidence. Prefer targeted tests first,
   then typecheck, lint, build, integration, or browser smoke checks according to
   the risk of the change.
+
+## Documentation Hygiene
+
+- Keep the repository root limited to durable product, architecture, testing,
+  and agent-instruction entry points.
+- Track active plans and tasks in GitHub Issues. Record durable architecture
+  decisions in `docs/adr/`; do not add root-level `PLAN_*`, `GOAL*`, `HANDOFF*`,
+  or `AUDIT*` files.
 
 ## Task-Aware Model Routing
 

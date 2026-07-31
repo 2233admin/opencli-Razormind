@@ -1,6 +1,6 @@
 """Local model processor via Ollama/vLLM compatible API.
 
-GOAL-6 PR-E note: deliberately NOT routed through
+model-provider runtime PR-E note: deliberately NOT routed through
 ``backend.llm.factory``/``OpenAICompatAdapter`` like the openai/claude
 processors. Two real incompatibilities, not just "not bothered yet":
 
