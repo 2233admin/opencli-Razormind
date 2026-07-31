@@ -15,6 +15,9 @@ depends_on = None
 
 
 def upgrade() -> None:
+    if "workflow_runs" not in sa.inspect(op.get_bind()).get_table_names():
+        return
+
     with op.batch_alter_table("workflow_runs") as batch:
         batch.add_column(
             sa.Column("studio_workflow_version_id", sa.String(length=36), nullable=True)
@@ -34,6 +37,9 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    if "workflow_runs" not in sa.inspect(op.get_bind()).get_table_names():
+        return
+
     with op.batch_alter_table("workflow_runs") as batch:
         batch.drop_index("ix_workflow_runs_studio_workflow_version_id")
         batch.drop_constraint(

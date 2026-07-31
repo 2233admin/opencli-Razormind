@@ -465,6 +465,8 @@ async def test_workflow_capabilities_project_real_backend_surfaces(client, monke
         "browser_act",
         "cli",
         "crawl4ai",
+        "doubao_research",
+        "douyin_detail",
         "opencli",
         "rss",
         "skill",
