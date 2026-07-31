@@ -37,7 +37,12 @@ random_hex() {
 
 random_fernet() {
   if command -v openssl >/dev/null 2>&1; then
-    openssl rand -base64 32 | tr '/+' '_-' | tr -d '\r\n'
+    raw="$(openssl rand -base64 32)" || return 1
+    if [ -z "$raw" ]; then
+      echo "openssl rand returned an empty encryption key" >&2
+      return 1
+    fi
+    printf '%s' "$raw" | tr '/+' '_-' | tr -d '\r\n'
   else
     docker run --rm python:3.13-alpine python -c \
       "import base64,secrets; print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"
@@ -57,10 +62,15 @@ replace_env() {
 
 api_token="$(random_hex 32)"
 bootstrap_token="$(random_hex 32)"
+credential_encryption_key="$(random_fernet)"
+if [ -z "$credential_encryption_key" ]; then
+  echo "Failed to generate CREDENTIAL_ENCRYPTION_KEY" >&2
+  exit 1
+fi
 replace_env API_AUTH_TOKEN "$api_token"
 replace_env BOOTSTRAP_ADMIN_TOKEN "$bootstrap_token"
 replace_env SECRET_KEY "$(random_hex 32)"
-replace_env CREDENTIAL_ENCRYPTION_KEY "$(random_fernet)"
+replace_env CREDENTIAL_ENCRYPTION_KEY "$credential_encryption_key"
 chmod 600 "$INSTALL_DIR/.env"
 
 cd "$INSTALL_DIR"

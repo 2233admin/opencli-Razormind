@@ -6,8 +6,16 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+function Assert-NativeSuccess([string]$Message) {
+    if ($LASTEXITCODE -ne 0) {
+        throw $Message
+    }
+}
+
 docker compose version | Out-Null
+Assert-NativeSuccess "Docker Compose is required."
 docker info | Out-Null
+Assert-NativeSuccess "Docker is not running."
 
 $resolvedInstallDir = [System.IO.Path]::GetFullPath($InstallDir)
 if (Test-Path -LiteralPath $resolvedInstallDir) {
@@ -25,7 +33,7 @@ $expanded = Join-Path $tempRoot "expanded"
 New-Item -ItemType Directory -Path $expanded | Out-Null
 
 try {
-    Invoke-WebRequest "https://github.com/$Repository/archive/refs/tags/v$Version.zip" -OutFile $archive
+    Invoke-WebRequest "https://github.com/$Repository/archive/refs/tags/v$Version.zip" -OutFile $archive -UseBasicParsing
     Expand-Archive -LiteralPath $archive -DestinationPath $expanded
     $sourceRoot = Get-ChildItem -LiteralPath $expanded -Directory | Select-Object -First 1
     if (-not $sourceRoot) {
@@ -80,12 +88,15 @@ Set-EnvValue "CREDENTIAL_ENCRYPTION_KEY" (New-FernetKey)
 Push-Location $resolvedInstallDir
 try {
     docker compose pull api frontend agent-1
+    Assert-NativeSuccess "Failed to pull OpenCLI Admin images."
     docker compose up -d
+    Assert-NativeSuccess "Failed to start OpenCLI Admin."
 
+    $frontendPort = if ($env:FRONTEND_PORT) { $env:FRONTEND_PORT } else { "3010" }
     $ready = $false
     for ($attempt = 0; $attempt -lt 60; $attempt++) {
         try {
-            Invoke-WebRequest "http://localhost:3010/login" -UseBasicParsing | Out-Null
+            Invoke-WebRequest "http://localhost:$frontendPort/login" -UseBasicParsing | Out-Null
             $ready = $true
             break
         } catch {
@@ -103,7 +114,7 @@ try {
 
 Write-Host ""
 Write-Host "OpenCLI Admin $Version is ready."
-Write-Host "URL: http://localhost:3010"
+Write-Host "URL: http://localhost:$frontendPort"
 Write-Host "BOOTSTRAP_ADMIN_TOKEN: $bootstrapToken"
 Write-Host "API_AUTH_TOKEN: $apiToken"
 Write-Host "Use BOOTSTRAP_ADMIN_TOKEN in the first login field and API_AUTH_TOKEN in the optional fleet field. Both are stored in $envPath"

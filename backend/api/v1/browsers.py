@@ -160,7 +160,7 @@ async def add_chrome_instance(
 
     pool = get_pool()
     project = _project_name()
-    novnc_base = int(os.environ.get("NOVNC_BASE_PORT", 3010))
+    novnc_base = int(os.environ.get("NOVNC_BASE_PORT", 6080))
     network = f"{project}_default"
     image = os.environ.get("CHROME_IMAGE", f"{project}-chrome")
     client = _docker_client()
