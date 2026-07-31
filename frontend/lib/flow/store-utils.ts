@@ -1,7 +1,9 @@
+import { customAlphabet } from "nanoid"
 import type { FlowSnapshot, FreehandStroke, WorkflowEdge, WorkflowNode } from "./types"
 import type { WorkflowProject, WorkflowProjectEdge, WorkflowProjectNode } from "../workflow/schema"
 
 export const HISTORY_LIMIT = 100
+export const workflowNodeId = customAlphabet("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz", 8)
 
 export type FlowNetworkStackEntry = { nodeId: string; label: string; snapshot: FlowSnapshot }
 export type FlowStoreSnapshot = FlowSnapshot & {

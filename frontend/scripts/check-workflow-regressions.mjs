@@ -91,6 +91,13 @@ function sourceSection(source, start, end) {
   return source.slice(startIndex, endIndex)
 }
 
+test('generated workflow node ids avoid reserved path separators', async () => {
+  const { workflowNodeId } = await importTypeScript('lib/flow/store-utils.ts')
+  for (let index = 0; index < 1_000; index += 1) {
+    assert.doesNotMatch(workflowNodeId(), /::|__/)
+  }
+})
+
 test('right workflow dock derives its outline from graph structure and opens without a selection', async () => {
   const [{ buildWorkflowOutlineRows }, shortcuts, inspector, shell, effects] = await Promise.all([
     importTypeScript('lib/workflow/workflow-outline.ts'),

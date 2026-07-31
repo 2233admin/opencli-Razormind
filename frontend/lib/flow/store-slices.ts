@@ -17,7 +17,7 @@ import {
   updateCanonicalNetworkScope,
   type CanonicalScopeId,
 } from "./store-canonical-actions"
-import { HISTORY_LIMIT, snapshot } from "./store-utils"
+import { HISTORY_LIMIT, snapshot, workflowNodeId } from "./store-utils"
 import { MAX_WORKFLOW_NODE_DEPTH } from "../workflow/node-hierarchy"
 import { parseWorkflowProject, type WorkflowProject, type WorkflowProjectNode } from "../workflow/schema"
 import type { WorkflowEdge, WorkflowNode } from "./types"
@@ -466,7 +466,7 @@ export function createSelectionActions(
 
       const newNodes = clipboard.nodes.map((n) => {
         const canonicalNode = canonicalByCanvasId.get(n.id)
-        const newLocalId = canonicalNode ? nanoid(8) : null
+        const newLocalId = canonicalNode ? workflowNodeId() : null
         const newId = newLocalId
           ? scopeId === null
             ? newLocalId

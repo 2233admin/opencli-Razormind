@@ -32,7 +32,7 @@ import {
   createSelectionActions,
   createWhiteboardActions,
 } from "./store-slices"
-import { snapshot } from "./store-utils"
+import { snapshot, workflowNodeId } from "./store-utils"
 import { PACKAGED_WORKFLOW_PROJECT } from "../workflow/collection-pipeline"
 import type { WorkflowProject } from "../workflow/schema"
 import { parseWorkflowProject, type AdapterBinding, type WorkflowProfile, type WorkflowProjectNode } from "../workflow/schema"
@@ -923,7 +923,7 @@ export const useFlowStore = create<FlowState>((set, get) => ({
   addPrimitiveNode: (item, position, runtimeCapability, options) => {
     if (!options?.suppressSnapshot) get().takeSnapshot()
     const { workflowProject, nodes, networkStack } = get()
-    const localId = `${item.idPrefix}-${nanoid(6)}`
+    const localId = `${item.idPrefix}-${workflowNodeId(6)}`
     const freePos = findFreePosition(nodes, position, { width: 196, height: 78 })
     const parentNetwork = networkStack.at(-1)
     const canonicalNode = canonicalNodeFromPrimitive(item, localId, freePos, runtimeCapability)
