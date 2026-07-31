@@ -1,5 +1,4 @@
-# Local build override: builds backend and agent images from source.
-# Frontend lives outside this clone; use C:\c\Users\Administrator\projects\open-cli-admin.
+# Local build override: builds the release images from this checkout.
 #
 # Usage:
 # docker compose -f docker-compose.yml -f docker-compose.build.yml up --build
@@ -22,7 +21,19 @@ x-agent-build: &agent-build
       # Set INSTALL_CHROME=true to embed Chromium + Xvfb (~1.2 GB), fully self-contained.
       INSTALL_CHROME: ${INSTALL_CHROME:-false}
 
+x-chrome-build: &chrome-build
+  build:
+    context: .
+    dockerfile: chrome/Dockerfile
+
 services:
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        BACKEND_URL: http://api:8000
+
   api:
     <<: *backend-build
 
@@ -33,7 +44,7 @@ services:
     <<: *backend-build
 
   agent-1:
-    <<: *agent-build
+    <<: *chrome-build
 
   # Remote edge agent: same image, same default (no embedded Chrome).
   agent:

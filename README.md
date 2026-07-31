@@ -1,6 +1,7 @@
 # OpenCLI Admin
 
-[![Docker](https://img.shields.io/badge/Docker%20Hub-0.3.6-blue?logo=docker)](https://hub.docker.com/u/2233admin)
+[![GitHub Release](https://img.shields.io/github/v/release/2233admin/opencli-admin)](https://github.com/2233admin/opencli-admin/releases)
+[![CI](https://github.com/2233admin/opencli-admin/actions/workflows/ci.yml/badge.svg)](https://github.com/2233admin/opencli-admin/actions/workflows/ci.yml)
 
 **现代化的数据采集系统** — 可视化管理多渠道数据采集，接入 [opencli](https://github.com/jackwener/opencli) 驱动国内外主流平台，支持 AI 处理、多节点分布式调度与实时通知推送。
 
@@ -51,7 +52,7 @@
 Mac Mini A（主控）              Mac Mini B                 Mac Mini C
 ┌──────────────────┐    WS     ┌─────────────────┐   WS  ┌─────────────────┐
 │ opencli-admin    │◄──────────│ opencli-agent   │       │ opencli-agent   │
-│ 管理界面 :8030   │◄──────────│ 登录：B站/小红书 │       │ 登录：Twitter/X │
+│ 管理界面 :3010   │◄──────────│ 登录：B站/小红书 │       │ 登录：Twitter/X │
 │ API :8031        │           │ 采集国内平台     │       │ 采集海外平台     │
 └──────────────────┘           └─────────────────┘       └─────────────────┘
 ```
@@ -81,10 +82,10 @@ B / C 两台用 Shell 脚本一键安装 Agent，WS 反向通道注册，穿透 
 ### 单机全能采集（最简部署）
 
 ```bash
-docker compose up -d   # 启动中心 + agent-1
+curl -fsSL https://raw.githubusercontent.com/2233admin/opencli-admin/v0.4.0/scripts/install.sh | sh
 ```
 
-在「节点管理」动态添加 agent-2、agent-3，各实例独立 Chrome Profile，支持同一平台多账号并行。
+安装完成后打开 `http://localhost:3010`，再打开 `http://localhost:6080` 进入内置浏览器扫码或登录平台账号。
 
 ---
 
@@ -149,7 +150,7 @@ ACCEPTANCE: PASS
 
 ## 快速开始
 
-### 方式零：前后端本地开发（推荐）
+### 方式零：前后端本地开发
 
 新前端在仓库内 `frontend/` 下开发和构建：
 
@@ -182,10 +183,9 @@ cp .env.example .env
 
 | 服务 | 地址 |
 |------|------|
-| 管理界面 | http://localhost:8030 |
 | API 文档 | http://localhost:8031/docs |
 
-脚本自动创建 venv、安装依赖、初始化数据库、启动 Chrome CDP、后端热重载、前端 HMR。
+`start.sh` 启动后端与 Chrome；前端另开终端运行 `npm run dev:frontend`。
 
 ```bash
 ./start.sh --no-chrome      # 跳过 Chrome（RSS/API 渠道不需要）
@@ -200,38 +200,40 @@ cp .env.example .env
 
 **前置要求**：Docker & Docker Compose
 
-> **Agent 镜像两个变体**：
-> - `opencli-admin-agent:0.3.6` — 默认，约 100 MB，通过 `host.docker.internal` 连接宿主机 Chrome
-> - `opencli-admin-agent:0.3.6-chrome` — 约 450 MB，内置 Chromium，完全自包含
-
-**启动宿主机 Chrome**（若使用默认无 Chrome 变体）：
+Linux / macOS：
 
 ```bash
-# macOS
-/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome \
-    --remote-debugging-port=9222 --remote-debugging-address=0.0.0.0 \
-    --no-first-run --no-default-browser-check &
-
+curl -fsSL https://raw.githubusercontent.com/2233admin/opencli-admin/v0.4.0/scripts/install.sh | sh
 ```
 
+Windows PowerShell：
+
+```powershell
+Invoke-WebRequest https://raw.githubusercontent.com/2233admin/opencli-admin/v0.4.0/scripts/install.ps1 -OutFile install.ps1
+.\install.ps1
+```
+
+安装器会生成安全密钥、拉取公开 GHCR 镜像并等待健康检查通过。终端会打印首次登录用的 `BOOTSTRAP_ADMIN_TOKEN` 和边缘节点用的 `API_AUTH_TOKEN`。
+
+从源码构建：
+
 ```bash
-cp .env.example .env
-docker compose up -d
+cp .env.docker.example .env
+# 填写 API_AUTH_TOKEN、BOOTSTRAP_ADMIN_TOKEN、SECRET_KEY、CREDENTIAL_ENCRYPTION_KEY
+docker compose -f docker-compose.yml -f docker-compose.build.yml up --build -d
 ```
 
 | 服务 | 地址 |
 |------|------|
-| 管理界面 | http://localhost:8030 |
+| 管理界面 | http://localhost:3010 |
 | API 文档 | http://localhost:8031/docs |
-| Agent noVNC | http://localhost:3010 |
-
-默认 Compose 会从仓库内构建前端。后端和 agent 默认仍可使用已发布镜像；如需全部从源码构建：
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.build.yml up --build -d
-```
+| 内置浏览器 / 扫码登录 | http://localhost:6080 |
 
 **停止**：`docker compose down`
+
+公开镜像只包含 OpenCLI 核心能力，不会隐式下载组织私有适配包；需要额外适配包时必须显式提供经过审计的仓库。
+
+首次打开管理界面时，在“管理员身份令牌”中输入 `BOOTSTRAP_ADMIN_TOKEN`；“Fleet API 令牌”中输入 `API_AUTH_TOKEN`，用于调用受保护的采集与节点接口。
 
 ---
 
@@ -242,8 +244,8 @@ opencli 渠道依赖浏览器登录态，首次使用需手动登录各平台账
 | 启动方式 | 操作 |
 |----------|------|
 | 原生 Shell | 脚本启动后在 Chrome 窗口中登录。登录态保存在 `~/.opencli-admin/chrome-profile/` |
-| Docker 单实例 | 打开 http://localhost:3010（noVNC）在界面中登录 |
-| Docker 多实例 | 各实例独立 Profile，分别登录。agent-2 → :3011，agent-3 → :3012 |
+| Docker 单实例 | 打开 http://localhost:6080，在内置 Chromium 中扫码或登录 |
+| 远程服务器 | 先执行 `ssh -L 6080:127.0.0.1:6080 user@server`，再访问本机 `http://localhost:6080` |
 
 > 需要登录：小红书、Bilibili、知乎、微博、Twitter/X、LinkedIn、YouTube。Hacker News、BBC、RSS 等公开内容无需登录。
 
@@ -268,31 +270,36 @@ opencli 渠道依赖浏览器登录态，首次使用需手动登录各平台账
 # WS 模式（NAT / 跨网）
 docker run -d --name opencli-agent --restart unless-stopped \
   --add-host=host.docker.internal:host-gateway \
-  -e CENTRAL_API_URL=http://<center-ip>:8030 \
+  -e CENTRAL_API_URL=http://<center-ip>:8031 \
   -e AGENT_REGISTER=ws -e AGENT_MODE=bridge \
+  -e AGENT_API_TOKEN=<API_AUTH_TOKEN> \
   -p 19823:19823 \
-  2233admin/opencli-admin-agent:0.3.6
+  ghcr.io/2233admin/opencli-admin-agent:0.4.0
 
 # HTTP 模式（局域网）
 docker run -d --name opencli-agent --restart unless-stopped \
   --add-host=host.docker.internal:host-gateway \
-  -e CENTRAL_API_URL=http://<center-ip>:8030 \
+  -e CENTRAL_API_URL=http://<center-ip>:8031 \
   -e AGENT_REGISTER=http -e AGENT_MODE=bridge \
+  -e AGENT_API_TOKEN=<API_AUTH_TOKEN> \
   -p 19823:19823 \
-  2233admin/opencli-admin-agent:0.3.6
+  ghcr.io/2233admin/opencli-admin-agent:0.4.0
 ```
 
 **一键脚本安装**
 
 ```bash
 # Docker 安装（无 Chrome 镜像）
-curl -fsSL http://<center>:8030/api/v1/nodes/install/agent.sh | bash
+curl -fsSL -H "Authorization: Bearer $API_AUTH_TOKEN" \
+  http://<center>:8031/api/v1/nodes/install/agent.sh | bash
 
 # Docker 安装，含 Chrome（无需宿主机 Chrome）
-curl -fsSL http://<center>:8030/api/v1/nodes/install/agent.sh | bash -s -- docker --install-chrome
+curl -fsSL -H "Authorization: Bearer $API_AUTH_TOKEN" \
+  http://<center>:8031/api/v1/nodes/install/agent.sh | bash -s -- docker --install-chrome
 
 # Shell 安装（无 Docker 环境）
-curl -fsSL http://<center>:8030/api/v1/nodes/install/agent.sh | \
+curl -fsSL -H "Authorization: Bearer $API_AUTH_TOKEN" \
+  http://<center>:8031/api/v1/nodes/install/agent.sh | \
   AGENT_REGISTER=ws AGENT_MODE=bridge bash -s -- python
 ```
 
@@ -469,48 +476,13 @@ AI 处理（可选）— Claude · OpenAI · DeepSeek · Kimi · GLM · Ollama
 
 ## 发布镜像
 
-构建并推送 amd64 + arm64 多平台镜像（需要 `multiarch` buildx builder）：
+推送 `v*` 标签后，GitHub Actions 自动构建 amd64 / arm64 镜像并创建 GitHub Release：
 
-```bash
-TAG=0.3.6
-
-# API（将 IMAGE_TAG 烘焙进镜像，供安装脚本动态注入版本号）
-docker buildx build --builder multiarch \
-  --platform linux/amd64,linux/arm64 \
-  --build-arg IMAGE_TAG=${TAG} \
-  -t 2233admin/opencli-admin-api:${TAG} --push .
-
-# Agent 基础版（~100 MB，通过宿主机 Chrome 连接）
-docker buildx build --builder multiarch \
-  --platform linux/amd64,linux/arm64 \
-  -f agent/Dockerfile \
-  -t 2233admin/opencli-admin-agent:${TAG} --push .
-
-# Agent 内置 Chrome 版（~450 MB，完全自包含）
-docker buildx build --builder multiarch \
-  --platform linux/amd64,linux/arm64 \
-  -f agent/Dockerfile \
-  --build-arg INSTALL_CHROME=true \
-  -t 2233admin/opencli-admin-agent:${TAG}-chrome --push .
-```
-
-如需并行构建所有镜像：
-
-```bash
-TAG=0.3.6
-docker buildx build --builder multiarch --platform linux/amd64,linux/arm64 \
-  --build-arg IMAGE_TAG=${TAG} \
-  -t 2233admin/opencli-admin-api:${TAG} --push . > /tmp/build-api.log 2>&1 &
-docker buildx build --builder multiarch --platform linux/amd64,linux/arm64 \
-  -f agent/Dockerfile \
-  -t 2233admin/opencli-admin-agent:${TAG} --push . > /tmp/build-agent.log 2>&1 &
-docker buildx build --builder multiarch --platform linux/amd64,linux/arm64 \
-  -f agent/Dockerfile --build-arg INSTALL_CHROME=true \
-  -t 2233admin/opencli-admin-agent:${TAG}-chrome --push . > /tmp/build-agent-chrome.log 2>&1 &
-wait && echo "done"
-```
-
-> 首次使用需创建 builder：`docker buildx create --name multiarch --use`
+- `ghcr.io/2233admin/opencli-admin-api:0.4.0`
+- `ghcr.io/2233admin/opencli-admin-frontend:0.4.0`
+- `ghcr.io/2233admin/opencli-admin-chrome:0.4.0`
+- `ghcr.io/2233admin/opencli-admin-agent:0.4.0`
+- `ghcr.io/2233admin/opencli-admin-agent:0.4.0-chrome`
 
 ## License
 

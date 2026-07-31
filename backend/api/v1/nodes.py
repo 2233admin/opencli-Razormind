@@ -687,7 +687,7 @@ install_docker() {{
     -e AGENT_LABEL="$AGENT_LABEL" -e AGENT_MODE="cdp" \\
     -e AGENT_API_TOKEN="$AGENT_API_TOKEN" \\
     $PROXY_ARGS -p "${{AGENT_PORT}}:${{AGENT_PORT}}" \\
-    "xjh1994/opencli-admin-agent:${{IMAGE_TAG}}"
+    "ghcr.io/2233admin/opencli-admin-agent:${{IMAGE_TAG}}"
   info "Agent container started!"
 }}
 

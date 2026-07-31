@@ -160,7 +160,7 @@ async def test_registered_anonymous_profile_is_visible_in_pool_inventory(client)
         {
             "url": "http://clean-agent:19823",
             "available": True,
-            "novnc_port": 3010,
+            "novnc_port": 6080,
             "container_status": "running",
             "mode": "cdp",
             "agent_url": "http://clean-agent:19823",

@@ -2,7 +2,8 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$CentralApiUrl,
     [string]$ApiAuthToken = "",
-    [string]$OhMyOpenCliRepo = "https://github.com/2233admin/OhMyOpenCLI.git",
+    [Parameter(Mandatory = $true)]
+    [string]$OhMyOpenCliRepo,
     [string]$OhMyOpenCliRoot = "$env:LOCALAPPDATA\opencli-admin\OhMyOpenCLI"
 )
 

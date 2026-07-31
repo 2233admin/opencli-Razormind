@@ -122,7 +122,7 @@ class Settings(BaseSettings):
     agent_pool_endpoints: str = ""
     # noVNC base port for the first agent instance (agent-1). Additional
     # instances use base+1, base+2, …  Matches docker-compose NOVNC_PORT.
-    novnc_base_port: int = 3010
+    novnc_base_port: int = 6080
 
     @property
     def cdp_endpoints(self) -> list[str]:

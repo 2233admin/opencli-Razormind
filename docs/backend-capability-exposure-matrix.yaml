@@ -1,6 +1,6 @@
 version: 1
 source: backend.main.app.openapi
-openapi_operation_count: 224
+openapi_operation_count: 231
 allowed_dispositions:
 - operator_ui
 - studio_binding
@@ -2254,7 +2254,75 @@ operations:
   decision: Expose only attested image models inside the Workflow Image Studio.
   target_epic: Epic 8
   capability_id: studio.workflow
+- method: GET
+  path: /api/v1/workspaces/{workspace_id}/operations-agents/{agent_id}/draft
+  operation_id: get_agent_draft_api_v1_workspaces__workspace_id__operations_agents__agent_id__draft_get
+  disposition: operator_ui
+  frontend_route: /operations-agents
+  wrapper: getOperationsAgentDraft
+  decision: Load the editable Operations Agent contract in the operator UI.
+  target_epic: Epic 8
+  capability_id: operator.workspace-governance
+- method: GET
+  path: /api/v1/workspaces/{workspace_id}/operations-agents/{agent_id}/versions
+  operation_id: list_agent_versions_api_v1_workspaces__workspace_id__operations_agents__agent_id__versions_get
+  disposition: operator_ui
+  frontend_route: /operations-agents
+  wrapper: listOperationsAgentVersions
+  decision: List published Operations Agent versions in the operator UI.
+  target_epic: Epic 8
+  capability_id: operator.workspace-governance
+- method: GET
+  path: /api/v1/workspaces/{workspace_id}/operations-agents/{agent_id}/versions/{version_number}
+  operation_id: get_agent_version_api_v1_workspaces__workspace_id__operations_agents__agent_id__versions__version_number__get
+  disposition: operator_ui
+  frontend_route: /operations-agents
+  wrapper: getOperationsAgentVersion
+  decision: Keep version detail available for operator comparison and rollback.
+  target_epic: Epic 8
+  capability_id: operator.workspace-governance
+- method: GET
+  path: /api/v1/workspaces/{workspace_id}/projects/{project_id}/runtime-logs
+  operation_id: list_project_runtime_logs_api_v1_workspaces__workspace_id__projects__project_id__runtime_logs_get
+  disposition: studio_binding
+  frontend_route: /studio/projects/[projectId]/operations
+  wrapper: listProjectRuntimeLogs
+  decision: Project runtime logs back the Studio operations view.
+  target_epic: Epic 8
+  capability_id: studio.workflow
+- method: GET
+  path: /api/v1/workspaces/{workspace_id}/projects/{project_id}/runtime-summary
+  operation_id: get_project_runtime_summary_api_v1_workspaces__workspace_id__projects__project_id__runtime_summary_get
+  disposition: studio_binding
+  frontend_route: /studio/projects/[projectId]/operations
+  wrapper: getProjectRuntimeSummary
+  decision: Project runtime summary backs the Studio operations view.
+  target_epic: Epic 8
+  capability_id: studio.workflow
+- method: GET
+  path: /api/v1/workspaces/{workspace_id}/projects/{project_id}/workflows/{workflow_id}/runs/{run_id}/trace
+  operation_id: get_project_runtime_trace_api_v1_workspaces__workspace_id__projects__project_id__workflows__workflow_id__runs__run_id__trace_get
+  disposition: studio_binding
+  frontend_route: /studio/projects/[projectId]/operations
+  wrapper: getProjectRuntimeTrace
+  decision: Runtime traces back project-scoped Studio run inspection.
+  target_epic: Epic 8
+  capability_id: studio.workflow
+- method: POST
+  path: /api/v1/workspaces/{workspace_id}/projects/{project_id}/workflows/{workflow_id}/runs
+  operation_id: start_published_workflow_run_api_v1_workspaces__workspace_id__projects__project_id__workflows__workflow_id__runs_post
+  disposition: studio_binding
+  frontend_route: /studio/workflow
+  wrapper: null
+  decision: Start only published project workflows through the Studio runtime boundary.
+  target_epic: Epic 8
+  capability_id: studio.workflow
 unreferenced_wrappers:
+- wrapper: getOperationsAgentVersion
+  operation_id: get_agent_version_api_v1_workspaces__workspace_id__operations_agents__agent_id__versions__version_number__get
+  disposition: operator_ui
+  target_epic: Epic 8
+  decision: Retain for version comparison and rollback detail once the UI exposes it.
 - wrapper: getWorkspaceSettings
   operation_id: null
   disposition: retire

@@ -162,7 +162,7 @@ async def add_chrome_instance(
     project = _project_name()
     novnc_base = int(os.environ.get("NOVNC_BASE_PORT", 3010))
     network = f"{project}_default"
-    image = f"{project}-chrome"
+    image = os.environ.get("CHROME_IMAGE", f"{project}-chrome")
     client = _docker_client()
 
     created: list[dict] = []
@@ -189,7 +189,7 @@ async def add_chrome_instance(
                     name=name,
                     network=network,
                     labels={"agent.pool.extra": "true", "agent.pool.index": str(N)},
-                    ports={"6080/tcp": novnc_port},
+                    ports={"6080/tcp": ("127.0.0.1", novnc_port)},
                     volumes={volume: {"bind": "/home/chrome/.config/chromium", "mode": "rw"}},
                     restart_policy={"Name": "unless-stopped"},
                 )

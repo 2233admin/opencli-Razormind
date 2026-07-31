@@ -29,6 +29,7 @@
 #   NETBIRD_SETUP_KEY  Setup key used to enroll this node into NetBird
 #   NETBIRD_MANAGEMENT_URL Self-hosted NetBird management URL (optional)
 #   NETBIRD_IMAGE_TAG  NetBird Docker image tag (default: latest)
+#   OHMYOPENCLI_REPO   Optional audited adapter-pack repository for Python installs
 # ─────────────────────────────────────────────────────────────────────────────
 
 set -euo pipefail
@@ -51,7 +52,7 @@ AGENT_MODE="${AGENT_MODE:-cdp}"
 IMAGE_TAG="${IMAGE_TAG:-__IMAGE_TAG__}"
 INSTALL_CHROME="${INSTALL_CHROME:-false}"
 OPENCLI_BROWSER_PROFILE_KIND="${OPENCLI_BROWSER_PROFILE_KIND:-authenticated}"
-OHMYOPENCLI_REPO="${OHMYOPENCLI_REPO:-https://github.com/2233admin/OhMyOpenCLI.git}"
+OHMYOPENCLI_REPO="${OHMYOPENCLI_REPO:-}"
 INSTALL_MODE="${1:-docker}"
 
 [[ "$CENTRAL_API_URL" == "__CENTRAL_API_URL__" ]] && CENTRAL_API_URL=""
@@ -81,7 +82,7 @@ if [[ "$INSTALL_CHROME" == "true" ]]; then
 else
   CHROME_SUFFIX=""
 fi
-AGENT_IMAGE="${DOCKER_IMAGE_NAMESPACE:-2233admin}/opencli-admin-agent:${IMAGE_TAG}${CHROME_SUFFIX}"
+AGENT_IMAGE="${DOCKER_REGISTRY:-ghcr.io/}${DOCKER_IMAGE_NAMESPACE:-2233admin}/opencli-admin-agent:${IMAGE_TAG}${CHROME_SUFFIX}"
 
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -331,18 +332,21 @@ install_python() {
     warn "  Install Node.js 22+ from https://nodejs.org then run: npm install -g @jackwener/opencli@1.8.5"
   fi
 
-  # Install the exact project-owned managed-acquisition capability package.
-  OHMYOPENCLI_ROOT="$AGENT_DIR/ohmyopencli"
-  OHMYOPENCLI_COMMIT="73cc60c83586ef2c95469b3b70d6cfc80fa5bc53"
-  OFFICIAL_SITE_CAPABILITY_COMMIT="73cc60c83586ef2c95469b3b70d6cfc80fa5bc53"
-  command -v git >/dev/null 2>&1 || die "git is required to install OhMyOpenCLI"
-  [[ -e "$OHMYOPENCLI_ROOT" ]] && die \
-    "Managed OhMyOpenCLI target already exists; archive it explicitly before reinstalling: $OHMYOPENCLI_ROOT"
-  git clone "$OHMYOPENCLI_REPO" "$OHMYOPENCLI_ROOT"
-  git -C "$OHMYOPENCLI_ROOT" checkout --detach "$OHMYOPENCLI_COMMIT"
-  git -C "$OHMYOPENCLI_ROOT" merge-base --is-ancestor \
-    "$OFFICIAL_SITE_CAPABILITY_COMMIT" HEAD
-  (cd "$OHMYOPENCLI_ROOT" && npm ci && npm run bootstrap)
+  # Organization-specific adapter packs are optional and never fetched implicitly.
+  OHMYOPENCLI_ROOT=""
+  if [[ -n "$OHMYOPENCLI_REPO" ]]; then
+    OHMYOPENCLI_ROOT="$AGENT_DIR/ohmyopencli"
+    OHMYOPENCLI_COMMIT="${OHMYOPENCLI_COMMIT:-73cc60c83586ef2c95469b3b70d6cfc80fa5bc53}"
+    OFFICIAL_SITE_CAPABILITY_COMMIT="${OFFICIAL_SITE_CAPABILITY_COMMIT:-$OHMYOPENCLI_COMMIT}"
+    command -v git >/dev/null 2>&1 || die "git is required to install the adapter pack"
+    [[ -e "$OHMYOPENCLI_ROOT" ]] && die \
+      "Adapter-pack target already exists; archive it explicitly before reinstalling: $OHMYOPENCLI_ROOT"
+    git clone "$OHMYOPENCLI_REPO" "$OHMYOPENCLI_ROOT"
+    git -C "$OHMYOPENCLI_ROOT" checkout --detach "$OHMYOPENCLI_COMMIT"
+    git -C "$OHMYOPENCLI_ROOT" merge-base --is-ancestor \
+      "$OFFICIAL_SITE_CAPABILITY_COMMIT" HEAD
+    (cd "$OHMYOPENCLI_ROOT" && npm ci && npm run bootstrap)
+  fi
 
   # ── Find Chrome binary ────────────────────────────────────────────────────
   find_chrome() {
@@ -432,7 +436,7 @@ Environment=AGENT_LABEL=${AGENT_LABEL}
 Environment=AGENT_MODE=${AGENT_MODE}
 Environment=AGENT_API_TOKEN=${AGENT_API_TOKEN}
 Environment=AGENT_DEPLOY_TYPE=shell
-Environment=OHMYOPENCLI_ROOT=${OHMYOPENCLI_ROOT}
+$([ -n "$OHMYOPENCLI_ROOT" ] && echo "Environment=OHMYOPENCLI_ROOT=${OHMYOPENCLI_ROOT}")
 Environment=OPENCLI_BROWSER_PROFILE_KIND=${OPENCLI_BROWSER_PROFILE_KIND}
 $([ -n "${OPENCLI_CDP_ENDPOINT:-}" ] && echo "Environment=OPENCLI_CDP_ENDPOINT=${OPENCLI_CDP_ENDPOINT}")
 $([ -n "${HTTP_PROXY:-}" ]  && echo "Environment=HTTP_PROXY=${HTTP_PROXY}")
@@ -452,7 +456,8 @@ EOF
       export CENTRAL_API_URL AGENT_REGISTER AGENT_PORT AGENT_ADVERTISE_URL AGENT_LABEL AGENT_MODE
       export AGENT_API_TOKEN
       export AGENT_DEPLOY_TYPE=shell
-      export OHMYOPENCLI_ROOT OPENCLI_BROWSER_PROFILE_KIND
+      export OPENCLI_BROWSER_PROFILE_KIND
+      [[ -n "$OHMYOPENCLI_ROOT" ]] && export OHMYOPENCLI_ROOT
       [[ -n "${OPENCLI_CDP_ENDPOINT:-}" ]] && export OPENCLI_CDP_ENDPOINT
       [[ -n "${HTTP_PROXY:-}" ]]  && export HTTP_PROXY
       [[ -n "${HTTPS_PROXY:-}" ]] && export HTTPS_PROXY

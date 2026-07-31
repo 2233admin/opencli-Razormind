@@ -4,10 +4,6 @@ FROM ${REGISTRY}python:3.13-slim AS builder
 
 WORKDIR /app
 
-# Switch to Aliyun apt mirror for faster downloads in China
-RUN sed -i 's|http://deb.debian.org|http://mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources 2>/dev/null || \
-    sed -i 's|http://deb.debian.org|http://mirrors.aliyun.com|g' /etc/apt/sources.list 2>/dev/null || true
-
 # Install build deps
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc libpq-dev \
@@ -15,18 +11,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Install Python deps into a prefix so we can copy them cleanly
 COPY pyproject.toml .
-RUN pip install --upgrade pip -i https://mirrors.aliyun.com/pypi/simple/ && \
-    pip install --prefix=/install . -i https://mirrors.aliyun.com/pypi/simple/
+RUN pip install --upgrade pip \
+    && pip install --prefix=/install .
 
 # ── Stage 2: runtime ──────────────────────────────────────────────────────────
 ARG REGISTRY=
 FROM ${REGISTRY}python:3.13-slim AS runtime
 
 WORKDIR /app
-
-# Switch to Aliyun apt mirror for faster downloads in China
-RUN sed -i 's|http://deb.debian.org|http://mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources 2>/dev/null || \
-    sed -i 's|http://deb.debian.org|http://mirrors.aliyun.com|g' /etc/apt/sources.list 2>/dev/null || true
 
 # Runtime system deps (psycopg2 needs libpq, opencli needs Node.js 22+)
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -44,23 +36,13 @@ RUN npm install -g @jackwener/opencli@${OPENCLI_VERSION} \
     && rm /tmp/patch-opencli.js \
     && rm -rf /root/.npm
 
-ARG OHMYOPENCLI_REPO=https://github.com/2233admin/OhMyOpenCLI.git
-ARG OHMYOPENCLI_COMMIT=73cc60c83586ef2c95469b3b70d6cfc80fa5bc53
-ARG OFFICIAL_SITE_CAPABILITY_COMMIT=73cc60c83586ef2c95469b3b70d6cfc80fa5bc53
-RUN git clone ${OHMYOPENCLI_REPO} /opt/ohmyopencli \
-    && cd /opt/ohmyopencli \
-    && git checkout --detach ${OHMYOPENCLI_COMMIT} \
-    && git merge-base --is-ancestor ${OFFICIAL_SITE_CAPABILITY_COMMIT} HEAD \
-    && npm ci \
-    && test "$(git rev-parse HEAD)" = "${OHMYOPENCLI_COMMIT}"
-
 # Copy installed packages from builder
 COPY --from=builder /install /usr/local
 
 # Copy application source
 COPY backend/ ./backend/
 COPY scripts/patch-opencli.js ./scripts/patch-opencli.js
-COPY scripts/verify_managed_opencli_runtime.py ./scripts/verify_managed_opencli_runtime.py
+COPY scripts/install-agent.sh ./scripts/install-agent.sh
 COPY alembic.ini .
 
 # Entrypoint handles migrations
@@ -70,16 +52,12 @@ RUN sed -i 's/\r$//' /entrypoint.sh && chmod +x /entrypoint.sh
 # Non-root user for security; pre-create /data so the SQLite volume is writable
 RUN useradd -m -u 1000 appuser && \
     mkdir -p /data && \
-    chown -R appuser:appuser /app /data /opt/ohmyopencli \
-    && cd /opt/ohmyopencli \
-    && HOME=/home/appuser npm run bootstrap \
-    && chown -R appuser:appuser /home/appuser/.opencli /opt/ohmyopencli
+    chown -R appuser:appuser /app /data
 USER appuser
 
 ENV PYTHONPATH=/app \
     PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    OHMYOPENCLI_ROOT=/opt/ohmyopencli
+    PYTHONUNBUFFERED=1
 # Bake the image tag so the system config API can serve it to clients.
 ARG IMAGE_TAG=latest
 ENV IMAGE_TAG=${IMAGE_TAG}

@@ -12,7 +12,7 @@ const eslintConfig = [
     },
   },
   {
-    ignores: [".next/**", "dist/**", "node_modules/**", "tsconfig.tsbuildinfo"],
+    ignores: [".next*/**", "dist/**", "node_modules/**", "tsconfig.tsbuildinfo"],
   },
 ]
 

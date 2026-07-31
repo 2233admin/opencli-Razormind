@@ -1,12 +1,11 @@
 # Shared backend config (DRY)
 x-backend-common: &backend-common
-  image: ${DOCKER_REGISTRY:-docker.io/}${DOCKER_IMAGE_NAMESPACE:-2233admin}/opencli-admin-api:${IMAGE_TAG:-0.3.6}
+  image: ${DOCKER_REGISTRY:-ghcr.io/}${DOCKER_IMAGE_NAMESPACE:-2233admin}/opencli-admin-api:${IMAGE_TAG:-0.4.0}
   env_file:
     - path: .env
       required: false
   volumes:
     - db_data:/data
-    - ./backend:/app/backend
   restart: unless-stopped
 
 services:
@@ -155,23 +154,26 @@ services:
       REDIS_URL: redis://redis:6379/0
       DEBUG: ${DEBUG:-false}
       SECRET_KEY: ${SECRET_KEY:-change-me-in-production}
-      API_AUTH_TOKEN: ${API_AUTH_TOKEN:-}
+      API_AUTH_TOKEN: ${API_AUTH_TOKEN:?Set API_AUTH_TOKEN in .env or run scripts/install.sh}
+      BOOTSTRAP_ADMIN_TOKEN: ${BOOTSTRAP_ADMIN_TOKEN:?Set BOOTSTRAP_ADMIN_TOKEN in .env or run scripts/install.sh}
       OPENCLI_MCP_ALLOWED_HOSTS: ${OPENCLI_MCP_ALLOWED_HOSTS:-}
       OPENCLI_MCP_ALLOWED_ORIGINS: ${OPENCLI_MCP_ALLOWED_ORIGINS:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      # Built-in sidecar agent URL (Chrome + agent_server in one container).
+      # Built-in interactive browser endpoint.
       # For COLLECTION_MODE=local this is pre-loaded into the browser pool.
-      OPENCLI_CDP_ENDPOINT: ${OPENCLI_CDP_ENDPOINT:-http://agent-1:19823}
+      OPENCLI_CDP_ENDPOINT: ${OPENCLI_CDP_ENDPOINT:-http://agent-1:19222}
       # Multi-instance pool: overrides OPENCLI_CDP_ENDPOINT when set
       AGENT_POOL_ENDPOINTS: ${AGENT_POOL_ENDPOINTS:-}
-      # Collection mode: "local" (default, built-in agent-1) or "agent" (distributed edge nodes)
+      # Collection mode: "local" (default browser) or "agent" (distributed edge nodes)
       COLLECTION_MODE: ${COLLECTION_MODE:-local}
       # Public-facing URL for install scripts and agent registration links.
       # Set to the URL remote agents will use to reach this center (e.g. http://192.168.1.1:8031).
       PUBLIC_URL: ${PUBLIC_URL:-}
       # Passed to the agent pool manager so it can name containers/networks correctly
       COMPOSE_PROJECT_NAME: ${COMPOSE_PROJECT_NAME:-opencli-admin}
+      CHROME_IMAGE: ${DOCKER_REGISTRY:-ghcr.io/}${DOCKER_IMAGE_NAMESPACE:-2233admin}/opencli-admin-chrome:${IMAGE_TAG:-0.4.0}
+      NOVNC_BASE_PORT: ${NOVNC_BASE_PORT:-6080}
       # NAS + III: cron 由 III schedule-bootstrap 驱动，API 不再跑内置 scheduler
       COLLECTION_ORCHESTRATOR: ${COLLECTION_ORCHESTRATOR:-admin}
       ODP_INGEST_URL: ${ODP_INGEST_URL:-}
@@ -184,11 +186,8 @@ services:
       IMAGE_ASSET_STORAGE_PATH: /data/image-studio/assets
     volumes:
       - db_data:/data
-      - ./backend:/app/backend
       # Docker socket: lets the API start/stop agent pool containers
       - /var/run/docker.sock:/var/run/docker.sock
-      # .env mount: lets the API persist AGENT_POOL_ENDPOINTS after pool changes
-      - ./.env:/app/.env:rw
     ports:
       - "${API_PORT:-8031}:8000"
     networks:
@@ -202,6 +201,31 @@ services:
       timeout: 5s
       retries: 5
       start_period: 20s
+    depends_on:
+      agent-1:
+        condition: service_healthy
+
+  # ── Next.js operator console ─────────────────────────────────────────────
+  frontend:
+    image: ${DOCKER_REGISTRY:-ghcr.io/}${DOCKER_IMAGE_NAMESPACE:-2233admin}/opencli-admin-frontend:${IMAGE_TAG:-0.4.0}
+    environment:
+      BACKEND_URL: http://api:8000
+    ports:
+      - "${FRONTEND_PORT:-3010}:3010"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://localhost:3010/login').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+    restart: unless-stopped
 
   # ── Celery Worker (only needed for TASK_EXECUTOR=celery) ─────────────────
   worker:
@@ -218,7 +242,7 @@ services:
       API_AUTH_TOKEN: ${API_AUTH_TOKEN:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      OPENCLI_CDP_ENDPOINT: ${OPENCLI_CDP_ENDPOINT:-http://agent-1:19823}
+      OPENCLI_CDP_ENDPOINT: ${OPENCLI_CDP_ENDPOINT:-http://agent-1:19222}
       AGENT_POOL_ENDPOINTS: ${AGENT_POOL_ENDPOINTS:-}
       KATS_RUNTIME_URL: ${KATS_RUNTIME_URL:-http://kats-runtime:8096}
       INVOKEAI_ENABLED: ${INVOKEAI_ENABLED:-false}
@@ -241,7 +265,9 @@ services:
   # upgrades require the upstream/API/schema/GPU gates in ADR-0026.
   invokeai:
     profiles: ["image-studio"]
-    image: ${INVOKEAI_ATTESTED_IMAGE:?Set an image built from the approved InvokeAI commit as repository@sha256:digest}
+    # Deliberately invalid fallback: default Compose remains parseable, while
+    # starting this profile still requires an explicitly attested image.
+    image: ${INVOKEAI_ATTESTED_IMAGE:-invalid.invalid/opencli/invokeai-attested-image-required@sha256:0000000000000000000000000000000000000000000000000000000000000000}
     read_only: true
     security_opt:
       - no-new-privileges:true
@@ -281,49 +307,25 @@ services:
       api:
         condition: service_healthy
 
-  # ── Built-in agent sidecar ────────────────────────────────────────────────────
-  # Default single instance — always started (local collection mode uses this).
-  # Chrome is NOT embedded in the image (~200 MB). The agent connects to Chrome
-  # running on the Docker host via host.docker.internal.
-  #
-  # Before starting, ensure Chrome is running on the host with CDP enabled:
-  #   • macOS/Linux: open -a "Google Chrome" --args --remote-debugging-port=9222
-  #   • Or start the Bridge daemon: node $(npm root -g)/@jackwener/opencli/dist/daemon.js
+  # ── Built-in interactive browser ─────────────────────────────────────────
+  # noVNC is loopback-only by default; use an SSH tunnel for remote servers.
   agent-1:
-    image: ${DOCKER_REGISTRY:-docker.io/}${DOCKER_IMAGE_NAMESPACE:-2233admin}/opencli-admin-agent:${IMAGE_TAG:-0.3.6}${CHROME_SUFFIX:-}
+    image: ${DOCKER_REGISTRY:-ghcr.io/}${DOCKER_IMAGE_NAMESPACE:-2233admin}/opencli-admin-chrome:${IMAGE_TAG:-0.4.0}
     environment:
-      CENTRAL_API_URL: http://api:8000
-      # Use container name so the API can reach this agent by DNS within the Docker network
-      AGENT_ADVERTISE_URL: http://agent-1:19823
-      AGENT_PORT: 19823
-      # Chrome connection mode: bridge | cdp (override in .env)
-      AGENT_MODE: ${AGENT_MODE:-bridge}
-      AGENT_DEPLOY_TYPE: docker
-      AGENT_LABEL: agent-1
-      # Host Chrome endpoints — agent connects to Chrome running on the Docker host
-      # bridge mode: daemon on host
-      OPENCLI_DAEMON_HOST: host.docker.internal
-      OPENCLI_DAEMON_PORT: ${OPENCLI_DAEMON_PORT:-19825}
-      # cdp mode: Chrome DevTools Protocol on host
-      OPENCLI_CDP_ENDPOINT: ${OPENCLI_CDP_ENDPOINT:-http://host.docker.internal:9222}
-      OPENCLI_TIMEOUT: ${OPENCLI_TIMEOUT:-120}
-      API_AUTH_TOKEN: ${API_AUTH_TOKEN:-}
-      AGENT_API_TOKEN: ${AGENT_API_TOKEN:-}
-      HTTP_PROXY: ${HTTP_PROXY:-}
-      HTTPS_PROXY: ${HTTPS_PROXY:-}
-    extra_hosts:
-      # Make host.docker.internal resolve to the host on Linux (already works on macOS/Windows)
-      - "host.docker.internal:host-gateway"
+      CHROME_HOSTNAME: agent-1
     volumes:
-      - agent_profile_1:/home/agent/.config/chromium
+      - agent_profile_1:/home/chrome/.config/chromium
     ports:
-      - "${AGENT1_PORT:-19823}:19823"   # agent_server HTTP API
-    depends_on:
-      api:
-        condition: service_healthy
+      - "127.0.0.1:${NOVNC_PORT:-6080}:6080"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9222/json/version"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
     restart: unless-stopped
 
-  # Additional agent instances are managed dynamically via the API
+  # Additional browser instances are managed dynamically via the API
   # (节点管理 → 新增实例)
 
   # ── Remote agent (all-in-one: Chrome + agent server) ─────────────────────
@@ -334,13 +336,13 @@ services:
   #     -e CENTRAL_API_URL=http://<center-ip>:8031 \
   #     -e AGENT_REGISTER=ws \
   #     -p 19823:19823 \
-  #     2233admin/opencli-admin-agent:0.3.6
+  #     ghcr.io/2233admin/opencli-admin-agent:0.4.0
   #
   # Or start the bundled agent profile (local network):
   #   docker compose --profile agent up agent
   agent:
     profiles: ["agent"]
-    image: ${DOCKER_REGISTRY:-docker.io/}${DOCKER_IMAGE_NAMESPACE:-2233admin}/opencli-admin-agent:${IMAGE_TAG:-0.3.6}${CHROME_SUFFIX:-}
+    image: ${DOCKER_REGISTRY:-ghcr.io/}${DOCKER_IMAGE_NAMESPACE:-2233admin}/opencli-admin-agent:${IMAGE_TAG:-0.4.0}${CHROME_SUFFIX:-}
     environment:
       CENTRAL_API_URL: ${CENTRAL_API_URL:-}
       AGENT_ADVERTISE_URL: ${AGENT_ADVERTISE_URL:-}

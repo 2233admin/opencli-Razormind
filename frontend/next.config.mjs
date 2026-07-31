@@ -12,6 +12,7 @@ const FRONTEND_ROOT = path.dirname(fileURLToPath(import.meta.url))
 const VIEW_TRANSITIONS_ENABLED = process.env.NEXT_PUBLIC_ENABLE_VIEW_TRANSITIONS !== 'false'
 
 const nextConfig = {
+  output: "standalone",
   allowedDevOrigins: ['127.0.0.1'],
   distDir: process.env.OPENCLI_NEXT_DIST_DIR ?? '.next',
   experimental: {

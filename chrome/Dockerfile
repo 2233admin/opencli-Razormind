@@ -1,10 +1,6 @@
 ARG REGISTRY=
 FROM ${REGISTRY}debian:bookworm-slim
 
-# Switch to Aliyun apt mirror for faster downloads in China
-RUN sed -i 's|http://deb.debian.org|http://mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources 2>/dev/null || \
-    sed -i 's|http://deb.debian.org|http://mirrors.aliyun.com|g' /etc/apt/sources.list 2>/dev/null || true
-
 # OPENCLI_VERSION: pin the opencli release; patch-opencli.js adds DAEMON_HOST/LISTEN env hooks
 ARG OPENCLI_VERSION=1.8.5
 COPY scripts/patch-opencli.js /tmp/patch-opencli.js
@@ -39,7 +35,7 @@ COPY chrome/extension-src/manifest.json /home/chrome/extension/manifest.json
 COPY chrome/extension-src/icons/ /home/chrome/extension/icons/
 COPY chrome/extension-src/dist/background.js /home/chrome/extension/dist/background.js
 
-EXPOSE 9222 6080
+EXPOSE 6080 19222 19825
 
 USER chrome
 # Pre-create profile directory as chrome user so Docker initialises new

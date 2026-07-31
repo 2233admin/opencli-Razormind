@@ -10,42 +10,6 @@ on:
   workflow_dispatch:
 
 jobs:
-  frontend:
-    runs-on: ubuntu-latest
-    name: Frontend (Next.js)
-    defaults:
-      run:
-        working-directory: frontend
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 11
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          cache: pnpm
-          cache-dependency-path: frontend/pnpm-lock.yaml
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Typecheck
-        run: pnpm exec tsc --noEmit
-
-      # TODO: add pnpm test once a frontend test suite exists
-
-      - name: Lint
-        run: pnpm run lint
-
-      - name: Build
-        run: pnpm run build
-
   extension:
     runs-on: ubuntu-latest
     name: Browser Extension
@@ -125,6 +89,43 @@ jobs:
 
       - name: Browser smoke test
         run: pnpm test:smoke
+
+  release-contract:
+    runs-on: ubuntu-latest
+    name: Public Install Smoke
+    env:
+      API_AUTH_TOKEN: ci-release-token
+      BOOTSTRAP_ADMIN_TOKEN: ci-bootstrap-admin-token
+      SECRET_KEY: ci-release-secret
+      CREDENTIAL_ENCRYPTION_KEY: MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA=
+      COMPOSE_PROJECT_NAME: opencli-admin-ci
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Validate Compose
+        run: docker compose --env-file .env.docker.example -f docker-compose.yml -f docker-compose.build.yml config --quiet
+
+      - name: Build and start public stack
+        run: docker compose --env-file .env.docker.example -f docker-compose.yml -f docker-compose.build.yml up -d --build --wait api frontend agent-1
+
+      - name: Verify public endpoints
+        run: |
+          curl --fail --silent --show-error http://localhost:3010/login >/dev/null
+          curl --fail --silent --show-error http://localhost:8031/health >/dev/null
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer ci-bootstrap-admin-token" \
+            -H "X-API-Token: ci-release-token" \
+            http://localhost:8031/api/v1/auth/me |
+            python -c 'import json,sys; assert json.load(sys.stdin)["data"]["subject"] == "bootstrap-admin"'
+
+      - name: Show logs on failure
+        if: failure()
+        run: docker compose --env-file .env.docker.example -f docker-compose.yml -f docker-compose.build.yml logs --tail=200 api frontend agent-1
+
+      - name: Stop public stack
+        if: always()
+        run: docker compose --env-file .env.docker.example -f docker-compose.yml -f docker-compose.build.yml down -v
 
   backend:
     runs-on: ubuntu-latest

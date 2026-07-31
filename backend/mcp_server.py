@@ -88,7 +88,7 @@ def _transport_security() -> TransportSecuritySettings:
 
 mcp = MCPServer(
     "opencli-admin",
-    version="0.1.0",
+    version="0.4.0",
     instructions=(
         "Use project tools for immutable published workflow runs and their durable traces. "
         "Use source tools for collection administration."

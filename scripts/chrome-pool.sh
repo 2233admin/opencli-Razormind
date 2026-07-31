@@ -94,7 +94,7 @@ start_instance() {
     --network "${NETWORK}" \
     --label "${LABEL_KEY}=true" \
     --label "chrome.pool.index=${n}" \
-    -p "${novnc_port}:6080" \
+    -p "127.0.0.1:${novnc_port}:6080" \
     -v "${volume}:/home/chrome/.config/chromium" \
     --restart unless-stopped \
     "${CHROME_IMAGE}" >/dev/null

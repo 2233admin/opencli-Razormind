@@ -546,7 +546,7 @@ async def lifespan(app: FastAPI):
             pass
 
 
-app = FastAPI(title="OpenCLI Agent Server", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="OpenCLI Agent Server", version="0.4.0", lifespan=lifespan)
 
 
 class CollectRequest(BaseModel):

@@ -1,7 +1,7 @@
 {
   "name": "opencli-admin",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.4.0",
   "workspaces": [
     "chrome/extension-src"
   ],

@@ -16,13 +16,15 @@ def test_invokeai_settings_are_server_only_and_fail_closed() -> None:
     assert settings.image_asset_storage_path
 
 
-def test_invokeai_compose_service_is_private_and_digest_pinned() -> None:
+def test_invokeai_compose_service_is_private_and_fails_closed_without_an_image() -> None:
     compose = yaml.safe_load((ROOT / "docker-compose.yml").read_text(encoding="utf-8"))
     service = compose["services"]["invokeai"]
 
     assert service["profiles"] == ["image-studio"]
     assert "ports" not in service
-    assert service["image"].startswith("${INVOKEAI_ATTESTED_IMAGE:?")
+    assert service["image"].startswith(
+        "${INVOKEAI_ATTESTED_IMAGE:-invalid.invalid/"
+    )
     assert "@sha256:" in service["image"]
     assert service["read_only"] is True
     assert service["security_opt"] == ["no-new-privileges:true"]
