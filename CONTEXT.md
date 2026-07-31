@@ -1,6 +1,18 @@
-# OpenCLI Operations Platform
+# OpenCLI Operations Platform Context
 
-OpenCLI is an Agent-driven data collection, processing, and delivery platform. OpenCLI Admin is its operator console for turning recurring data needs into observable, governable work.
+OpenCLI is an Agent-driven research and intelligence pipeline for continuously collecting, processing, reviewing, and delivering data. OpenCLI Admin is its self-hosted operator console for turning recurring data needs into observable, governable Projects and Workflows.
+
+## Public Release Baseline
+
+The public v0.4.0 release has one end-to-end product path:
+
+<strong>Project → Workflow → Run → Records / Evidence → Delivery</strong>
+
+The default Docker installation includes the Admin frontend, FastAPI backend, SQLite storage, and an interactive Chromium/noVNC browser execution resource for QR-code or account login. OpenCLI, RSS, API, web, and tool nodes feed the same Workflow runtime; runs expose node events, traces, outputs, evidence, and records.
+
+AI providers, authenticated websites, and notification channels require operator-owned credentials or browser sessions. Remote Agents, PostgreSQL, Celery/Redis, Kats, Dify/Graphon, ODP/III, and other compatibility runtimes are optional deployment profiles rather than default-install promises.
+
+This document defines product language and object boundaries. It is not a release checklist; [README.md](README.md) is the public installation and capability contract.
 
 ## Language
 
