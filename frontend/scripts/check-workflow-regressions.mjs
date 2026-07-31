@@ -11,9 +11,10 @@ const frontendRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 
 const repositoryRoot = path.resolve(frontendRoot, '..')
 const windowsRepositoryPython = path.join(repositoryRoot, '.venv', 'Scripts', 'python.exe')
 const unixRepositoryPython = path.join(repositoryRoot, '.venv', 'bin', 'python')
-const pythonExecutable = existsSync(windowsRepositoryPython)
-  ? windowsRepositoryPython
-  : (process.env.PYTHON ?? (existsSync(unixRepositoryPython) ? unixRepositoryPython : 'python'))
+const pythonExecutable = process.env.PYTHON
+  ?? (existsSync(windowsRepositoryPython)
+    ? windowsRepositoryPython
+    : (existsSync(unixRepositoryPython) ? unixRepositoryPython : 'python'))
 
 registerHooks({
   resolve(specifier, context, nextResolve) {
