@@ -6,7 +6,7 @@ Create Date: 2026-07-29
 """
 
 import sqlalchemy as sa
-from alembic import op
+from alembic import context, op
 
 revision = "j7k8l9m0n1o2"
 down_revision = "i6j7k8l9m0n1"
@@ -15,7 +15,10 @@ depends_on = None
 
 
 def upgrade() -> None:
-    if "workflow_runs" not in sa.inspect(op.get_bind()).get_table_names():
+    if (
+        not context.is_offline_mode()
+        and "workflow_runs" not in sa.inspect(op.get_bind()).get_table_names()
+    ):
         return
 
     with op.batch_alter_table("workflow_runs") as batch:
@@ -37,7 +40,10 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    if "workflow_runs" not in sa.inspect(op.get_bind()).get_table_names():
+    if (
+        not context.is_offline_mode()
+        and "workflow_runs" not in sa.inspect(op.get_bind()).get_table_names()
+    ):
         return
 
     with op.batch_alter_table("workflow_runs") as batch:
