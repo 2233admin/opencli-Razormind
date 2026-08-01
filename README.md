@@ -1,14 +1,14 @@
-# OpenCLI Admin
+# opencli-Razormind
 
-[![GitHub Release](https://img.shields.io/github/v/release/2233admin/opencli-admin)](https://github.com/2233admin/opencli-admin/releases/latest)
-[![CI](https://github.com/2233admin/opencli-admin/actions/workflows/ci.yml/badge.svg)](https://github.com/2233admin/opencli-admin/actions/workflows/ci.yml)
-[![License](https://img.shields.io/github/license/2233admin/opencli-admin)](LICENSE)
-[![Docker](https://img.shields.io/badge/docker-amd64%20%7C%20arm64-2496ED?logo=docker&logoColor=white)](https://github.com/2233admin/opencli-admin/pkgs/container/opencli-admin-api)
+[![GitHub Release](https://img.shields.io/github/v/release/2233admin/opencli-Razormind)](https://github.com/2233admin/opencli-Razormind/releases/latest)
+[![CI](https://github.com/2233admin/opencli-Razormind/actions/workflows/ci.yml/badge.svg)](https://github.com/2233admin/opencli-Razormind/actions/workflows/ci.yml)
+[![License](https://img.shields.io/github/license/2233admin/opencli-Razormind)](LICENSE)
+[![Docker](https://img.shields.io/badge/docker-amd64%20%7C%20arm64-2496ED?logo=docker&logoColor=white)](https://github.com/2233admin/opencli-Razormind/pkgs/container/opencli-admin-api)
 
-开源、自托管的研究与情报管线。把浏览器 / OpenCLI / RSS / API 数据采集、可视化工作流、AI 处理、证据关系和结果交付放进一个可运行、可审计的系统。
+opencli-Razormind 是一个开源、自托管的研究与情报管线。它把浏览器 / OpenCLI / RSS / API 数据采集、可视化工作流、AI 处理、证据关系和结果交付，统一到一个可运行、可审计的系统中。
 
 <p align="center">
-  <img src="docs/screenshots/project-overview.png" alt="OpenCLI Admin 项目概览" width="100%" />
+  <img src="docs/screenshots/project-overview.png" alt="opencli-Razormind 项目概览" width="100%" />
 </p>
 
 图中的网站变化监控项目已发布不可变 <code>v1</code>，并完成了基于该发布版本的真实运行与 Trace 记录。
@@ -24,13 +24,13 @@
 Linux / macOS：
 
 ~~~bash
-curl -fsSL https://raw.githubusercontent.com/2233admin/opencli-admin/v0.4.0/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/2233admin/opencli-Razormind/v0.4.0/scripts/install.sh | sh
 ~~~
 
 Windows PowerShell：
 
 ~~~powershell
-Invoke-WebRequest https://raw.githubusercontent.com/2233admin/opencli-admin/v0.4.0/scripts/install.ps1 -OutFile install.ps1
+Invoke-WebRequest https://raw.githubusercontent.com/2233admin/opencli-Razormind/v0.4.0/scripts/install.ps1 -OutFile install.ps1
 .\install.ps1
 ~~~
 
@@ -65,25 +65,25 @@ Invoke-WebRequest https://raw.githubusercontent.com/2233admin/opencli-admin/v0.4
 
 来源、处理、校验和数据集节点在同一画布完成编排；草稿、验证、发布和运行使用同一项目上下文。
 
-![OpenCLI Admin 工作流画布与参数面板](docs/screenshots/workflow-inspector.png)
+![opencli-Razormind 工作流画布与参数面板](docs/screenshots/workflow-inspector.png)
 
 ### 统一数据结果
 
 采集结果保留原始数据、标准化字段和完整血缘，可搜索、查看详情，也可继续进入 AI、关系分析和交付节点。
 
-![OpenCLI Admin 数据结果与管线血缘](docs/screenshots/record-detail.png)
+![opencli-Razormind 数据结果与管线血缘](docs/screenshots/record-detail.png)
 
 ### 证据与关系
 
 项目证据、实体关系和 Galaxy 共用同一份项目数据，支持搜索、图谱控制和运行证据回溯。
 
-![OpenCLI Admin 证据关系](docs/screenshots/evidence-relationships.png)
+![opencli-Razormind 证据关系](docs/screenshots/evidence-relationships.png)
 
 ### 运行与治理
 
 每次运行都能看到发布版本、状态、触发方式、节点事件、耗时和 Trace；下图第一条记录即为 <code>Published v1</code> 的成功运行。
 
-![OpenCLI Admin 运行记录](docs/screenshots/run-operations.png)
+![opencli-Razormind 运行记录](docs/screenshots/run-operations.png)
 
 ## 已支持的能力
 
@@ -115,7 +115,7 @@ OpenCLI 提供小红书、Bilibili、知乎、微博、X / Twitter、Reddit、Yo
 需要把登录态留在本地电脑，或让多台机器分担不同站点时，可注册远程 Agent：
 
 ~~~text
-OpenCLI Admin (:3010 / :8031)
+opencli-Razormind (:3010 / :8031)
         │
         ├── WS 反向通道 ── Agent A ── 已登录的小红书 / Bilibili
         ├── WS 反向通道 ── Agent B ── 已登录的 X / LinkedIn
@@ -157,8 +157,8 @@ flowchart LR
 前置要求：Python 3.13+、Node.js 26.3.1（见 <code>.nvmrc</code>）、uv、pnpm。
 
 ~~~bash
-git clone https://github.com/2233admin/opencli-admin.git
-cd opencli-admin
+git clone https://github.com/2233admin/opencli-Razormind.git
+cd opencli-Razormind
 
 uv sync
 uv run uvicorn backend.main:app --host 127.0.0.1 --port 8031
@@ -199,7 +199,7 @@ v0.4.0 同时发布 <code>linux/amd64</code> 和 <code>linux/arm64</code>：
 - <code>ghcr.io/2233admin/opencli-admin-agent:0.4.0</code>
 - <code>ghcr.io/2233admin/opencli-admin-agent:0.4.0-chrome</code>
 
-查看 [最新 Release](https://github.com/2233admin/opencli-admin/releases/latest)。
+查看 [最新 Release](https://github.com/2233admin/opencli-Razormind/releases/latest)。
 
 ## 文档与贡献
 
