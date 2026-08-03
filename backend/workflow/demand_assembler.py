@@ -305,6 +305,18 @@ def _native_first_loop_operations(
             ),
         ]
     )
+    if _requires_popularity_ranking(demand_text) and _keyword_from_need(demand_text) != "热门":
+        operations.append(
+            WorkflowPatchOperation(
+                op="request_missing_capability",
+                capability="collection.rank.popularity",
+                reason=(
+                    "The matched OpenCLI search adapters accept a query and limit but expose no "
+                    "popularity sort or threshold. Keep the topic search runnable, but require a "
+                    "governed popularity-ranking capability before claiming hot-post fidelity."
+                ),
+            )
+        )
     return operations
 
 
@@ -576,14 +588,33 @@ def _legacy_keyword_slots_for_need(text: str) -> list[dict[str, Any]]:
 
 def _keyword_from_need(text: str) -> str:
     value = text.strip()
+    value = re.sub(
+        r"[,，;；。]\s*(?:(?:再|然后|并|以及)\s*)?"
+        r"(?:清洗|去重|保存|存储|入库|发送|通知|汇总|分析).*$",
+        "",
+        value,
+        flags=re.IGNORECASE,
+    )
     for pattern in (
-        r"^(抓|采集|收集|监控|找|看)\s*",
+        r"^(?:请|帮我)?\s*(?:抓取?|采集|收集|监控|找|搜索|搜|看(?:下|一下)?)\s*",
         r"(小红书|xiaohongshu|xhs|哔哩哔哩|哔哩|bilibili|b站|bili)",
+        r"(相关的?|有关的?)",
         r"(热帖|热门帖子|热门内容|hot posts?)",
     ):
         value = re.sub(pattern, " ", value, flags=re.IGNORECASE)
+    value = re.sub(r"^\s*(?:(?:和|与|及|、|的)\s*)+", "", value)
     value = re.sub(r"\s+", " ", value).strip(" ，,。")
     return value or "热门"
+
+
+def _requires_popularity_ranking(text: str) -> bool:
+    return bool(
+        re.search(
+            r"(热帖|热门帖子|热门内容|爆款|高热度|hot posts?|trending)",
+            text,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 # --- OpenCLI adapter catalog matching --------------------------------------

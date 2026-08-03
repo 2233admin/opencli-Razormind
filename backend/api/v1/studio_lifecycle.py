@@ -32,6 +32,31 @@ from backend.workflow.compiler import compile_workflow_project
 router = APIRouter()
 
 
+def _isolated_source_errors(
+    project: workflow_schemas.WorkflowProject,
+) -> list[workflow_schemas.WorkflowCompileError]:
+    """Reject Studio drafts whose root source cannot feed any downstream node.
+
+    The generic compiler intentionally permits standalone nodes for capability
+    previews. A Studio draft, however, is publishable and runnable, so accepting
+    an unconnected source would silently discard every record it collects.
+    """
+
+    connected_sources = {edge.source for edge in project.edges}
+    return [
+        workflow_schemas.WorkflowCompileError(
+            code="isolated_source_node",
+            message=(
+                f'Workflow source node "{node.id}" is not connected to a downstream node'
+            ),
+            node_id=node.id,
+            path=["nodes", node.id],
+        )
+        for node in project.nodes
+        if node.kind == "source" and node.id not in connected_sources
+    ]
+
+
 def _image_generation_nodes(
     nodes: object,
     *,
@@ -173,6 +198,7 @@ async def validate_draft(
         )
         valid = False
     else:
+        errors.extend(_isolated_source_errors(project))
         if errors:
             valid = False
         else:

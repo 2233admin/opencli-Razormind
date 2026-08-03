@@ -232,6 +232,120 @@ test('OpenCLI write commands become accepted action nodes with explicit mutation
   assert.ok(updated.adapters.some((adapter) => adapter.id === 'opencli-twitter'))
 })
 
+test('runnable OpenCLI source presets retain the stable backend catalog binding', async () => {
+  const [{ openCLIAdapterNodeMaterialization, workflowCatalogItemForOpenCLIAdapterNode }, { addCatalogNodeToWorkflowProject }, { parseWorkflowProject }, paletteSource, catalogHookSource] = await Promise.all([
+    importTypeScript('lib/workflow/backend-opencli-adapter-nodes.ts'),
+    importTypeScript('lib/workflow/node-catalog.ts'),
+    importTypeScript('lib/workflow/schema.ts'),
+    readSource('components/flow/command-palette.tsx'),
+    readSource('lib/workflow/use-opencli-adapter-catalog.ts'),
+  ])
+  const catalogItem = workflowCatalogItemForOpenCLIAdapterNode({
+    id: 'opencli.adapter.statsgov.nbs',
+    label: 'statsgov · nbs',
+    description: 'National Bureau of Statistics releases',
+    status: 'runnable',
+    site: 'statsgov',
+    command: 'nbs',
+    access: 'read',
+    browser: false,
+    catalogId: 'intelligence.source.opencli-slot',
+    kind: 'source',
+    capability: 'fetch',
+    presetKind: 'source_slot',
+    runtimeReadiness: 'source_slot_ready',
+    requiredArgs: [],
+    args: [],
+    adapter: {
+      id: 'opencli-statsgov-nbs',
+      type: 'source',
+      provider: 'opencli',
+      mode: 'live',
+      config: { channel: 'opencli' },
+    },
+    params: {
+      site: 'statsgov',
+      command: 'nbs',
+      format: 'json',
+      args: {},
+      positional_args: [],
+    },
+    manifest: {},
+  })
+  const addOpenCLIAdapter = sourceSection(
+    paletteSource,
+    'const addOpenCLIAdapter',
+    'const generate',
+  )
+
+  assert.match(
+    addOpenCLIAdapter,
+    /materialization === "source_slot_ready"[\s\S]*?workflowCatalogItemForOpenCLIAdapterNode\(item\)/,
+  )
+  assert.match(
+    catalogHookSource,
+    /node\.access === "read"[\s\S]*?workflowCatalogItemForOpenCLIAdapterNode\(node\)/,
+  )
+  assert.equal(catalogItem.id, 'intelligence.source.opencli-slot')
+  assert.equal(
+    openCLIAdapterNodeMaterialization({
+      status: 'preview_only',
+      runtimeReadiness: 'source_slot_ready',
+      manifest: { canvas: { materialization: 'source_slot_ready' } },
+    }),
+    'unavailable',
+  )
+
+  const project = parseWorkflowProject({
+    id: 'opencli-statsgov-project',
+    name: 'OpenCLI statsgov project',
+    profile: 'intelligence',
+    nodes: [{
+      id: 'manual-trigger',
+      kind: 'action',
+      capability: 'trigger',
+      params: {},
+    }],
+    edges: [],
+  })
+  const updated = addCatalogNodeToWorkflowProject(
+    project,
+    catalogItem,
+    'source-opencli-statsgov-nbs',
+    { x: 320, y: 180 },
+  )
+  const sourceNode = updated.nodes.find((node) => node.id === 'source-opencli-statsgov-nbs')
+
+  assert.equal(sourceNode?.ui?.catalogId, 'intelligence.source.opencli-slot')
+  assert.equal(sourceNode?.params.opencliAdapterNodeId, 'opencli.adapter.statsgov.nbs')
+  assert.ok(updated.adapters.some((adapter) => adapter.id === 'opencli-statsgov-nbs'))
+
+  const persistedBadDraft = structuredClone(updated)
+  persistedBadDraft.nodes.find((node) => node.id === sourceNode.id).ui.catalogId = 'opencli.adapter.statsgov.nbs'
+  const rejected = compileWithBackend(persistedBadDraft)
+  assert.notEqual(rejected.status, 0)
+  assert.ok(rejected.report.errors.some((error) => error.code === 'unknown_node_library_binding'))
+
+  const repaired = parseWorkflowProject(persistedBadDraft)
+  const repairedSource = repaired.nodes.find((node) => node.id === sourceNode.id)
+  assert.equal(repairedSource?.ui?.catalogId, 'intelligence.source.opencli-slot')
+
+  const untrustedNearMiss = structuredClone(persistedBadDraft)
+  untrustedNearMiss.adapters.find((adapter) => adapter.id === 'opencli-statsgov-nbs').provider = 'http'
+  assert.equal(
+    parseWorkflowProject(untrustedNearMiss).nodes.find((node) => node.id === sourceNode.id)?.ui?.catalogId,
+    'opencli.adapter.statsgov.nbs',
+  )
+
+  const compiled = compileWithBackend(repaired)
+  assert.equal(compiled.status, 0, `${compiled.stdout}\n${compiled.stderr}`)
+  assert.equal(compiled.report.valid, true)
+  assert.equal(
+    compiled.report.plan.runtime.nodes.find((node) => node.id === sourceNode.id).runtime.binding.binding_id,
+    'iii.collector-opencli.snapshot',
+  )
+})
+
 test('OpenTabs tools become typed callable nodes and compile to the OpenTabs executor', async () => {
   const [{ workflowCatalogItemForOpenTabsToolNode }, { addCatalogNodeToWorkflowProject }, { parseWorkflowProject }] = await Promise.all([
     importTypeScript('lib/workflow/backend-opentabs-tool-nodes.ts'),

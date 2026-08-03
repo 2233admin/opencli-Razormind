@@ -48,6 +48,29 @@ def _fixture_opencli_adapter_catalog() -> tuple[dict, ...]:
     )
 
 
+def _fixture_opencli_required_arg_catalog() -> tuple[dict, ...]:
+    return (
+        {
+            "site": "example",
+            "name": "search",
+            "description": "Example search",
+            "access": "read",
+            "browser": False,
+            "strategy": "public",
+            "args": [
+                {
+                    "name": "query",
+                    "type": "str",
+                    "required": True,
+                    "positional": True,
+                },
+                {"name": "limit", "type": "int", "required": False},
+            ],
+            "columns": ["id", "text"],
+        },
+    )
+
+
 @pytest.mark.asyncio
 async def test_patch_adds_existing_node_updates_params_connects_and_compiles(client):
     project = _valid_workflow_project()
@@ -335,7 +358,7 @@ async def test_patch_materializes_opencli_required_arg_adapter_with_params(
 ):
     monkeypatch.setattr(
         "backend.workflow.opencli_adapter_nodes._load_opencli_catalog",
-        _fixture_opencli_adapter_catalog,
+        _fixture_opencli_required_arg_catalog,
     )
     project = _valid_workflow_project()
 
@@ -346,7 +369,7 @@ async def test_patch_materializes_opencli_required_arg_adapter_with_params(
             "operations": [
                 {
                     "op": "materialize_opencli_adapter",
-                    "adapterNodeId": "opencli.adapter.twitter.search",
+                    "adapterNodeId": "opencli.adapter.example.search",
                     "nodeId": "source-x-openai",
                     "params": {"query": "openai", "limit": 1},
                 }
@@ -359,7 +382,7 @@ async def test_patch_materializes_opencli_required_arg_adapter_with_params(
     assert data["valid"] is True
     nodes = {node["id"]: node for node in data["project"]["nodes"]}
     node = nodes["source-x-openai"]
-    assert node["adapter"] == "opencli-twitter"
+    assert node["adapter"] == "opencli-example"
     assert node["params"]["positional_args"] == ["openai"]
     assert node["params"]["args"] == {"limit": 1}
 
@@ -374,7 +397,7 @@ async def test_patch_materialize_opencli_required_arg_reports_missing_params(
 ):
     monkeypatch.setattr(
         "backend.workflow.opencli_adapter_nodes._load_opencli_catalog",
-        _fixture_opencli_adapter_catalog,
+        _fixture_opencli_required_arg_catalog,
     )
     project = _valid_workflow_project()
 
@@ -385,7 +408,7 @@ async def test_patch_materialize_opencli_required_arg_reports_missing_params(
             "operations": [
                 {
                     "op": "materialize_opencli_adapter",
-                    "adapterNodeId": "opencli.adapter.twitter.search",
+                    "adapterNodeId": "opencli.adapter.example.search",
                 }
             ],
         },
@@ -401,7 +424,7 @@ async def test_patch_materialize_opencli_required_arg_reports_missing_params(
         {
             "capability": "opencli.adapter.params",
             "reason": "Missing OpenCLI adapter params: query",
-            "n8n_search_hint": "opencli.adapter.twitter.search",
+            "n8n_search_hint": "opencli.adapter.example.search",
         }
     ]
 
@@ -582,6 +605,19 @@ async def test_demand_draft_assembles_multi_source_need_through_merge(client):
     nodes = {node["id"]: node for node in data["project"]["nodes"]}
     assert "source-xiaohongshu" in nodes
     assert "source-bilibili" in nodes
+    assert nodes["source-xiaohongshu"]["params"]["args"] == {"keyword": "AI"}
+    assert nodes["source-bilibili"]["params"]["args"] == {"keyword": "AI"}
+    assert data["missing_capabilities"] == [
+        {
+            "capability": "collection.rank.popularity",
+            "reason": (
+                "The matched OpenCLI search adapters accept a query and limit but expose no "
+                "popularity sort or threshold. Keep the topic search runnable, but require a "
+                "governed popularity-ranking capability before claiming hot-post fidelity."
+            ),
+            "n8n_search_hint": "collection.rank.popularity",
+        }
+    ]
     edges = {
         (edge["source"], edge["target"], edge.get("targetPort"))
         for edge in data["project"]["edges"]

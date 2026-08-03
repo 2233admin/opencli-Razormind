@@ -591,7 +591,7 @@ export function CommandPalette({
         }
         addWorkflowNodeFromCatalog(workflowCatalogItemForOpenCLIAdapterNode(item, values), anchorPosition())
       } else if (materialization === "source_slot_ready" && item.status === "runnable") {
-        addWorkflowNodeFromCatalog(openCLIAdapterNodeToCatalogItem(item), anchorPosition())
+        addWorkflowNodeFromCatalog(workflowCatalogItemForOpenCLIAdapterNode(item), anchorPosition())
       } else if (materialization === "tool_capability_review_required") {
         addWorkflowNodeFromCatalog(openCLIAdapterNodeToCatalogItem(item), anchorPosition())
       } else {

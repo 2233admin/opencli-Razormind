@@ -221,7 +221,13 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     app = FastAPI(
         title="OpenCLI Admin",
-        description="Multi-channel data collection management system",
+        description=(
+            "Agent-driven workflow and data collection platform. Authenticate protected REST "
+            "and MCP calls with `Authorization: Bearer <API_AUTH_TOKEN>`. Agent workflow: "
+            "inspect `/api/v1/workflows/capabilities`, draft with "
+            "`/api/v1/workflows/demand-draft`, validate with `/api/v1/workflows/compile`, "
+            "then review before publishing or running."
+        ),
         version="0.4.0",
         docs_url="/docs",
         redoc_url="/redoc",
@@ -257,6 +263,75 @@ def create_app() -> FastAPI:
 
     # Routes
     app.include_router(v1_router)
+    default_openapi = app.openapi
+
+    def openapi_schema() -> dict:
+        if app.openapi_schema:
+            return app.openapi_schema
+        schema = default_openapi()
+        components = schema.setdefault("components", {})
+        security_schemes = components.setdefault("securitySchemes", {})
+        security_schemes["BearerAuth"] = {
+            "type": "http",
+            "scheme": "bearer",
+            "description": "Operator-provisioned OpenCLI Admin API token.",
+        }
+        for path, path_item in schema.get("paths", {}).items():
+            if not path.startswith("/api/"):
+                continue
+            for method, operation in path_item.items():
+                if method.lower() in {"get", "post", "put", "patch", "delete"}:
+                    operation.setdefault("security", [{"BearerAuth": []}])
+        schema["x-opencli-agent"] = {
+            "mcp": {
+                "url": "/mcp",
+                "transport": "streamable-http",
+                "authentication": "BearerAuth",
+            },
+            "workflow": [
+                "list_workflow_node_capabilities",
+                "draft_workflow_from_intent",
+                "preview_workflow_node_patch",
+                "compile_workflow_draft",
+                "run_published_workflow",
+            ],
+        }
+        app.openapi_schema = schema
+        return schema
+
+    app.openapi = openapi_schema
+
+    @app.get("/", include_in_schema=False)
+    async def discovery() -> dict:
+        """Return the stable public entrypoints a human or Agent needs to begin."""
+
+        return {
+            "name": "OpenCLI Admin",
+            "version": app.version,
+            "interfaces": {
+                "openapi": "/openapi.json",
+                "docs": "/docs",
+                "redoc": "/redoc",
+                "mcp": {
+                    "url": "/mcp",
+                    "transport": "streamable-http",
+                },
+            },
+            "authentication": {
+                "type": "http",
+                "scheme": "bearer",
+                "header": "Authorization: Bearer <API_AUTH_TOKEN>",
+                "provisioning": "operator-supplied",
+            },
+            "agentWorkflow": [
+                "discover capabilities",
+                "arrange a review-only node draft",
+                "compile and preflight",
+                "request operator review for effects",
+                "run an immutable published workflow",
+                "inspect trace and evidence",
+            ],
+        }
 
     @app.get("/health")
     async def health() -> dict:

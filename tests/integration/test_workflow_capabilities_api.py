@@ -590,7 +590,7 @@ def test_opencli_adapter_nodes_classify_manifest_entries(monkeypatch):
     assert bbc.params == {"site": "bbc", "command": "news", "format": "json", "args": {}}
 
     twitter_search = nodes["opencli.adapter.twitter.search"]
-    assert twitter_search.status == "blocked"
+    assert twitter_search.status == "preview_only"
     assert twitter_search.catalogId == "intelligence.source.opencli-slot"
     assert twitter_search.requiredArgs == ["query"]
     assert twitter_search.presetKind == "source_slot"
@@ -622,7 +622,7 @@ def test_opencli_adapter_nodes_classify_manifest_entries(monkeypatch):
         "capability": {"fetch": 2, "store": 1},
         "access": {"read": 2, "write": 1},
         "browser": {"non_browser": 1, "browser": 2},
-        "status": {"runnable": 1, "blocked": 2},
+        "status": {"runnable": 1, "blocked": 1, "preview_only": 1},
         "presetKind": {"source_slot": 2, "tool_capability": 1},
         "runtimeReadiness": {
             "source_slot_ready": 1,
@@ -760,7 +760,7 @@ async def test_opencli_adapter_nodes_endpoint_filters_presets_and_returns_facets
         "capability": {"fetch": 1},
         "access": {"read": 1},
         "browser": {"browser": 1},
-        "status": {"blocked": 1},
+        "status": {"preview_only": 1},
         "presetKind": {"source_slot": 1},
         "runtimeReadiness": {"source_slot_requires_params": 1},
     }

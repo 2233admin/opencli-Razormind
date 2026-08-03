@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react"
 
 import {
   fetchWorkflowOpenCLIAdapterNodes,
+  workflowCatalogItemForOpenCLIAdapterNode,
   type WorkflowOpenCLIAdapterNodesResponse,
 } from "./backend-opencli-adapter-nodes"
 import {
@@ -39,7 +40,11 @@ export function useOpenCLIAdapterCatalog(enabled = true) {
       })
       if (signal?.aborted) return
       setState({
-        items: response.nodes.map(openCLIAdapterNodeToCatalogItem),
+        items: response.nodes.map((node) =>
+          node.access === "read"
+            ? workflowCatalogItemForOpenCLIAdapterNode(node)
+            : openCLIAdapterNodeToCatalogItem(node),
+        ),
         response,
         error: null,
         loading: false,

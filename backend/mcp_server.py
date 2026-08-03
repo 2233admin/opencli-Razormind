@@ -90,8 +90,10 @@ mcp = MCPServer(
     "opencli-admin",
     version="0.4.0",
     instructions=(
-        "Use project tools for immutable published workflow runs and their durable traces. "
-        "Use source tools for collection administration."
+        "For a new workflow, first inspect workflow node capabilities, then create a review-only "
+        "draft from the operator's intent or preview explicit node patches, then compile it. "
+        "Drafting and compilation never persist or execute work. Run only an immutable published "
+        "workflow after operator review. Use source tools for collection administration."
     ),
 )
 
@@ -239,6 +241,85 @@ async def list_project_workflows(workspace_id: str, project_id: str) -> dict[str
         "GET",
         f"/api/v1/workspaces/{workspace_id}/projects/{project_id}/workflows",
     )
+
+
+@mcp.tool(annotations=READ_ONLY_TOOL, structured_output=True)
+async def list_workflow_node_capabilities() -> dict[str, Any]:
+    """List typed Workflow nodes, runtime bindings, readiness, and input/output contracts."""
+
+    return await _request("GET", "/api/v1/workflows/capabilities")
+
+
+def _new_agent_workflow_project(intent: str, name: str, locale: str) -> dict[str, Any]:
+    """Create the canonical review-only seed used by intent-driven drafting."""
+
+    return {
+        "id": "agent-workflow-draft",
+        "name": name,
+        "profile": "intelligence",
+        "version": 1,
+        "nodes": [
+            {
+                "id": "collection-need",
+                "kind": "schedule",
+                "capability": "trigger",
+                "params": {"text": intent, "locale": locale, "mode": "demand-draft"},
+                "proposalState": "proposed",
+                "ui": {
+                    "catalogId": "intelligence.input.collection-need",
+                    "label": "Collection Need",
+                    "position": {"x": 160, "y": 180},
+                },
+            }
+        ],
+        "edges": [],
+        "adapters": [],
+        "agentPermissions": {
+            "canFetchNetwork": True,
+            "canSendNotifications": False,
+            "canWriteInbox": True,
+            "canMutateExternalSites": False,
+            "allowedDomains": [],
+        },
+    }
+
+
+@mcp.tool(annotations=READ_ONLY_TOOL, structured_output=True)
+async def draft_workflow_from_intent(
+    intent: str,
+    name: str = "Agent workflow draft",
+    locale: str = "zh-CN",
+    project: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Arrange existing nodes into a review-only draft; never persist, publish, or execute it."""
+
+    base_project = project or _new_agent_workflow_project(intent, name, locale)
+    return await _request(
+        "POST",
+        "/api/v1/workflows/demand-draft",
+        json={"project": base_project, "text": intent, "locale": locale},
+    )
+
+
+@mcp.tool(annotations=READ_ONLY_TOOL, structured_output=True)
+async def preview_workflow_node_patch(
+    project: dict[str, Any],
+    operations: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Preview explicit add/connect/update node operations without persisting the graph."""
+
+    return await _request(
+        "POST",
+        "/api/v1/workflows/patch",
+        json={"project": project, "operations": operations},
+    )
+
+
+@mcp.tool(annotations=READ_ONLY_TOOL, structured_output=True)
+async def compile_workflow_draft(project: dict[str, Any]) -> dict[str, Any]:
+    """Validate and compile a draft graph in memory without dispatching or persisting work."""
+
+    return await _request("POST", "/api/v1/workflows/compile", json={"project": project})
 
 
 @mcp.tool(annotations=IDEMPOTENT_WRITE_TOOL, structured_output=True)

@@ -120,6 +120,57 @@ async def test_studio_workflow_draft_validation_run_is_persisted(client):
 
 
 @pytest.mark.asyncio
+async def test_studio_validation_rejects_an_isolated_source_node(client):
+    graph = workflow_conformance_project()
+    graph["nodes"].append(
+        {
+            "id": "isolated-http-source",
+            "kind": "source",
+            "capability": "fetch",
+            "adapter": "isolated-http-adapter",
+            "params": {
+                "channelType": "http",
+                "endpoint": "https://example.com/data",
+                "method": "GET",
+            },
+            "ui": {"catalogId": "intelligence.source.http"},
+        }
+    )
+    graph["adapters"].append(
+        {
+            "id": "isolated-http-adapter",
+            "type": "source",
+            "provider": "http",
+            "mode": "live",
+            "config": {"channelType": "http"},
+        }
+    )
+    created = await _create_studio_workflow(client, graph=graph)
+
+    response = await client.post(
+        f"{created['base_url']}/draft/validation-runs",
+        json={},
+    )
+
+    assert response.status_code == 201, response.text
+    run = response.json()["data"]
+    assert run["status"] == "failed"
+    assert run["valid"] is False
+    assert run["errors"] == [
+        {
+            "code": "isolated_source_node",
+            "message": (
+                'Workflow source node "isolated-http-source" is not connected '
+                "to a downstream node"
+            ),
+            "node_id": "isolated-http-source",
+            "edge_id": None,
+            "path": ["nodes", "isolated-http-source"],
+        }
+    ]
+
+
+@pytest.mark.asyncio
 async def test_studio_workflow_current_validated_revision_can_be_published(client):
     created = await _create_studio_workflow(client)
     validation = (

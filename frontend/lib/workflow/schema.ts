@@ -201,8 +201,38 @@ export type AdapterBinding = z.infer<typeof adapterBindingSchema>
 export type AgentPermissions = z.infer<typeof agentPermissionsSchema>
 export type WorkflowProject = z.infer<typeof workflowProjectSchema>
 
+const OPENCLI_SOURCE_SLOT_CATALOG_ID = "intelligence.source.opencli-slot"
+const LEGACY_OPENCLI_ADAPTER_CATALOG_ID = /^opencli\.adapter\.[a-z0-9][a-z0-9._-]*$/i
+
+function normalizeLegacyOpenCLISourceCatalogIds(project: WorkflowProject): WorkflowProject {
+  const adapters = new Map(project.adapters.map((adapter) => [adapter.id, adapter]))
+  let changed = false
+  const nodes = project.nodes.map((node) => {
+    const catalogId = node.ui?.catalogId
+    const opencliAdapterNodeId = node.params.opencliAdapterNodeId
+    const adapter = node.adapter ? adapters.get(node.adapter) : undefined
+    if (
+      node.kind !== "source" ||
+      node.capability !== "fetch" ||
+      typeof catalogId !== "string" ||
+      !LEGACY_OPENCLI_ADAPTER_CATALOG_ID.test(catalogId) ||
+      opencliAdapterNodeId !== catalogId ||
+      adapter?.type !== "source" ||
+      adapter.provider !== "opencli"
+    ) {
+      return node
+    }
+    changed = true
+    return {
+      ...node,
+      ui: { ...node.ui, catalogId: OPENCLI_SOURCE_SLOT_CATALOG_ID },
+    }
+  })
+  return changed ? { ...project, nodes } : project
+}
+
 export function parseWorkflowProject(input: unknown): WorkflowProject {
-  const project = workflowProjectSchema.parse(input)
+  const project = normalizeLegacyOpenCLISourceCatalogIds(workflowProjectSchema.parse(input))
   validateWorkflowReferences(project)
   return project
 }

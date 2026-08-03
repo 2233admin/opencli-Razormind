@@ -33,6 +33,9 @@ _OPENCLI_CATALOG_LOCK = threading.Lock()
 _OPENCLI_CATALOG_GENERATION = 0
 _OPENCLI_SOURCE_CATALOG_ID = "intelligence.source.opencli-slot"
 _EXTERNAL_TOOL_CATALOG_ID = "external.tool.capability"
+_KNOWN_UNAVAILABLE_COMMANDS = {
+    ("sse", "company-list"): "upstream_http_404",
+}
 _TOP_LEVEL_PARAM_KEYS = {
     "format",
     "mode",
@@ -172,6 +175,11 @@ def materialize_opencli_adapter_node(
             "unknown_opencli_adapter_node",
             f'OpenCLI adapter node "{adapter_node_id}" is not registered.',
         )
+    if adapter_node.status in {"preview_only", "design_only"}:
+        raise OpenCLIAdapterNodeMaterializationError(
+            "opencli_adapter_node_unavailable",
+            f'OpenCLI adapter node "{adapter_node_id}" is not currently runnable.',
+        )
     materialized_params = _materialized_params(adapter_node, params or {})
     missing = _missing_required_args(adapter_node, materialized_params)
     if missing:
@@ -287,7 +295,19 @@ def _build_adapter_node(entry: dict[str, Any]) -> WorkflowOpenCLIAdapterNode:
     args = [_adapter_arg(arg) for arg in _read_args(entry.get("args"))]
     required_args = [arg.name for arg in args if arg.required]
     is_read = access == "read"
-    status = "runnable" if is_read and not required_args else "blocked"
+    unavailable_reason = _unavailability_reason(
+        site=site,
+        command=command,
+        browser=browser,
+        strategy=_read_string(entry.get("strategy")),
+    )
+    status = (
+        "preview_only"
+        if is_read and unavailable_reason
+        else "runnable"
+        if is_read and not required_args
+        else "blocked"
+    )
     catalog_id = _OPENCLI_SOURCE_CATALOG_ID if is_read else _EXTERNAL_TOOL_CATALOG_ID
     kind = "source" if is_read else "action"
     capability = "fetch" if is_read else "store"
@@ -344,13 +364,17 @@ def _build_adapter_node(entry: dict[str, Any]) -> WorkflowOpenCLIAdapterNode:
             },
             "canvas": {
                 "node": True,
-                "runBlocked": runtime_readiness != "source_slot_ready",
+                "runBlocked": status != "runnable" or runtime_readiness != "source_slot_ready",
                 "catalogId": catalog_id,
                 "materialization": runtime_readiness,
                 "presetKind": preset_kind,
                 "requiredArgs": required_args,
                 "positionalRequiredArgs": positional_required,
                 "namedRequiredArgs": named_required,
+            },
+            "availability": {
+                "available": unavailable_reason is None,
+                "reason": unavailable_reason,
             },
             "runtime": {
                 "binding": OPENCLI_BINDING_ID if is_read else EXTERNAL_TOOL_BINDING_ID,
@@ -366,6 +390,23 @@ def _build_adapter_node(entry: dict[str, Any]) -> WorkflowOpenCLIAdapterNode:
             },
         },
     )
+
+
+def _unavailability_reason(
+    *,
+    site: str,
+    command: str,
+    browser: bool,
+    strategy: str | None,
+) -> str | None:
+    known_reason = _KNOWN_UNAVAILABLE_COMMANDS.get((site.lower(), command.lower()))
+    if known_reason:
+        return known_reason
+    if browser:
+        return "browser_session_readiness_unverified"
+    if strategy == "cookie":
+        return "cookie_readiness_unverified"
+    return None
 
 
 def _adapter_arg(value: dict[str, Any]) -> WorkflowOpenCLIAdapterNodeArg:

@@ -944,6 +944,77 @@ async def test_compile_resolves_opencli_source_to_iii_runtime_binding(client):
     }
 
 
+@pytest.mark.parametrize(
+    ("catalog_id", "provider", "channel_type", "params"),
+    [
+        (
+            "intelligence.source.http",
+            "http",
+            "http",
+            {"endpoint": "https://example.com/data", "method": "GET"},
+        ),
+        (
+            "intelligence.source.rss-bridge",
+            "rss",
+            "rss",
+            {"url": "https://rss-bridge.example/?action=display&format=Atom"},
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_compile_resolves_declared_source_presets_to_source_fetch_runtime(
+    client,
+    catalog_id: str,
+    provider: str,
+    channel_type: str,
+    params: dict,
+):
+    project = _valid_workflow_project()
+    project["nodes"] = [
+        {
+            "id": "source-preset",
+            "kind": "source",
+            "capability": "fetch",
+            "adapter": "source-preset-adapter",
+            "params": {**params, "channelType": channel_type},
+            "ui": {"catalogId": catalog_id},
+        }
+    ]
+    project["edges"] = []
+    project["adapters"] = [
+        {
+            "id": "source-preset-adapter",
+            "type": "source",
+            "provider": provider,
+            "mode": "live",
+            "config": {"channelType": channel_type},
+        }
+    ]
+
+    response = await client.post("/api/v1/workflows/compile", json={"project": project})
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["valid"] is True, data["errors"]
+    source_node = data["plan"]["runtime"]["nodes"][0]
+    assert source_node["runtime"]["origin"] == {
+        "kind": "node_library",
+        "catalog_id": catalog_id,
+        "notes": [],
+    }
+    _assert_binding_includes(
+        source_node["runtime"]["binding"],
+        {
+            "status": "bound",
+            "binding_id": "workflow.source.fetch",
+            "runtime": "workflow",
+            "channel": "source",
+        },
+    )
+    assert source_node["runtime"]["binding"]["input"]["provider"] == provider
+    assert source_node["runtime"]["binding"]["input"]["channelType"] == channel_type
+
+
 @pytest.mark.asyncio
 async def test_compile_projects_native_first_loop_nodes_to_runtime_bindings(client):
     response = await client.post(

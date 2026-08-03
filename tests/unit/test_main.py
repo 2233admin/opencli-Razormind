@@ -113,3 +113,36 @@ def test_app_has_openapi_docs():
     schema = response.json()
     assert "openapi" in schema
     assert "paths" in schema
+    assert schema["components"]["securitySchemes"]["BearerAuth"] == {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Operator-provisioned OpenCLI Admin API token.",
+    }
+    assert schema["paths"]["/api/v1/workflows/capabilities"]["get"]["security"] == [
+        {"BearerAuth": []}
+    ]
+    assert schema["x-opencli-agent"]["mcp"]["url"] == "/mcp"
+
+
+def test_root_discovers_agent_interfaces(client):
+    """GET / gives a new Agent the authentication and workflow entry sequence."""
+    import asyncio
+
+    from httpx import ASGITransport, AsyncClient
+
+    from backend.main import app
+
+    async def _check():
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+            return await ac.get("/")
+
+    response = asyncio.run(_check())
+    assert response.status_code == 200
+    data = response.json()
+    assert data["interfaces"]["mcp"]["url"] == "/mcp"
+    assert data["authentication"]["scheme"] == "bearer"
+    assert data["agentWorkflow"][:3] == [
+        "discover capabilities",
+        "arrange a review-only node draft",
+        "compile and preflight",
+    ]

@@ -317,6 +317,7 @@ export function openCLIAdapterNodePresentation(
 export function openCLIAdapterNodeMaterialization(
   node: WorkflowOpenCLIAdapterNode,
 ): WorkflowOpenCLIAdapterMaterialization {
+  if (node.status === "preview_only" || node.status === "design_only") return "unavailable"
   if (
     node.runtimeReadiness === "source_slot_ready" ||
     node.runtimeReadiness === "source_slot_requires_params" ||

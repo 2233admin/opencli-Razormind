@@ -217,7 +217,7 @@ def test_legacy_keyword_slots_unchanged_for_both_known_sites(monkeypatch):
             "sourceGroup": "social",
             "site": "xiaohongshu",
             "command": "search",
-            "args": {"keyword": "和 AI"},
+            "args": {"keyword": "AI"},
         },
         {
             "id": "bilibili",
@@ -225,8 +225,19 @@ def test_legacy_keyword_slots_unchanged_for_both_known_sites(monkeypatch):
             "sourceGroup": "video",
             "site": "bilibili",
             "command": "search",
-            "args": {"keyword": "和 AI"},
+            "args": {"keyword": "AI"},
         },
+    ]
+
+
+def test_keyword_excludes_platform_glue_and_downstream_processing(monkeypatch):
+    text = "抓小红书和B站的AI热帖，清洗去重后保存"
+
+    slots = _legacy_keyword_slots_for_need(text)
+
+    assert [slot["args"] for slot in slots] == [
+        {"keyword": "AI"},
+        {"keyword": "AI"},
     ]
 
 

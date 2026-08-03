@@ -1350,6 +1350,12 @@ async def start_workflow_run(
             fleet_match,
             **dispatch_kwargs,
         )
+        if not is_write:
+            output_items, agent_dispatch_details = _bounded_opencli_dispatch_result(
+                output_items,
+                agent_dispatch_details,
+                max_items=body.project.settings.maxItemsPerRun,
+            )
         output_items = _opencli_dispatch_source_items(node, dispatch, output_items)
         batch = _batch_reference(body.project.id, run_id, dispatch)
         if output_items:
@@ -3005,6 +3011,28 @@ def _opencli_dispatch_source_items(
         }
         for index, item in enumerate(raw_items)
     ]
+
+
+def _bounded_opencli_dispatch_result(
+    raw_items: list[dict[str, Any]],
+    details: dict[str, object] | None,
+    *,
+    max_items: int,
+) -> tuple[list[dict[str, Any]], dict[str, object] | None]:
+    """Enforce the workflow-level item cap when an adapter cannot push it down."""
+
+    limit = max(1, max_items)
+    received_count = len(raw_items)
+    items = raw_items[:limit]
+    if details is None or received_count <= limit:
+        return items, details
+    return items, {
+        **details,
+        "itemCount": len(items),
+        "receivedItemCount": received_count,
+        "maxItemsPerRun": limit,
+        "truncated": True,
+    }
 
 
 def _is_local_opencli_dispatch(details: dict[str, object] | None) -> bool:

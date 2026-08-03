@@ -14,7 +14,7 @@ from backend.models.record import CollectedRecord
 from backend.models.source import DataSource
 from backend.models.task import CollectionTask
 from backend.models.workflow_run import WorkflowRun, WorkflowRunEvent
-from backend.workflow.opencli_hda_tracer import _RUNS
+from backend.workflow.opencli_hda_tracer import _RUNS, _bounded_opencli_dispatch_result
 from tests.fixtures.workflow_conformance import workflow_conformance_project
 from tests.integration.test_workflow_compile_api import (
     _nested_operator_project,
@@ -159,6 +159,23 @@ def _multi_source_opencli_hda_project() -> dict:
             "canWriteInbox": True,
             "allowedDomains": ["bilibili.com", "xiaohongshu.com"],
         },
+    }
+
+
+def test_opencli_dispatch_result_enforces_workflow_item_cap() -> None:
+    items, details = _bounded_opencli_dispatch_result(
+        [{"id": "1"}, {"id": "2"}, {"id": "3"}],
+        {"success": True, "itemCount": 3},
+        max_items=1,
+    )
+
+    assert items == [{"id": "1"}]
+    assert details == {
+        "success": True,
+        "itemCount": 1,
+        "receivedItemCount": 3,
+        "maxItemsPerRun": 1,
+        "truncated": True,
     }
 
 
