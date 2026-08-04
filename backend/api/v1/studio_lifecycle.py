@@ -28,6 +28,7 @@ from backend.models.studio import (
 from backend.schemas import workflow as workflow_schemas
 from backend.schemas.common import ApiResponse
 from backend.workflow.compiler import compile_workflow_project
+from backend.workflow.trigger_scope import scoped_project, select_active_union
 
 router = APIRouter()
 
@@ -55,6 +56,60 @@ def _isolated_source_errors(
         for node in project.nodes
         if node.kind == "source" and node.id not in connected_sources
     ]
+
+
+def _parked_diagnostics(
+    project: workflow_schemas.WorkflowProject,
+    parked_ids: list[str],
+) -> list[workflow_schemas.WorkflowCompileError]:
+    """Emit node-anchored diagnostics for every parked canvas node.
+
+    Membership comes first (one ``parked_node`` row per parked id, in authored
+    order). Any original configuration diagnostic for the same node follows in
+    its existing order so the UI can render each failure cause individually.
+    """
+
+    parked_set = set(parked_ids)
+    diagnostics: list[workflow_schemas.WorkflowCompileError] = []
+    for node_id in parked_ids:
+        diagnostics.append(
+            workflow_schemas.WorkflowCompileError(
+                code="parked_node",
+                message=f'Workflow node "{node_id}" is not connected to a supported trigger.',
+                node_id=node_id,
+                path=["nodes", node_id],
+            )
+        )
+
+    # Compile parked nodes in isolation to surface configuration diagnostics
+    # (unknown bindings, missing params, etc.) as warnings without edges that
+    # would produce irrelevant port-mismatch noise.
+    if not parked_set:
+        return diagnostics
+    parked_nodes = [n for n in project.nodes if n.id in parked_set]
+    parked_project = workflow_schemas.WorkflowProject(
+        id=project.id,
+        name=project.name,
+        profile=project.profile,
+        version=project.version,
+        nodes=parked_nodes,
+        edges=[],
+        settings=project.settings,
+        adapters=list(project.adapters),
+        agentPermissions=project.agentPermissions,
+    )
+    parked_result = compile_workflow_project(parked_project)
+    for error in parked_result.errors:
+        if error.node_id and error.node_id in parked_set:
+            diagnostics.append(
+                workflow_schemas.WorkflowCompileError(
+                    code=error.code,
+                    message=error.message,
+                    node_id=error.node_id,
+                    path=error.path,
+                )
+            )
+    return diagnostics
 
 
 def _image_generation_nodes(
@@ -185,6 +240,9 @@ async def validate_draft(
         project_id=project_id,
         workflow_id=workflow_id,
     )
+    warnings: list[workflow_schemas.WorkflowCompileError] = []
+    valid = False
+    stored_graph: dict[str, Any] | None = None
     try:
         project = workflow_schemas.WorkflowProject.model_validate(resolved_graph)
     except ValidationError as exc:
@@ -196,25 +254,47 @@ async def validate_draft(
             )
             for error in exc.errors()
         )
-        valid = False
     else:
-        errors.extend(_isolated_source_errors(project))
-        if errors:
-            valid = False
+        active_union = select_active_union(project)
+        if not active_union.has_supported_trigger:
+            # Legacy / media-canvas / non-trigger workflows preserve the
+            # existing full-graph validation path unchanged.
+            errors.extend(_isolated_source_errors(project))
+            if not errors:
+                result = compile_workflow_project(project)
+                errors = list(result.errors)
+                if result.valid and result.plan is not None:
+                    valid = True
+                    stored_graph = resolved_graph
         else:
-            result = compile_workflow_project(project)
-            errors = result.errors
-            valid = result.valid
-
+            scoped = scoped_project(
+                project=project,
+                active_ids=active_union.active_node_ids,
+                external_ids={
+                    node.id
+                    for node in project.nodes
+                    if isinstance(node.params.get("externalWorkflow"), dict)
+                },
+            )
+            errors.extend(_isolated_source_errors(scoped))
+            if not errors:
+                scoped_result = compile_workflow_project(scoped)
+                errors = list(scoped_result.errors)
+                if scoped_result.valid and scoped_result.plan is not None:
+                    valid = True
+                    stored_graph = scoped.model_dump(mode="json")
+                    warnings.extend(
+                        _parked_diagnostics(project, active_union.parked_node_ids)
+                    )
     row = StudioWorkflowValidationRun(
         workflow_id=workflow_id,
         draft_revision=draft.revision,
         status="completed" if valid else "failed",
         valid=valid,
         errors=[error.model_dump(mode="json") for error in errors],
-        warnings=[],
+        warnings=[warning.model_dump(mode="json") for warning in warnings],
         compile_version=workflow_schemas.WORKFLOW_COMPILE_VERSION,
-        resolved_graph=resolved_graph if valid else None,
+        resolved_graph=stored_graph,
     )
     db.add(row)
     await db.flush()

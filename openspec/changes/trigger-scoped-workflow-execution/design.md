@@ -41,13 +41,13 @@ Supported kinds and precedence are intentionally identical to the current regist
 4. Registry output is single-valued. If an authored node could satisfy both schedule and webhook predicates, `resolve_runtime_metadata` checks webhook first, so `workflow.trigger.webhook_input` wins. Native or other earlier resolver branches win by returning a different binding and therefore are not trigger entries.
 5. When `triggerNodeId` is supplied, it wins and must exist, be a supported trigger, and match the normalized request kind.
 6. Without an id, select exactly one matching trigger; zero is `workflow_trigger_kind_mismatch`, more than one is `workflow_trigger_ambiguous`.
-7. A project with no supported trigger is invalid; the old compile-then-select fallback is not carried into authoritative source-level selection.
+7. Trigger-scoped selection applies only when the authored graph contains at least one supported trigger entry. A graph with no supported trigger preserves the existing full-graph validation and Run behavior for legacy, media-canvas, and other non-trigger workflows; it does not classify the entire graph as parked. Once any supported trigger exists, the old compile-then-select fallback is not used.
 
 Alternative rejected: compile the complete graph and filter compile errors afterward. That cannot produce a trustworthy plan when full compilation fails and risks accidentally suppressing active structural errors.
 
 ### Decision 2: Validation discovers active trigger components and demotes only parked diagnostics
 
-Studio validation shall discover every supported trigger entry, compute the union of their downstream components, and compile that active union. A draft with no supported trigger is invalid. Errors attached to active nodes/edges remain errors.
+Studio validation shall discover every supported trigger entry, compute the union of their downstream components, and compile that active union. If the graph has no supported trigger entry, validation shall preserve the existing full-graph path and diagnostics. Errors attached to active nodes/edges remain errors.
 
 The validator shall emit exactly one membership warning per parked node using `WorkflowCompileError(code="parked_node", node_id=<id>, path=["nodes", <id>])`, then preserve any parked-node configuration diagnostics as warnings with their original code and node id. Warning ordering shall be stable by authored node order and diagnostic order. Existing `warnings: list[WorkflowCompileError]` storage and response shape shall be reused. The canvas derives `parkedCount` from unique membership warnings and `activeCount` from authored node count minus `parkedCount`; no API schema expansion is authorized unless this is proven impossible.
 

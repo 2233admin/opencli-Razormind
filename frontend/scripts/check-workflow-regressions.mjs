@@ -1123,6 +1123,20 @@ test('workflow validation waits for the runtime capability catalog', async () =>
   assert.match(session, /capabilityLoading \? '正在加载运行能力目录'/)
 })
 
+test('trigger scope validation shows active and parked node counts with a stable testid', async () => {
+  const session = await readSource('components/flow/workflow-editor-session.tsx')
+
+  assert.match(session, /data-testid="workflow-validation-scope-summary"/)
+  assert.match(session, /活动节点/)
+  assert.match(session, /未接入节点/)
+  assert.match(session, /validationScope/)
+  assert.match(session, /setValidationScope/)
+  assert.match(session, /parkedNodeIds/)
+  assert.match(session, /parked_node/)
+  // P3: on graph change the stale scope must be cleared
+  assert.match(session, /setValidationScope\(null\)/)
+})
+
 test('workflow separates lightweight canvas actions from the guided node picker', async () => {
   const [editor, surface, palette, contextMenu, commandStrip, effects, runTrace] = await Promise.all([
     readSource('components/flow/workflow-editor.tsx'),

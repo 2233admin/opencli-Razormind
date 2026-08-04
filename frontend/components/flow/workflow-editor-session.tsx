@@ -74,6 +74,7 @@ export function WorkflowEditorSession({ forceStandalone = false }: WorkflowEdito
   const [releaseState, setReleaseState] = useState<'idle' | 'validating' | 'validated' | 'publishing' | 'published' | 'blocked'>('idle')
   const [releaseBlocker, setReleaseBlocker] = useState<string | null>(null)
   const [publishedVersion, setPublishedVersion] = useState<number | null>(null)
+  const [validationScope, setValidationScope] = useState<{ active: number; parked: number } | null>(null)
   const loaded = useRef(false)
   const revision = useRef<number | null>(null)
   const pendingGraph = useRef<typeof workflowProject | null>(null)
@@ -226,6 +227,7 @@ export function WorkflowEditorSession({ forceStandalone = false }: WorkflowEdito
       setValidationRunId(null)
       setReleaseBlocker(null)
       setPublishedVersion(null)
+      setValidationScope(null)
     }
   }, [workflowProject])
 
@@ -241,9 +243,24 @@ export function WorkflowEditorSession({ forceStandalone = false }: WorkflowEdito
     }
     setReleaseState('validating')
     setReleaseBlocker(null)
+    setValidationScope(null)
     try {
       await saveDraft(workflowProject)
       const run = await validateProjectWorkflowDraft(workspaceId, projectId, workflowId)
+      const validationRun = run as typeof run & {
+        warnings?: Array<{ code?: string; nodeId?: string | null; node_id?: string | null }>
+      }
+      const rawWarnings = Array.isArray(validationRun.warnings) ? validationRun.warnings : []
+      const parkedNodeIds = new Set(
+        rawWarnings
+          .filter((warning) => warning?.code === 'parked_node')
+          .map((warning) => warning?.nodeId ?? warning?.node_id)
+          .filter((value): value is string => typeof value === 'string' && value.length > 0),
+      )
+      const canvasNodeCount = workflowProject.nodes.length
+      const parkedCount = parkedNodeIds.size
+      const activeCount = Math.max(0, canvasNodeCount - parkedCount)
+      setValidationScope({ active: activeCount, parked: parkedCount })
       if (!run.valid || run.status !== 'completed') {
         const details = run.errors.slice(0, 3).map((error) => error.message).filter(Boolean)
         throw new Error(details.length ? `验证失败：${details.join('；')}` : `验证 Run 状态：${run.status}`)
@@ -406,6 +423,12 @@ export function WorkflowEditorSession({ forceStandalone = false }: WorkflowEdito
       {workspaceId && projectId && workflowId ? (
         <div className="absolute inset-x-3 bottom-3 z-40 ml-auto flex max-w-4xl flex-col gap-2 rounded-md border bg-background/90 p-2 backdrop-blur-xl">
           <WorkflowLifecycleStrip state={documentState === 'error' || documentState === 'conflict' || capabilityError ? 'blocked' : releaseState === 'idle' ? 'draft' : releaseState} revision={savedRevision} publishedVersion={publishedVersion} blockerText={documentState === 'conflict' ? '草稿已在其他位置更新，请重新加载。' : documentState === 'error' ? '草稿保存失败。' : capabilityError ? '运行能力目录不可用，暂时无法验证。' : (releaseBlocker ?? undefined)} />
+          {validationScope ? (
+            <div className="flex items-center justify-between gap-2 px-1.5 text-2xs text-muted-foreground" role="status" data-testid="workflow-validation-scope-summary">
+              <span>{`活动节点 ${validationScope.active} · 未接入节点 ${validationScope.parked}`}</span>
+              <span className="text-3xs opacity-70">未接入节点仅提示，不会阻止发布</span>
+            </div>
+          ) : null}
           <div className="flex flex-wrap items-center justify-end gap-2">
             <div className="mr-auto flex items-center gap-1.5 px-1.5 text-xs text-muted-foreground" role="status">
               {documentState === 'loading' || documentState === 'saving' ? <Loader2 className="size-3.5 animate-spin" /> : null}

@@ -305,14 +305,63 @@ async def start_workflow_run(
     trace_id = body.traceId or str(uuid.uuid4())
     started_at = _utcnow()
     prior_events = list(existing_events or [])
+    # Source-level trigger scope selection runs before authoritative compilation
+    # so a disconnected, incomplete canvas node cannot block a valid
+    # trigger-reachable component. The compiled-runtime selector remains as a
+    # defensive assertion against post-compile drift (e.g. template expansion
+    # producing a second matching trigger entry).
+    from backend.workflow.trigger_scope import has_supported_triggers, select_trigger_scope
+
+    has_triggers = has_supported_triggers(body.project)
+    if has_triggers:
+        scope_result = select_trigger_scope(
+            body.project,
+            trigger_kind=body.trigger.kind,
+            trigger_node_id=body.trigger.triggerNodeId,
+        )
+        if scope_result.selection_error is not None:
+            scope_project = body.project
+            runtime_nodes: list[CompiledWorkflowNode] = []
+            errors = [scope_result.selection_error]
+            events = _compile_failure_events(
+                workflow_id=body.project.id,
+                run_id=run_id,
+                trace_id=trace_id,
+                errors=errors,
+            )
+            stored_events = [*prior_events, *events]
+            projection = _build_projection(
+                workflow_id=body.project.id,
+                run_id=run_id,
+                trace_id=trace_id,
+                package_node_id=body.packageNodeId,
+                started_at=started_at,
+                valid=False,
+                errors=errors,
+                runtime_nodes=[],
+                events=stored_events,
+            )
+            await _store_workflow_run(
+                run_id,
+                request=body,
+                projection=projection,
+                events=stored_events,
+                session=session,
+                workflow_version_id=workflow_version_id,
+                studio_workflow_version_id=studio_workflow_version_id,
+            )
+            return projection
+        scope_project = scope_result.project
+    else:
+        scope_project = body.project
     compile_result = (
         await compile_managed_dify_workflow_project(
-            body.project,
+            scope_project,
             graphon_client=graphon_client,
             session=session,
         )
         if graphon_client is not None
-        else compile_workflow_project(body.project)
+        else compile_workflow_project(scope_project)
     )
 
     if not compile_result.valid or compile_result.plan is None:
@@ -428,7 +477,7 @@ async def start_workflow_run(
     ) and (body.packageNodeId is not None or _select_package_id(runtime_nodes, None) is not None)
     trace = (
         build_opencli_hda_trace(
-            body.project,
+            scope_project,
             package_node_id=body.packageNodeId,
             run_id=run_id,
             trace_id=trace_id,
@@ -1565,8 +1614,8 @@ async def start_workflow_run(
         trace_id=trace_id,
         package_node_id=(trace.packageNodeId if trace else None) or body.packageNodeId,
         started_at=started_at,
-        valid=trace.valid if trace else True,
-        errors=trace.errors if trace else [],
+        valid=compile_result.valid,
+        errors=list(compile_result.errors) if trace is None else compile_result.errors,
         runtime_nodes=runtime_nodes,
         events=events,
     )
@@ -1589,8 +1638,8 @@ async def start_workflow_run(
                 package_node_id=(trace.packageNodeId if trace else None)
                 or body.packageNodeId,
                 started_at=started_at,
-                valid=trace.valid if trace else True,
-                errors=trace.errors if trace else [],
+                valid=compile_result.valid,
+                errors=list(compile_result.errors) if trace is None else compile_result.errors,
                 runtime_nodes=runtime_nodes,
                 events=stored.events,
             )

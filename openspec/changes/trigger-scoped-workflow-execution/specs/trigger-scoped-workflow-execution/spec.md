@@ -61,10 +61,10 @@ Studio validation SHALL evaluate the union of nodes reachable from supported tri
 - **THEN** validation returns `valid=false`
 - **AND** the defect remains in `errors`, not only in `warnings`.
 
-#### Scenario: Draft without a supported trigger cannot validate
-- **WHEN** the draft has nodes but no supported trigger entry
-- **THEN** validation returns `valid=false` with a workflow-trigger error
-- **AND** treating every node as parked SHALL NOT produce a false valid result.
+#### Scenario: Draft without a supported trigger preserves legacy behavior
+- **WHEN** the draft has no supported trigger entry
+- **THEN** validation and Run preserve the existing full-graph behavior and diagnostics
+- **AND** no node is classified as parked solely because the graph uses a legacy, media-canvas, or other non-trigger workflow shape.
 
 #### Scenario: Multiple supported triggers remain independent
 - **WHEN** a draft contains multiple supported trigger entries
