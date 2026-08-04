@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-08-05
+goal: A valid trigger-reachable chain runs even when disconnected canvas nodes
+  are incomplete, with explicit parked-node visibility and no weakening of
+  active-chain validation.
