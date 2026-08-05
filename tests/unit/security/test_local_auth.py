@@ -44,6 +44,16 @@ async def test_first_run_setup_creates_local_admin_and_session(client, monkeypat
     assert identity.json()["data"]["auth_method"] == "local"
     assert identity.json()["data"]["is_platform_admin"] is True
 
+    identity_with_stale_fleet_token = await client.get(
+        "/api/v1/auth/me",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "X-API-Token": "stale-browser-token",
+        },
+    )
+    assert identity_with_stale_fleet_token.status_code == 200
+    assert identity_with_stale_fleet_token.json()["data"]["auth_method"] == "local"
+
 
 @pytest.mark.asyncio
 async def test_local_admin_login_and_second_setup_are_guarded(client, monkeypatch):

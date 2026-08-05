@@ -194,12 +194,19 @@ class FleetAuthMiddleware:
             return
 
         headers = Headers(scope=scope)
-        credential = headers.get("x-api-token", "") or _bearer_credential(headers)
+        credentials = (
+            headers.get("x-api-token", ""),
+            _bearer_credential(headers),
+        )
         bootstrap = get_settings().bootstrap_admin_token
-        if credential and (
-            _token_matches(credential, token)
-            or (bootstrap and _token_matches(credential, bootstrap))
-            or is_local_session(credential)
+        if any(
+            credential
+            and (
+                _token_matches(credential, token)
+                or (bootstrap and _token_matches(credential, bootstrap))
+                or is_local_session(credential)
+            )
+            for credential in credentials
         ):
             await self.app(scope, receive, send)
             return
