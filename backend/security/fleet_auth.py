@@ -19,6 +19,10 @@ Exemptions (deliberate — issue 04: "exempt if and only if they leak nothing"):
 - ``/docs``, ``/redoc``, ``/openapi.json`` — outside the ``/api`` prefix.
   They disclose the API *schema* but no data; issue 04's scope is "every
   /api route". Tighten separately if schema disclosure becomes a concern.
+- ``/api/v1/auth/local/status``, ``/setup``, and ``/login`` — the minimum
+  unauthenticated surface required to establish a local administrator session.
+  Setup still requires the Bootstrap credential, login is rate-limited, and
+  status returns only a boolean.
 
 Websocket endpoints under ``/api`` (the agent reverse channel in
 api/v1/nodes.py and api/v1/browsers.py) are guarded by this same middleware.
@@ -73,9 +77,17 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from starlette.websockets import WebSocketClose
 
 from backend.config import get_settings
+from backend.security.local_auth import is_local_session
 
 #: Path prefixes guarded by :class:`FleetAuthMiddleware`.
 PROTECTED_PREFIXES = ("/api", "/mcp")
+PUBLIC_LOCAL_AUTH_PATHS = frozenset(
+    {
+        "/api/v1/auth/local/status",
+        "/api/v1/auth/local/setup",
+        "/api/v1/auth/local/login",
+    }
+)
 
 _LOCALHOST_HOSTS = frozenset({"localhost", "::1"})
 
@@ -156,6 +168,9 @@ class FleetAuthMiddleware:
         ):
             await self.app(scope, receive, send)
             return
+        if scope["type"] == "http" and scope["path"] in PUBLIC_LOCAL_AUTH_PATHS:
+            await self.app(scope, receive, send)
+            return
 
         # Read per request: get_settings() is lru_cached (cheap), but
         # api/v1/system.py may cache_clear() it at runtime after a config
@@ -180,7 +195,12 @@ class FleetAuthMiddleware:
 
         headers = Headers(scope=scope)
         credential = headers.get("x-api-token", "") or _bearer_credential(headers)
-        if credential and _token_matches(credential, token):
+        bootstrap = get_settings().bootstrap_admin_token
+        if credential and (
+            _token_matches(credential, token)
+            or (bootstrap and _token_matches(credential, bootstrap))
+            or is_local_session(credential)
+        ):
             await self.app(scope, receive, send)
             return
 

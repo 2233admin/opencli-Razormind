@@ -16,6 +16,7 @@ from backend.api.v1 import (
     geo_acquisition,
     identity,
     image_studio,
+    local_auth,
     model_defaults,
     nodes,
     notifications,
@@ -80,6 +81,7 @@ v1_router.include_router(workers.router)
 v1_router.include_router(dashboard.router)
 v1_router.include_router(system.router)
 v1_router.include_router(identity.router)
+v1_router.include_router(local_auth.router)
 v1_router.include_router(workspaces.router)
 v1_router.include_router(workspace_sources.router)
 v1_router.include_router(project_source_bindings.router)

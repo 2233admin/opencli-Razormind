@@ -58,6 +58,9 @@ class Settings(BaseSettings):
     # Empty (default) = auth disabled — dev posture, which the startup bind
     # guard only allows on a localhost bind. Env: API_AUTH_TOKEN.
     api_auth_token: str = ""
+    # Emergency first-run/recovery credential. Local administrator setup
+    # verifies this value but never persists it as a daily login secret.
+    bootstrap_admin_token: str = ""
 
     # CLI channel binary allowlist (ADR-0005, audit P0-4). The cli channel is
     # an arbitrary-binary-execution surface, so it only runs binaries the

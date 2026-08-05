@@ -93,4 +93,5 @@ printf '\nOpenCLI Admin %s is ready.\n' "$VERSION"
 printf 'URL: http://localhost:%s\n' "${FRONTEND_PORT:-3010}"
 printf 'BOOTSTRAP_ADMIN_TOKEN: %s\n' "$bootstrap_token"
 printf 'API_AUTH_TOKEN: %s\n' "$api_token"
-printf 'Use BOOTSTRAP_ADMIN_TOKEN in the first login field and API_AUTH_TOKEN in the optional fleet field. Both are stored in %s/.env\n' "$INSTALL_DIR"
+printf 'First run: open the URL, create a local administrator password, and enter BOOTSTRAP_ADMIN_TOKEN once.\n'
+printf 'After setup, sign in with the administrator password. Recovery tokens remain stored in %s/.env\n' "$INSTALL_DIR"

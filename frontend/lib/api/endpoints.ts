@@ -91,6 +91,22 @@ export const resetWorkspaceSettings = () =>
 export const getCurrentIdentity = () =>
   apiClient.get<ApiResponse<AuthIdentity>>('/auth/me').then((r) => r.data.data)
 
+export const getLocalAuthStatus = () =>
+  apiClient.get<ApiResponse<{ configured: boolean }>>('/auth/local/status').then((r) => r.data.data)
+
+export const loginLocalAdmin = (password: string) =>
+  apiClient
+    .post<ApiResponse<{ access_token: string }>>('/auth/local/login', { password })
+    .then((r) => r.data.data.access_token)
+
+export const setupLocalAdmin = (bootstrapToken: string, password: string) =>
+  apiClient
+    .post<ApiResponse<{ access_token: string }>>('/auth/local/setup', {
+      bootstrap_token: bootstrapToken,
+      password,
+    })
+    .then((r) => r.data.data.access_token)
+
 export const listMyWorkspaces = () =>
   apiClient.get<ApiResponse<WorkspaceSummary[]>>('/workspaces').then((r) => r.data.data)
 

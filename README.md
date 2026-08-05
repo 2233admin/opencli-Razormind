@@ -57,10 +57,10 @@ Invoke-WebRequest https://raw.githubusercontent.com/2233admin/opencli-Razormind/
 
 安装完成后，终端会打印：
 
-- `BOOTSTRAP_ADMIN_TOKEN`：首次进入管理界面使用；
+- `BOOTSTRAP_ADMIN_TOKEN`：首次创建本地管理员及紧急恢复时使用；
 - `API_AUTH_TOKEN`：Fleet、Agent、API 和 MCP 访问使用。
 
-两者同时保存在安装目录的 `.env`。不要公开 noVNC、令牌或浏览器调试端口；远程部署建议使用 HTTPS、反向代理或 SSH 隧道。
+首次进入控制台时设置本地管理员密码并输入一次 `BOOTSTRAP_ADMIN_TOKEN`；后续直接使用管理员密码登录。令牌同时保存在安装目录的 `.env`，仅供恢复使用。不要公开 noVNC、令牌或浏览器调试端口；远程部署建议使用 HTTPS、反向代理或 SSH 隧道。
 
 ## 正常的研究流程
 
