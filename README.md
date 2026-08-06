@@ -173,25 +173,21 @@ flowchart LR
 git clone https://github.com/2233admin/opencli-Razormind.git
 cd opencli-Razormind
 
-uv sync
-uv run uvicorn backend.main:app --host 127.0.0.1 --port 8031
+uv sync --extra dev
+npm run dev:backend
 ~~~
 
 另开终端：
 
 ~~~bash
-cd frontend
-pnpm install
-pnpm dev --hostname 127.0.0.1 --port 3010
+npm run dev:frontend
 ~~~
 
 常用验证：
 
 ~~~bash
-npm run lint:frontend
-npm run typecheck:frontend
-npm run build:frontend
-uv run pytest
+npm run check
+npm run test:backend
 ~~~
 
 从源码构建完整 Docker 栈：
@@ -199,7 +195,7 @@ uv run pytest
 ~~~bash
 cp .env.docker.example .env
 # 设置 API_AUTH_TOKEN、BOOTSTRAP_ADMIN_TOKEN、SECRET_KEY、CREDENTIAL_ENCRYPTION_KEY
-docker compose -f docker-compose.yml -f docker-compose.build.yml up --build -d
+npm run docker:up
 ~~~
 
 ## 发布镜像

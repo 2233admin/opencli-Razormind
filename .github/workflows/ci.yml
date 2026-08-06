@@ -144,13 +144,14 @@ jobs:
         with:
           python-version-file: ".python-version"
 
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v7
+
       - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e .[dev]
+        run: uv sync --extra dev
 
       - name: Backend syntax check
-        run: python -m compileall backend
+        run: uv run python -m compileall backend
 
       # Coverage visibility, not a gate: pyproject.toml bakes in
       # `--cov-fail-under=80` via [tool.pytest.ini_options].addopts, but the
@@ -167,7 +168,7 @@ jobs:
       # The upstream oracle stays opt-in (DATAFLOW_RUN_UPSTREAM_ORACLE=1) and
       # self-skips in this job.
       - name: Backend tests (with coverage report)
-        run: python -m pytest tests/unit tests/compat tests/integration -m "not live" --cov=backend --cov-report=term-missing --cov-fail-under=0
+        run: uv run pytest tests/unit tests/compat tests/integration -m "not live" --cov=backend --cov-report=term-missing --cov-fail-under=0
 
   frontend-workflow-checks:
     runs-on: ubuntu-latest
@@ -237,28 +238,29 @@ jobs:
         with:
           python-version-file: ".python-version"
 
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v7
+
       - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e .[dev]
+        run: uv sync --extra dev
 
       - name: Wait for Postgres
-        run: python -c "import time; time.sleep(2)"
+        run: uv run python -c "import time; time.sleep(2)"
 
       - name: alembic upgrade head
-        run: alembic upgrade head
+        run: uv run alembic upgrade head
 
       # Catches broken downgrade() bodies / non-reversible migrations before
       # merge: a chain that only ever gets tested via upgrade() can silently
       # rot (dropped columns with no re-add, wrong op order, etc.).
       - name: alembic downgrade/upgrade smoke test
         run: |
-          alembic downgrade -1
-          alembic upgrade head
+          uv run alembic downgrade -1
+          uv run alembic upgrade head
 
       - name: Native intelligence and event spine PostgreSQL conformance
         run: >-
-          pytest tests/integration/test_intelligence_session_store.py
+          uv run pytest tests/integration/test_intelligence_session_store.py
           tests/integration/test_intelligence_session_migration.py
           tests/unit/test_workflow_run_events.py
           tests/integration/test_workflow_event_spine_migrations.py
@@ -274,7 +276,7 @@ jobs:
       # is caught. --no-cov: this is a targeted single-test step, not a coverage
       # run (pyproject's addopts would otherwise fail it under the 80% gate).
       - name: cursor FOR UPDATE locking (Postgres)
-        run: python -m pytest tests/unit/pipeline/test_db_cursor_store.py -k postgres --no-cov -p no:cacheprovider
+        run: uv run pytest tests/unit/pipeline/test_db_cursor_store.py -k postgres --no-cov -p no:cacheprovider
 
   cargo:
     runs-on: ubuntu-latest
