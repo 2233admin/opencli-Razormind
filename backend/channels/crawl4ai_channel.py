@@ -137,8 +137,13 @@ class Crawl4AIChannel(AbstractChannel):
             try:
                 parsed = json.loads(result.extracted_content)
             except (json.JSONDecodeError, TypeError) as exc:
+                # WIRING_GAP_LEDGER W1: error_type must be set so the
+                # SCHEMA_DRIFT chain (error_kinds -> control.recorder) fires
+                # instead of being dropped by recorder's `elif error_type is
+                # not None` guard.
                 raise ChannelFetchError(
-                    "crawl4ai: could not parse extracted_content as JSON"
+                    "crawl4ai: could not parse extracted_content as JSON",
+                    error_type=type(exc).__name__,
                 ) from exc
             items = parsed if isinstance(parsed, list) else [parsed]
 

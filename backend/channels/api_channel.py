@@ -119,7 +119,12 @@ class ApiChannel(AbstractChannel):
         try:
             data = response.json()
         except Exception as exc:
-            raise ChannelFetchError("Failed to parse API response as JSON") from exc
+            # WIRING_GAP_LEDGER W1: error_type must be set so the SCHEMA_DRIFT
+            # chain (error_kinds -> control.recorder) fires instead of being
+            # dropped by recorder's `elif error_type is not None` guard.
+            raise ChannelFetchError(
+                "Failed to parse API response as JSON", error_type=type(exc).__name__
+            ) from exc
 
         if result_path:
             for key in result_path.split("."):

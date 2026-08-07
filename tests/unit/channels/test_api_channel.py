@@ -7,6 +7,7 @@ import pytest
 
 from backend.channels.api_channel import ApiChannel, _resolve_dict_secrets, _resolve_secrets
 from backend.channels.base import ChannelFetchError, FetchContext
+from backend.control.error_kinds import ErrorKind, map_error_type
 
 
 @pytest.fixture(autouse=True)
@@ -645,6 +646,59 @@ async def test_fetch_http_error_raises_channel_fetch_error(channel):
 
     with pytest.raises(ChannelFetchError, match="500"):
         await channel.fetch(ctx)
+
+
+# ── WIRING_GAP_LEDGER W1: JSON parse failures must carry error_type so the
+# SCHEMA_DRIFT chain (error_kinds -> control.recorder) fires instead of being
+# dropped by recorder's `elif error_type is not None` guard. ────────────────
+
+@pytest.mark.asyncio
+async def test_fetch_non_json_response_classified_schema_drift(channel):
+    """fetch() JSON parse failure carries error_type mapping to SCHEMA_DRIFT."""
+    import json
+
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.raise_for_status = MagicMock()
+    mock_response.json = MagicMock(
+        side_effect=json.JSONDecodeError("Expecting value", "doc", 0)
+    )
+    http = AsyncMock()
+    http.request = AsyncMock(return_value=mock_response)
+    ctx = FetchContext(
+        config={"base_url": "https://api.example.com", "endpoint": "/data"},
+        params={},
+        http=http,
+    )
+
+    with pytest.raises(ChannelFetchError) as exc_info:
+        await channel.fetch(ctx)
+
+    assert exc_info.value.error_type == "JSONDecodeError"
+    assert map_error_type(exc_info.value.error_type) is ErrorKind.SCHEMA_DRIFT
+
+
+@pytest.mark.asyncio
+async def test_collect_non_json_response_classified_schema_drift(channel):
+    """collect() propagates fetch()'s error_type through ChannelResult.fail."""
+    import json
+
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.raise_for_status = MagicMock()
+    mock_response.json = MagicMock(
+        side_effect=json.JSONDecodeError("Expecting value", "doc", 0)
+    )
+    mock_client_ctx, _ = _make_mock_client(mock_response)
+
+    with patch("httpx.AsyncClient", return_value=mock_client_ctx):
+        result = await channel.collect(
+            {"base_url": "https://api.example.com", "endpoint": "/data"}, {}
+        )
+
+    assert result.success is False
+    assert result.error_type == "JSONDecodeError"
+    assert map_error_type(result.error_type) is ErrorKind.SCHEMA_DRIFT
 
 
 # ── AUDIT C13: gateway statuses classify retryable, other 4xx stay permanent ──

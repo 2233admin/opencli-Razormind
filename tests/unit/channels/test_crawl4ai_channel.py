@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from backend.channels.base import ChannelFetchError, FetchContext
 from backend.channels.crawl4ai_channel import Crawl4AIChannel
+from backend.control.error_kinds import ErrorKind, map_error_type
 
 
 def _sessionmaker(db_engine):
@@ -127,8 +128,14 @@ async def test_fetch_malformed_extracted_content_raises(channel):
         config={"url": "https://example.com", "selectors": {"title": "h1"}}, params={}
     )
     with patch("crawl4ai.AsyncWebCrawler", return_value=ctx_mgr):
-        with pytest.raises(ChannelFetchError, match="could not parse extracted_content"):
+        with pytest.raises(ChannelFetchError) as exc_info:
             await channel.fetch(ctx)
+
+    # WIRING_GAP_LEDGER W1: parse failures must carry error_type so the
+    # SCHEMA_DRIFT chain (error_kinds -> control.recorder) fires instead of
+    # being dropped by recorder's `elif error_type is not None` guard.
+    assert exc_info.value.error_type == "JSONDecodeError"
+    assert map_error_type(exc_info.value.error_type) is ErrorKind.SCHEMA_DRIFT
 
 
 @pytest.mark.asyncio
