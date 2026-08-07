@@ -41,6 +41,21 @@ def _submission() -> AcquisitionSubmission:
     )
 
 
+def _chat_submission() -> AcquisitionSubmission:
+    return AcquisitionSubmission.model_validate(
+        {
+            "request_id": "request-chat-1",
+            "idempotency_key": "attempt-chat-1",
+            "capability": {"id": "chat-ai.capture", "version": "1.0.0"},
+            "output_schema_version": "1",
+            "input": {"prompt": "如何选择适合团队的知识库工具？"},
+            "environment": {"locale": "zh-CN", "region": "CN"},
+            "required_artifacts": [],
+            "geo_refs": {"attempt_id": "attempt-chat-1"},
+        }
+    )
+
+
 @pytest.mark.asyncio
 async def test_official_site_execution_rejects_private_target_before_opencli(
     db_engine, monkeypatch
@@ -405,7 +420,7 @@ async def test_unknown_capability_invocation_fails_closed(db_engine):
     )
     submission_data = _submission().model_dump()
     submission_data["capability"] = {
-        "id": "chat-ai.capture",
+        "id": "unknown.capture",
         "version": "1.0.0",
     }
     submission = AcquisitionSubmission.model_validate(submission_data)
@@ -428,24 +443,92 @@ async def test_unknown_capability_invocation_fails_closed(db_engine):
         assert execution.status == AcquisitionExecutionStatus.FAILED
         assert execution.failure == {
             "code": "unsupported_capability_invocation",
-            "message": "No invocation is registered for chat-ai.capture@1.0.0 schema 1",
+            "message": "No invocation is registered for unknown.capture@1.0.0 schema 1",
         }
     channel.collect.assert_not_awaited()
 
 
-def test_dispatch_registry_contains_only_real_versioned_capabilities():
+def test_dispatch_registry_contains_real_versioned_capabilities():
     from backend.acquisition.registry import list_capability_registrations
 
     registrations = list_capability_registrations()
 
     assert [registration.identity for registration in registrations] == [
-        ("official-site.observe", "1.0.0", "1")
+        ("official-site.observe", "1.0.0", "1"),
+        ("chat-ai.capture", "1.0.0", "1"),
     ]
     assert registrations[0].invocation == {
         "site": "official-site",
         "command": "observe",
         "format": "json",
     }
+    assert registrations[1].invocation == {
+        "site": "chatgpt",
+        "command": "capture",
+        "format": "json",
+        "args": {"timeout": 180},
+    }
+    assert registrations[1].required_profile_kind == "authenticated"
+
+
+@pytest.mark.asyncio
+async def test_chat_capture_routes_only_to_authenticated_profile(db_engine):
+    from backend.acquisition.runner import run_acquisition_execution
+
+    sessions = async_sessionmaker(
+        db_engine, class_=AsyncSession, expire_on_commit=False
+    )
+    async with sessions() as db:
+        outcome = await acquisition_service.submit_execution(db, _chat_submission())
+        await acquisition_service.queue_execution(db, outcome.execution)
+        execution_id = outcome.execution.id
+
+    pool = init_pool(
+        ["http://anonymous:9222", "http://signed-in:9222"], use_redis=False
+    )
+    pool.set_profile_kind("http://anonymous:9222", "anonymous")
+    pool.set_profile_kind("http://signed-in:9222", "authenticated")
+    payload = {
+        "capabilityId": "chat-ai.capture",
+        "capabilityVersion": "1.0.0",
+        "outputSchemaVersion": "1",
+        "target": "chatgpt",
+        "prompt": "如何选择适合团队的知识库工具？",
+        "completionState": "complete",
+        "answer": {"text": "可以从权限、检索质量和维护成本三个方面比较。"},
+        "citations": [],
+        "displayedUrl": "https://chatgpt.com/c/example",
+        "finalUrl": "https://chatgpt.com/c/example",
+    }
+    channel = AsyncMock()
+    channel.collect.return_value = ChannelResult.ok([payload])
+
+    await run_acquisition_execution(
+        execution_id, session_factory=sessions, channel=channel
+    )
+
+    channel.collect.assert_awaited_once_with(
+        {
+            "site": "chatgpt",
+            "command": "capture",
+            "format": "json",
+            "args": {"timeout": 180},
+        },
+        {
+            "prompt": "如何选择适合团队的知识库工具？",
+            "chrome_endpoint": "http://signed-in:9222",
+            "required_profile_kind": "authenticated",
+        },
+    )
+    async with sessions() as db:
+        execution = await acquisition_service.get_execution(db, execution_id)
+        assert execution is not None
+        assert execution.status == AcquisitionExecutionStatus.SUCCEEDED
+        assert execution.result_payload["payload"] == payload
+        assert execution.result_payload["operational"]["browser"] == {
+            "endpoint": "http://signed-in:9222",
+            "profile_kind": "authenticated",
+        }
 
 
 @pytest.mark.asyncio
@@ -617,7 +700,7 @@ async def test_official_site_execution_preserves_payload_in_versioned_envelope(
             "operational": {
                 "runtime": {
                     "ohmyopencli_repo_commit": (
-                        "73cc60c83586ef2c95469b3b70d6cfc80fa5bc53"
+                        "54f729d6447238918c4098e322d80b1c64ab8a7a"
                     ),
                     "capability_source_commit": (
                         "73cc60c83586ef2c95469b3b70d6cfc80fa5bc53"

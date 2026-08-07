@@ -12,7 +12,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-OHMYOPENCLI_COMMIT = "73cc60c83586ef2c95469b3b70d6cfc80fa5bc53"
+OHMYOPENCLI_COMMIT = "54f729d6447238918c4098e322d80b1c64ab8a7a"
 CAPABILITY_SOURCE_COMMIT = "73cc60c83586ef2c95469b3b70d6cfc80fa5bc53"
 OPENCLI_VERSION = "1.8.5"
 

@@ -35,6 +35,14 @@ class NoCleanProfileError(RuntimeError):
         super().__init__(self.code)
 
 
+class NoMatchingProfileError(RuntimeError):
+    """No browser profile of the capability's required kind is available."""
+
+    def __init__(self, profile_kind: str) -> None:
+        self.code = f"no_{profile_kind}_profile"
+        super().__init__(self.code)
+
+
 class LocalBrowserPool:
     """In-process pool backed by per-endpoint asyncio.Queue slots.
 
@@ -62,10 +70,11 @@ class LocalBrowserPool:
         self._agent_protocols: dict[str, str | None] = {ep: None for ep in endpoints}
         # node_type per endpoint: "docker" (started in container) | "shell" (native process)
         self._node_types: dict[str, str] = {ep: "docker" for ep in endpoints}
-        # Fail closed: an endpoint is potentially personalized until an agent
-        # or operator explicitly registers it as a dedicated anonymous profile.
+        # Managed acquisition routes only to explicitly classified profiles.
+        # Merely appearing in a legacy endpoint setting does not certify an
+        # account-backed session or a dedicated anonymous browser.
         self._profile_kinds: dict[str, str] = {
-            ep: "authenticated" for ep in endpoints
+            ep: "unclassified" for ep in endpoints
         }
         logger.info(
             "BrowserPool (local): %d Chrome instance(s): %s",
@@ -143,12 +152,27 @@ class LocalBrowserPool:
             raise NoCleanProfileError()
         return candidates
 
-    def select_anonymous_endpoint(self) -> str:
-        candidates = self.anonymous_endpoints()
+    def profile_endpoints(self, profile_kind: str) -> list[str]:
+        candidates = [
+            endpoint
+            for endpoint in self.endpoints
+            if self.get_profile_kind(endpoint) == profile_kind
+        ]
+        if not candidates:
+            if profile_kind == "anonymous":
+                raise NoCleanProfileError()
+            raise NoMatchingProfileError(profile_kind)
+        return candidates
+
+    def select_endpoint(self, profile_kind: str) -> str:
+        candidates = self.profile_endpoints(profile_kind)
         return next(
             (endpoint for endpoint in candidates if self.available_for(endpoint)),
             candidates[0],
         )
+
+    def select_anonymous_endpoint(self) -> str:
+        return self.select_endpoint("anonymous")
 
     async def _acquire_any(self) -> str:
         """Wait for whichever endpoint slot becomes free first."""
@@ -226,7 +250,7 @@ class LocalBrowserPool:
         logger.info("BrowserPool: endpoint %s node_type set to %s", endpoint, node_type)
 
     def get_profile_kind(self, endpoint: str) -> str:
-        return self._profile_kinds.get(endpoint, "authenticated")
+        return self._profile_kinds.get(endpoint, "unclassified")
 
     def set_profile_kind(self, endpoint: str, profile_kind: str) -> None:
         if profile_kind not in {"anonymous", "authenticated"}:
@@ -249,7 +273,7 @@ class LocalBrowserPool:
         self._agent_urls.setdefault(endpoint, None)
         self._agent_protocols.setdefault(endpoint, None)
         self._node_types.setdefault(endpoint, "docker")
-        self._profile_kinds.setdefault(endpoint, "authenticated")
+        self._profile_kinds.setdefault(endpoint, "unclassified")
         self._total += 1
         logger.info("BrowserPool: added endpoint %s (total: %d)", endpoint, self._total)
 
@@ -311,7 +335,7 @@ class RedisBrowserPool:
         self._total = len(endpoints)
         self._modes: dict[str, str] = {ep: "bridge" for ep in endpoints}
         self._profile_kinds: dict[str, str] = {
-            ep: "authenticated" for ep in endpoints
+            ep: "unclassified" for ep in endpoints
         }
 
     def _client(self):
@@ -349,7 +373,7 @@ class RedisBrowserPool:
             self._endpoints.append(endpoint)
             self._total += 1
             self._modes.setdefault(endpoint, "bridge")
-            self._profile_kinds.setdefault(endpoint, "authenticated")
+            self._profile_kinds.setdefault(endpoint, "unclassified")
 
         async with self._client() as r:
             added = await r.sadd(self._REGISTRY_KEY, endpoint)
@@ -460,7 +484,7 @@ class RedisBrowserPool:
         self._modes[endpoint] = mode
 
     def get_profile_kind(self, endpoint: str) -> str:
-        return self._profile_kinds.get(endpoint, "authenticated")
+        return self._profile_kinds.get(endpoint, "unclassified")
 
     def set_profile_kind(self, endpoint: str, profile_kind: str) -> None:
         if profile_kind not in {"anonymous", "authenticated"}:
@@ -477,8 +501,23 @@ class RedisBrowserPool:
             raise NoCleanProfileError()
         return candidates
 
+    def profile_endpoints(self, profile_kind: str) -> list[str]:
+        candidates = [
+            endpoint
+            for endpoint in self.endpoints
+            if self.get_profile_kind(endpoint) == profile_kind
+        ]
+        if not candidates:
+            if profile_kind == "anonymous":
+                raise NoCleanProfileError()
+            raise NoMatchingProfileError(profile_kind)
+        return candidates
+
+    def select_endpoint(self, profile_kind: str) -> str:
+        return self.profile_endpoints(profile_kind)[0]
+
     def select_anonymous_endpoint(self) -> str:
-        return self.anonymous_endpoints()[0]
+        return self.select_endpoint("anonymous")
 
 
 # ── Module-level singleton ────────────────────────────────────────────────────

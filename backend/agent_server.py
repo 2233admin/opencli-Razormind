@@ -40,7 +40,7 @@ Environment variables:
     OPENCLI_CDP_BIN         Path to opencli 0.9 binary (default: /opt/opencli-cdp/bin/opencli)
     OPENCLI_CDP_ENDPOINT    Default Chrome CDP endpoint (default: http://localhost:19222)
     OPENCLI_DAEMON_PORT     Bridge daemon port (default: 19825)
-    OPENCLI_TIMEOUT         opencli subprocess timeout in seconds (default: 120)
+    OPENCLI_TIMEOUT         opencli subprocess timeout in seconds (default: 240)
 """
 
 import asyncio
@@ -110,7 +110,7 @@ _AGENT_LABEL = os.environ.get("AGENT_LABEL", socket.gethostname())
 #   off  — disable auto-registration entirely
 _AGENT_REGISTER = os.environ.get("AGENT_REGISTER", "http").lower()
 # opencli subprocess execution timeout in seconds
-_OPENCLI_TIMEOUT = int(os.environ.get("OPENCLI_TIMEOUT", "120"))
+_OPENCLI_TIMEOUT = int(os.environ.get("OPENCLI_TIMEOUT", "240"))
 # Outbound proxy for agent → center communication (optional)
 _HTTP_PROXY = os.environ.get("HTTP_PROXY") or os.environ.get("http_proxy") or ""
 _HTTPS_PROXY = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy") or ""
@@ -165,7 +165,7 @@ async def _kill_process_tree(proc: asyncio.subprocess.Process) -> None:
     await proc.wait()
 
 
-async def _runtime_lineage(bin_path: str) -> dict[str, str]:
+async def _runtime_lineage(bin_path: str, site: str, command: str) -> dict[str, str]:
     """Measure the binaries/source used by this node; never echo declarations."""
     async def output(*argv: str, cwd: str | None = None) -> str:
         try:
@@ -178,8 +178,9 @@ async def _runtime_lineage(bin_path: str) -> dict[str, str]:
             return ""
 
     repo_commit = await output("git", "rev-parse", "HEAD", cwd=_OHMYOPENCLI_ROOT)
+    adapter_path = f"adapters/{site}/{command}.js"
     source_commit = await output(
-        "git", "log", "-1", "--format=%H", "--", "adapters/official-site/observe.js",
+        "git", "log", "-1", "--format=%H", "--", adapter_path,
         cwd=_OHMYOPENCLI_ROOT,
     )
     version_text = await output(bin_path, "--version")
@@ -662,7 +663,7 @@ async def collect(req: CollectRequest) -> dict:
             hostname = "host.docker.internal"
         env.pop("OPENCLI_CDP_ENDPOINT", None)
         env["OPENCLI_DAEMON_HOST"] = hostname
-        env["OPENCLI_DAEMON_PORT"] = str(_DAEMON_PORT)
+        env.pop("OPENCLI_DAEMON_PORT", None)
         logger.info("bridge | cmd=%s daemon=%s:%s", " ".join(cmd), hostname, _DAEMON_PORT)
     else:
         # Same logic for CDP: remap localhost to host.docker.internal only when
@@ -695,7 +696,11 @@ async def collect(req: CollectRequest) -> dict:
             await _kill_process_tree(proc)
         if mode == "cdp":
             await _cleanup_cdp_tabs(cdp_ep, pre_tab_ids)
-        return {"success": False, "items": [], "error": "opencli timed out after 120s"}
+        return {
+            "success": False,
+            "items": [],
+            "error": f"opencli timed out after {_OPENCLI_TIMEOUT}s",
+        }
     except Exception as exc:
         logger.exception("subprocess error | %s", exc)
         if mode == "cdp":
@@ -725,7 +730,9 @@ async def collect(req: CollectRequest) -> dict:
 
     logger.info("done | site=%s cmd=%s items=%d", req.site, req.command, len(items))
     trace_match = re.search(r"OpenCLI trace artifact:\s*([^\r\n]+)", stderr_str)
-    metadata: dict[str, Any] = {"runtime": await _runtime_lineage(bin_path)}
+    metadata: dict[str, Any] = {
+        "runtime": await _runtime_lineage(bin_path, req.site, req.command)
+    }
     if trace_match:
         metadata["trace_artifact"] = trace_match.group(1)
     return {

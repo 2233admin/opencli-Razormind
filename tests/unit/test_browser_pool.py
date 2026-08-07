@@ -462,6 +462,16 @@ async def test_acquire_anonymous_profile_fails_closed_when_none_is_registered():
             pass
 
 
+def test_unregistered_endpoint_is_not_an_authenticated_capture_profile():
+    from backend.browser_pool import LocalBrowserPool, NoMatchingProfileError
+
+    pool = LocalBrowserPool(["http://legacy-default:9222"])
+
+    assert pool.get_profile_kind("http://legacy-default:9222") == "unclassified"
+    with pytest.raises(NoMatchingProfileError, match="no_authenticated_profile"):
+        pool.select_endpoint("authenticated")
+
+
 @pytest.mark.asyncio
 async def test_acquire_anonymous_profile_routes_only_to_explicit_anonymous_profile():
     from backend.browser_pool import LocalBrowserPool
