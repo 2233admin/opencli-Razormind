@@ -2,7 +2,7 @@ import pytest
 from sqlalchemy.exc import IntegrityError
 
 from backend.database import Base
-from backend.models import User, Workspace, WorkspaceMembership, WorkspaceRole
+from backend.models import LocalAdmin, User, Workspace, WorkspaceMembership, WorkspaceRole
 
 
 def test_identity_models_are_registered_for_migrations():
@@ -13,7 +13,10 @@ def test_identity_models_are_registered_for_migrations():
         "teams",
         "team_memberships",
         "service_identities",
+        "local_admin_credentials",
     } <= set(Base.metadata.tables)
+
+    assert LocalAdmin.__tablename__ == "local_admin_credentials"
 
 
 @pytest.mark.asyncio

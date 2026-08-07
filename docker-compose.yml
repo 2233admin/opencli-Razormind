@@ -144,6 +144,9 @@ services:
   # ── Backend API ───────────────────────────────────────────────────────────
   api:
     <<: *backend-common
+    # 0.4.1 上游镜像缺 2 个 alembic 迁移文件(a8b9c0d1e2f3/z7a8b9c0d1e2)导致旧库无法升级
+    # 用本地补全文件重建的修复版镜像,其余服务仍用官方 0.4.1
+    image: ${DOCKER_REGISTRY:-ghcr.io/}${DOCKER_IMAGE_NAMESPACE:-2233admin}/opencli-admin-api:0.4.1-fixed
     # Run as root so the API can manage Docker containers (agent pool) via
     # the mounted socket. Acceptable for a self-hosted admin panel.
     user: root

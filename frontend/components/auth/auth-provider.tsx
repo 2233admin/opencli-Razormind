@@ -2,29 +2,40 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 
-import { getCurrentIdentity } from '@/lib/api/endpoints'
+import {
+  getCurrentIdentity,
+  getLocalAuthStatus,
+  loginLocalAdmin,
+  setupLocalAdmin as createLocalAdmin,
+} from '@/lib/api/endpoints'
 import { AUTH_REQUIRED_EVENT } from '@/lib/api/auth-events'
 import { setApiAuthToken } from '@/lib/api/auth-token'
 import { getOidcManager, isOidcConfigured, oidcReturnTo, sanitizeReturnTo } from '@/lib/auth/oidc'
 import {
   clearIdentityToken,
-  getBootstrapIdentityToken,
+  getPersistedIdentityToken,
   hasDevelopmentSession,
   isDevelopmentLoginAllowed,
-  persistBootstrapIdentityToken,
+  persistIdentityToken,
   setDevelopmentSession,
   setRuntimeIdentityToken,
 } from '@/lib/auth/session'
 import type { AuthIdentity, AuthStatus } from '@/lib/auth/types'
 
+type LocalAdminStatus = 'loading' | 'configured' | 'unconfigured' | 'unavailable'
+
 type AuthContextValue = {
   status: AuthStatus
   identity: AuthIdentity | null
   oidcEnabled: boolean
+  localAdminStatus: LocalAdminStatus
   developmentLoginEnabled: boolean
   signInWithOidc: (returnTo?: string, fleetToken?: string) => Promise<void>
   completeOidcSignIn: () => Promise<string>
   signInWithBootstrap: (identityToken: string, fleetToken?: string) => Promise<void>
+  signInWithLocal: (password: string) => Promise<void>
+  setupLocalAdmin: (bootstrapToken: string, password: string) => Promise<void>
+  refreshLocalAdminStatus: () => Promise<void>
   enterDevelopmentMode: (fleetToken?: string) => void
   signOut: () => Promise<void>
 }
@@ -44,6 +55,7 @@ const DEVELOPMENT_IDENTITY: AuthIdentity = {
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [status, setStatus] = useState<AuthStatus>('loading')
   const [identity, setIdentity] = useState<AuthIdentity | null>(null)
+  const [localAdminStatus, setLocalAdminStatus] = useState<LocalAdminStatus>('loading')
   const oidcEnabled = isOidcConfigured()
   const developmentLoginEnabled = isDevelopmentLoginAllowed()
 
@@ -80,9 +92,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           return
         }
 
-        const bootstrapToken = getBootstrapIdentityToken()
-        if (bootstrapToken) {
-          await acceptIdentityToken(bootstrapToken)
+        const persistedToken = getPersistedIdentityToken()
+        if (persistedToken) {
+          await acceptIdentityToken(persistedToken)
           return
         }
 
@@ -106,6 +118,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       active = false
     }
   }, [acceptIdentityToken, developmentLoginEnabled])
+
+  const refreshLocalAdminStatus = useCallback(async () => {
+    setLocalAdminStatus('loading')
+    try {
+      const { configured } = await getLocalAuthStatus()
+      setLocalAdminStatus(configured ? 'configured' : 'unconfigured')
+    } catch {
+      setLocalAdminStatus('unavailable')
+    }
+  }, [])
+
+  useEffect(() => {
+    void refreshLocalAdminStatus()
+  }, [refreshLocalAdminStatus])
 
   useEffect(() => {
     const manager = getOidcManager()
@@ -157,7 +183,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (!trimmed) throw new Error('请输入管理员身份令牌')
       if (fleetToken !== undefined) setApiAuthToken(fleetToken)
       await acceptIdentityToken(trimmed)
-      persistBootstrapIdentityToken(trimmed)
+      persistIdentityToken(trimmed)
+    },
+    [acceptIdentityToken],
+  )
+
+  const signInWithLocal = useCallback(
+    async (password: string) => {
+      const token = await loginLocalAdmin(password)
+      await acceptIdentityToken(token)
+      persistIdentityToken(token)
+    },
+    [acceptIdentityToken],
+  )
+
+  const setupLocalAdmin = useCallback(
+    async (bootstrapToken: string, password: string) => {
+      const token = await createLocalAdmin(bootstrapToken.trim(), password)
+      setLocalAdminStatus('configured')
+      await acceptIdentityToken(token)
+      persistIdentityToken(token)
     },
     [acceptIdentityToken],
   )
@@ -191,10 +236,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       status,
       identity,
       oidcEnabled,
+      localAdminStatus,
       developmentLoginEnabled,
       signInWithOidc,
       completeOidcSignIn,
       signInWithBootstrap,
+      signInWithLocal,
+      setupLocalAdmin,
+      refreshLocalAdminStatus,
       enterDevelopmentMode,
       signOut,
     }),
@@ -203,11 +252,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       developmentLoginEnabled,
       enterDevelopmentMode,
       identity,
+      localAdminStatus,
       oidcEnabled,
       signInWithBootstrap,
+      signInWithLocal,
       signInWithOidc,
       signOut,
       status,
+      setupLocalAdmin,
+      refreshLocalAdminStatus,
     ],
   )
 
