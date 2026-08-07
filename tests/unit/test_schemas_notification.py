@@ -22,19 +22,26 @@ class TestNotificationRuleCreateTriggerEvent:
         )
         assert rule.trigger_event == "on_new_record"
 
-    def test_unsupported_value_rejected(self):
-        """on_task_failed reads like a plausible trigger (it's even named in
-        the model's stale comment) but has no dispatch producer -- must be
-        rejected, not silently accepted into a dead rule."""
-        with pytest.raises(ValidationError):
-            NotificationRuleCreate(
-                name="r1", trigger_event="on_task_failed", notifier_type="webhook"
-            )
+    def test_on_ai_processed_accepted(self):
+        """on_ai_processed now has a dispatch producer (pipeline step 5 when
+        AI enrichment ran) — accepted at the schema layer."""
+        rule = NotificationRuleCreate(
+            name="r1", trigger_event="on_ai_processed", notifier_type="webhook"
+        )
+        assert rule.trigger_event == "on_ai_processed"
+
+    def test_on_task_failed_accepted(self):
+        """on_task_failed now has a dispatch producer (pipeline failure paths
+        with a synthetic failure payload) — accepted at the schema layer."""
+        rule = NotificationRuleCreate(
+            name="r1", trigger_event="on_task_failed", notifier_type="webhook"
+        )
+        assert rule.trigger_event == "on_task_failed"
 
     def test_arbitrary_string_rejected(self):
         with pytest.raises(ValidationError):
             NotificationRuleCreate(
-                name="r1", trigger_event="on_ai_processed", notifier_type="webhook"
+                name="r1", trigger_event="on_something_else", notifier_type="webhook"
             )
 
     def test_missing_trigger_event_still_required(self):
@@ -49,9 +56,13 @@ class TestNotificationRuleUpdateTriggerEvent:
         update = NotificationRuleUpdate(trigger_event="on_new_record")
         assert update.trigger_event == "on_new_record"
 
+    def test_on_task_failed_accepted(self):
+        update = NotificationRuleUpdate(trigger_event="on_task_failed")
+        assert update.trigger_event == "on_task_failed"
+
     def test_unsupported_value_rejected(self):
         with pytest.raises(ValidationError):
-            NotificationRuleUpdate(trigger_event="on_task_failed")
+            NotificationRuleUpdate(trigger_event="on_whatever")
 
     def test_omitted_trigger_event_stays_none(self):
         """Update is a partial patch -- omitting trigger_event entirely must

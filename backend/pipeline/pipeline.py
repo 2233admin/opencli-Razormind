@@ -113,6 +113,36 @@ class PipelineResult:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
+async def _notify_task_failed(
+    task_id: str, source_id: str, *, error: str, error_type: str | None
+) -> None:
+    """Best-effort ``on_task_failed`` notification dispatch (W2 producer).
+
+    Fires matching notification rules with a synthetic failure payload so a
+    task failure can alert operators even though no records were collected.
+    Never masks the original failure — a notification error is logged and
+    swallowed.
+    """
+    try:
+        from backend.database import AsyncSessionLocal
+        from backend.pipeline import notifier_dispatch
+
+        async with AsyncSessionLocal() as session:
+            await notifier_dispatch.dispatch_notifications(
+                session,
+                source_id,
+                [],
+                trigger_event="on_task_failed",
+                failure_payload={
+                    "error": error,
+                    "error_type": error_type,
+                    "task_id": task_id,
+                },
+            )
+    except Exception:
+        logger.exception("[task:%s] failed to dispatch on_task_failed notification", task_id)
+
+
 async def run_pipeline(
     task_id: str,
     source: DataSource,
@@ -130,7 +160,6 @@ async def run_pipeline(
 
     started = datetime.now(timezone.utc)
     params = parameters or {}
-
     # Pre-step: auto-resolve chrome endpoint from a browser binding. Channels that
     # declare capabilities.session_affinity (opencli, skill) drive a real Chrome
     # from the shared pool, so a site-keyed binding lets them attach to a
@@ -239,6 +268,10 @@ async def run_pipeline(
                 error_kind=map_exception(exc),
                 raw={"stage": "collect", "error": str(exc), "error_type": error_type},
             )
+        if enable_notifications:
+            await _notify_task_failed(
+                task_id, source.id, error=str(exc), error_type=error_type
+            )
         return PipelineResult(success=False, source_id=source.id, error=str(exc))
 
     if not channel_result.success:
@@ -261,6 +294,13 @@ async def run_pipeline(
                 fetch_latency_ms=int((datetime.now(timezone.utc) - step1_start).total_seconds() * 1000),
                 error_type=channel_result.error_type,
                 raw={"stage": "collect", "error": channel_result.error},
+            )
+        if enable_notifications:
+            await _notify_task_failed(
+                task_id,
+                source.id,
+                error=channel_result.error or "collect failed",
+                error_type=channel_result.error_type,
             )
         return PipelineResult(success=False, source_id=source.id, error=channel_result.error)
 
@@ -503,6 +543,12 @@ async def run_pipeline(
                 notify_summary = await notifier_dispatch.dispatch_notifications(
                     session, source.id, new_records
                 )
+                # W2 producer: rules scoped to on_ai_processed fire when AI
+                # enrichment actually ran on this batch.
+                if ai_count > 0:
+                    await notifier_dispatch.dispatch_notifications(
+                        session, source.id, new_records, trigger_event="on_ai_processed"
+                    )
             notifications_sent = notify_summary.get("sent", 0)
             notifications_failed = notify_summary.get("failed", 0)
             # AUDIT C12: report the real aggregate, not an unconditional

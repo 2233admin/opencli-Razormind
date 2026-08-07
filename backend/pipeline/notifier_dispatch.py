@@ -93,10 +93,35 @@ async def dispatch_notifications(
     source_id: str,
     records: list[CollectedRecord],
     trigger_event: str = "on_new_record",
+    failure_payload: dict[str, Any] | None = None,
 ) -> dict[str, int]:
     """Find matching notification rules and dispatch. Returns ``{"sent": n,
     "failed": m}`` — the real aggregate outcome (AUDIT C12: this used to be
-    silent per-row-only bookkeeping the caller never inspected)."""
+    silent per-row-only bookkeeping the caller never inspected).
+
+    ``failure_payload`` lets the ``on_task_failed`` producer fire with NO
+    collected records: when ``records`` is empty and a failure payload is
+    given, a synthetic record (never persisted) is used so the normal
+    rule-matching / logging / send pipeline applies unchanged to task-failure
+    notifications.
+    """
+    if not records and failure_payload:
+        records = [
+            CollectedRecord(
+                task_id=str(failure_payload.get("task_id") or ""),
+                source_id=source_id,
+                raw_data={},
+                normalized_data={
+                    "title": f"Task failed: {source_id}",
+                    "error": failure_payload.get("error"),
+                    "error_type": failure_payload.get("error_type"),
+                    "source_id": source_id,
+                    "task_id": failure_payload.get("task_id"),
+                },
+                ai_enrichment=None,
+                content_hash=f"task-failed-{uuid.uuid4().hex}",
+            )
+        ]
     if not records:
         return {"sent": 0, "failed": 0}
 

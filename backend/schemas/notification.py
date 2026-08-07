@@ -9,14 +9,14 @@ from backend.schemas.common import UTCModel
 class NotificationRuleCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     source_id: str | None = None
-    # WIRING_GAP_LEDGER W2: dispatch_notifications() only ever queries/fires
-    # rules with trigger_event == "on_new_record" (backend/pipeline/
-    # notifier_dispatch.py) — there is no producer for any other value.
-    # Before this Literal, a rule saved with any other string (the free-text
-    # str field previously accepted anything) became permanently, silently
-    # inert. Constrained here at the schema layer so the API rejects an
-    # unsupported value loudly instead of persisting a dead rule.
-    trigger_event: Literal["on_new_record"]
+    # WIRING_GAP_LEDGER W2 (resolved): dispatch_notifications() used to only
+    # query/fire rules with trigger_event == "on_new_record" with no producer
+    # for any other value. Producers now exist for all three values:
+    #   - on_new_record   — pipeline step 5 (every successful collect)
+    #   - on_ai_processed — pipeline step 5, when AI enrichment ran (ai_count>0)
+    #   - on_task_failed  — pipeline failure paths (collect exception / fail),
+    #                       with a synthetic failure payload
+    trigger_event: Literal["on_new_record", "on_ai_processed", "on_task_failed"]
     notifier_type: str
     notifier_config: dict[str, Any] = Field(default_factory=dict)
     filter_conditions: dict[str, Any] | None = None
@@ -25,7 +25,7 @@ class NotificationRuleCreate(BaseModel):
 
 class NotificationRuleUpdate(BaseModel):
     name: str | None = None
-    trigger_event: Literal["on_new_record"] | None = None
+    trigger_event: Literal["on_new_record", "on_ai_processed", "on_task_failed"] | None = None
     notifier_type: str | None = None
     notifier_config: dict[str, Any] | None = None
     filter_conditions: dict[str, Any] | None = None

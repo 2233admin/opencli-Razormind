@@ -205,3 +205,101 @@ async def test_pipeline_sink_retryable_exception_propagates(db_session):
     ):
         with pytest.raises(ConnectionError, match="pool exhausted"):
             await run_pipeline(db_session, source, task.id)
+
+
+# ── notification trigger_event producers (W2): on_ai_processed / on_task_failed ──
+
+
+@pytest.mark.asyncio
+async def test_pipeline_failure_dispatches_on_task_failed_notification(db_session):
+    """A permanent collect failure fires the on_task_failed producer with the
+    error payload — and success paths never do."""
+    from backend.models.source import DataSource
+    from backend.models.task import CollectionTask
+
+    source = DataSource(
+        name="Notif Fail Source",
+        channel_type="rss",
+        channel_config={"feed_url": "https://ex.com/feed.xml"},
+    )
+    db_session.add(source)
+    await db_session.flush()
+
+    task = CollectionTask(source_id=source.id, trigger_type="manual", parameters={})
+    db_session.add(task)
+    await db_session.flush()
+
+    channel_result = ChannelResult.fail("feed malformed", error_type="JSONDecodeError")
+
+    with (
+        patch("backend.pipeline.collector.collect", return_value=channel_result),
+        patch(
+            "backend.pipeline.pipeline._notify_task_failed", new_callable=AsyncMock
+        ) as mock_notify,
+    ):
+        result = await run_pipeline(task.id, source)
+
+    assert result.success is False
+    mock_notify.assert_awaited_once()
+    assert mock_notify.await_args.kwargs["error"] == "feed malformed"
+    assert mock_notify.await_args.kwargs["error_type"] == "JSONDecodeError"
+
+
+@pytest.mark.asyncio
+async def test_pipeline_ai_processed_dispatches_second_notification(db_session):
+    """When AI enrichment runs, step 5 fires BOTH on_new_record and
+    on_ai_processed; when it doesn't, only on_new_record fires."""
+    from backend.models.source import DataSource
+    from backend.models.task import CollectionTask
+
+    source = DataSource(
+        name="Notif AI Source",
+        channel_type="rss",
+        channel_config={"feed_url": "https://ex.com/feed.xml"},
+        ai_config={"processor_type": "claude"},
+    )
+    db_session.add(source)
+    await db_session.flush()
+
+    task = CollectionTask(source_id=source.id, trigger_type="manual", parameters={})
+    db_session.add(task)
+    await db_session.flush()
+
+    items = [{"title": "Item"}]
+    channel_result = ChannelResult.ok(items)
+    mock_records = [MagicMock(ai_enrichment={"summary": "s"})]
+
+    events = []
+
+    async def fake_dispatch(session, source_id, records, trigger_event="on_new_record", failure_payload=None):  # noqa: E501
+        events.append(trigger_event)
+        return {"sent": 0, "failed": 0}
+
+    mock_session = AsyncMock()
+    mock_session.get = AsyncMock(return_value=source)
+    mock_session.commit = AsyncMock()
+    mock_session_cm = AsyncMock()
+    mock_session_cm.__aenter__ = AsyncMock(return_value=mock_session)
+    mock_session_cm.__aexit__ = AsyncMock(return_value=False)
+
+    with (
+        patch("backend.pipeline.collector.collect", return_value=channel_result),
+        patch(
+            "backend.pipeline.storer.store_records",
+            new=AsyncMock(return_value=(mock_records, 0)),
+        ),
+        patch("backend.database.AsyncSessionLocal", return_value=mock_session_cm),
+        patch(
+            "backend.pipeline.ai_processor.process_with_ai",
+            new=AsyncMock(return_value=1),
+        ),
+        patch(
+            "backend.pipeline.notifier_dispatch.dispatch_notifications",
+            side_effect=fake_dispatch,
+        ),
+    ):
+        result = await run_pipeline(task.id, source)
+
+    assert result.success is True
+    assert events.count("on_new_record") == 1
+    assert events.count("on_ai_processed") == 1
