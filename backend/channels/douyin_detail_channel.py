@@ -5,8 +5,27 @@ import re
 from typing import Any
 from urllib.parse import urlparse
 
-from backend.channels.base import AbstractChannel, Capabilities, ChannelResult
+from backend.channels.base import (
+    AbstractChannel,
+    Capabilities,
+    ChannelFetchError,
+    ChannelResult,
+    FetchContext,
+    FetchResult,
+)
 from backend.channels.registry import register_channel
+
+#: Transient CDP/browser race conditions — retrying the same video lookup
+#: usually succeeds once navigation settles. Classified as ``ConnectionError``
+#: (retryable in error_taxonomy) so the thick ``fetch()`` retry loop picks
+#: them up.
+_TRANSIENT_CDP_MARKERS = (
+    "CDP connection is not open",
+    "Inspected target navigated or closed",
+    "Execution context was destroyed",
+    "Target closed",
+    "Session closed",
+)
 
 _AWEME_ID_RE = re.compile(r"(?:/video/|/share/video/|[?&]aweme_id=)(\d{15,25})(?:[/?&#]|$)")
 
@@ -96,6 +115,13 @@ def _parse_detail(stdout: str) -> dict[str, Any]:
     return detail
 
 
+def _is_transient_cdp_fault(stderr: str, stdout: str) -> bool:
+    """True when the adapter hit a CDP/browser race (navigation, closed tab,
+    session teardown) — retrying the same lookup usually succeeds."""
+    text = f"{stderr} {stdout}"
+    return any(marker in text for marker in _TRANSIENT_CDP_MARKERS)
+
+
 async def _run_douyin_command(command: list[str]) -> tuple[int, str, str]:
     """Use OpenCLI's bounded subprocess helper rather than spawning a shell."""
     import os
@@ -139,7 +165,10 @@ class DouyinDetailChannel(AbstractChannel):
             )
             if open_code:
                 return ChannelResult.fail(
-                    f"OpenCLI browser open exited with code {open_code}: {open_stderr[:500]}"
+                    f"OpenCLI browser open exited with code {open_code}: {open_stderr[:500]}",
+                    error_type=(
+                        "ConnectionError" if _is_transient_cdp_fault(open_stderr, "") else None
+                    ),
                 )
             eval_code, stdout, stderr = await _run_douyin_command(
                 [
@@ -165,7 +194,10 @@ class DouyinDetailChannel(AbstractChannel):
 
         if eval_code:
             return ChannelResult.fail(
-                f"OpenCLI browser eval exited with code {eval_code}: {stderr[:500]}"
+                f"OpenCLI browser eval exited with code {eval_code}: {stderr[:500]}",
+                error_type=(
+                    "ConnectionError" if _is_transient_cdp_fault(stderr, stdout) else None
+                ),
             )
         try:
             item = _detail_item(_parse_detail(stdout), aweme_id)
@@ -185,3 +217,36 @@ class DouyinDetailChannel(AbstractChannel):
     def identity(self, item: dict[str, Any]) -> str | None:
         value = item.get("aweme_id")
         return str(value) if value else None
+
+    async def fetch(self, ctx: FetchContext) -> FetchResult:
+        """Thick-contract entry point: migrate douyin onto the runner protocol
+        and own a bounded retry on transient CDP faults (same pattern as
+        ``doubao_research_channel.fetch()`` — see its docstring for the
+        rationale). ``collect()`` stays the single source of truth; this
+        override only adds the retry loop for ``error_taxonomy``-retryable
+        failures (``max_retries`` default 3, ``retry_base_delay`` default 2s,
+        exponential backoff). Permanent failures fail immediately.
+        """
+        import asyncio
+
+        from backend.pipeline.error_taxonomy import is_retryable
+
+        max_retries = int(ctx.config.get("max_retries", 3))
+        base_delay = float(ctx.config.get("retry_base_delay", 2.0))
+        last: ChannelResult | None = None
+        for attempt in range(max_retries + 1):
+            result = await self.collect(ctx.config, ctx.params)
+            if result.success:
+                return FetchResult(items=result.items, metadata=result.metadata)
+            if not is_retryable(result.error_type):
+                raise ChannelFetchError(
+                    result.error or "douyin detail collect failed",
+                    error_type=result.error_type,
+                )
+            last = result
+            if attempt < max_retries:
+                await asyncio.sleep(base_delay * (2**attempt))
+        raise ChannelFetchError(
+            last.error or "douyin detail collect failed",
+            error_type=last.error_type,
+        )

@@ -4,7 +4,14 @@ import os
 import re
 from typing import Any
 
-from backend.channels.base import AbstractChannel, Capabilities, ChannelResult
+from backend.channels.base import (
+    AbstractChannel,
+    Capabilities,
+    ChannelFetchError,
+    ChannelResult,
+    FetchContext,
+    FetchResult,
+)
 from backend.channels.registry import register_channel
 
 _URL_RE = re.compile(r"https?://[^\s<>\[\](){}'\"]+", re.IGNORECASE)
@@ -16,6 +23,18 @@ _CAPTCHA_MARKERS = (
     "blocked the request",
     "人机验证",
     "验证码",
+)
+#: Transient CDP/browser race conditions — retrying the same question in the
+#: same session usually succeeds once the navigation settles. Classified as
+#: ``ConnectionError`` (retryable in error_taxonomy) so the thick ``fetch()``
+#: retry loop picks them up, while a captcha wall (above) is NOT retried.
+_TRANSIENT_CDP_MARKERS = (
+    "CDP connection is not open",
+    "Inspected target navigated or closed",
+    "Execution context was destroyed",
+    "Target closed",
+    "Session closed",
+    "cloneNode",
 )
 
 
@@ -64,6 +83,13 @@ def _is_captcha_block(stderr: str, stdout: str) -> bool:
     """True when the adapter reports a captcha/verification wall."""
     text = f"{stderr} {stdout}".lower()
     return any(marker in text for marker in _CAPTCHA_MARKERS)
+
+
+def _is_transient_cdp_fault(stderr: str, stdout: str) -> bool:
+    """True when the adapter hit a CDP/browser race (navigation, closed tab,
+    session teardown) — retrying the same question usually succeeds."""
+    text = f"{stderr} {stdout}"
+    return any(marker in text for marker in _TRANSIENT_CDP_MARKERS)
 
 
 async def _run_doubao_command(command: list[str]) -> tuple[int, str, str]:
@@ -131,9 +157,16 @@ class DoubaoResearchChannel(AbstractChannel):
             )
 
         if returncode:
-            # Classify captcha walls so the runner can apply a human-in-the-loop
-            # or cooldown-retry policy instead of treating it as a permanent failure.
-            error_type = "captcha_challenge" if _is_captcha_block(stderr, stdout) else None
+            # Classify: captcha walls (human-cleared — never auto-retry) and
+            # transient CDP races (retryable) get structured error_types so
+            # the runner / thick fetch() can act on them; anything else stays
+            # a generic failure instead of a permanent misclassification.
+            if _is_captcha_block(stderr, stdout):
+                error_type = "captcha_challenge"
+            elif _is_transient_cdp_fault(stderr, stdout):
+                error_type = "ConnectionError"
+            else:
+                error_type = None
             return ChannelResult.fail(
                 f"opencli doubao ask exited with code {returncode}: {stderr[:500]}",
                 error_type=error_type,
@@ -194,4 +227,55 @@ class DoubaoResearchChannel(AbstractChannel):
             []
             if str(config.get("question") or "").strip()
             else ["'question' is required for doubao_research channel"]
+        )
+
+    async def fetch(self, ctx: FetchContext) -> FetchResult:
+        """Thick-contract entry point: migrate doubao onto the runner protocol
+        (``type(chan).fetch is not AbstractChannel.fetch``) and own a bounded
+        retry on TRANSIENT faults only.
+
+        ``collect()`` stays the single source of truth for prompt construction
+        and evidence output; this override adds the retry loop around it:
+        - captcha walls (``captcha_challenge``) are never auto-retried — the
+          pipeline's captcha branch (PR #65) pauses the source for a human
+          instead;
+        - non-retryable failures (``error_taxonomy.is_retryable`` False) fail
+          immediately;
+        - transient faults (CDP races classified as ``ConnectionError``,
+          timeouts) retry with exponential backoff up to ``max_retries``
+          (default 3, config key ``max_retries``; ``retry_base_delay``
+          seconds, default 2).
+
+        ``ctx.http`` is deliberately not threaded into ``collect()`` — the
+        transport is a local opencli subprocess, not an HTTP request the
+        runner's RateLimitedClient was built for (same trade-off documented in
+        ``opencli_channel.fetch()``).
+        """
+        import asyncio
+
+        from backend.pipeline.error_taxonomy import is_retryable
+
+        # Local captcha marker (equals error_taxonomy.CAPTCHA_CHALLENGE, which
+        # PR #65 exposes as is_captcha()) — kept inline so this PR merges
+        # independently of #65.
+        _CAPTCHA = "captcha_challenge"
+
+        max_retries = int(ctx.config.get("max_retries", 3))
+        base_delay = float(ctx.config.get("retry_base_delay", 2.0))
+        last: ChannelResult | None = None
+        for attempt in range(max_retries + 1):
+            result = await self.collect(ctx.config, ctx.params)
+            if result.success:
+                return FetchResult(items=result.items, metadata=result.metadata)
+            if result.error_type == _CAPTCHA or not is_retryable(result.error_type):
+                raise ChannelFetchError(
+                    result.error or "doubao collect failed",
+                    error_type=result.error_type,
+                )
+            last = result
+            if attempt < max_retries:
+                await asyncio.sleep(base_delay * (2**attempt))
+        raise ChannelFetchError(
+            last.error or "doubao collect failed",
+            error_type=last.error_type,
         )
