@@ -148,6 +148,53 @@ async def test_fetch_bozo_feed_raises_error_type_mapped_to_schema_drift():
 
 
 @pytest.mark.asyncio
+async def test_fetch_html_response_raises_error_type_mapped_to_schema_drift():
+    """Issue #36: an HTML error page parses as bozo=False with entries=[] on
+    the fetch() path too — must raise ChannelFetchError(ParseError), mapped
+    to SCHEMA_DRIFT, instead of returning a fake empty feed."""
+    from backend.control.error_kinds import ErrorKind, map_error_type
+
+    http = _Http(_Resp(200, text="<html><body>Error 502</body></html>", headers={}))
+    ctx = FetchContext(config={"feed_url": "https://x/feed"}, params={}, cursor=None, http=http)
+
+    with pytest.raises(ChannelFetchError) as exc_info:
+        await RSSChannel().fetch(ctx)
+
+    assert exc_info.value.error_type == "ParseError"
+    assert map_error_type(exc_info.value.error_type) is ErrorKind.SCHEMA_DRIFT
+
+
+@pytest.mark.asyncio
+async def test_fetch_empty_body_raises_error_type_mapped_to_schema_drift():
+    """Issue #36: an empty HTTP 200 body on the fetch() path must raise
+    ParseError (SCHEMA_DRIFT), not return a fake empty feed."""
+    from backend.control.error_kinds import ErrorKind, map_error_type
+
+    http = _Http(_Resp(200, text="", headers={}))
+    ctx = FetchContext(config={"feed_url": "https://x/feed"}, params={}, cursor=None, http=http)
+
+    with pytest.raises(ChannelFetchError) as exc_info:
+        await RSSChannel().fetch(ctx)
+
+    assert exc_info.value.error_type == "ParseError"
+    assert map_error_type(exc_info.value.error_type) is ErrorKind.SCHEMA_DRIFT
+
+
+@pytest.mark.asyncio
+async def test_fetch_valid_empty_feed_succeeds():
+    """A legitimate zero-entry feed (version detected) must NOT be flagged as
+    a non-feed response on the fetch() path."""
+    empty_rss = '<rss version="2.0"><channel><title>Empty</title></channel></rss>'
+    http = _Http(_Resp(200, text=empty_rss, headers={}))
+    ctx = FetchContext(config={"feed_url": "https://x/feed"}, params={}, cursor=None, http=http)
+
+    result = await RSSChannel().fetch(ctx)
+
+    assert result.items == []
+    assert result.has_more is False
+
+
+@pytest.mark.asyncio
 async def test_run_channel_drives_rss_and_persists_cursor():
     from backend.pipeline.channel_runner import run_channel
     from backend.pipeline.cursor_store import InMemoryCursorStore

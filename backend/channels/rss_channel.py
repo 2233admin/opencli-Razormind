@@ -43,6 +43,37 @@ def _bozo_error_type(parsed: Any) -> str:
     return "ParseError"
 
 
+def _parsed_version(parsed: Any) -> str:
+    """Detected feed format (``'rss20'``, ``'atom10'``, ...), or ``''`` when
+    feedparser recognized no feed format in the body. Works for both
+    feedparser's dict-like result and bare namespaces used in tests."""
+    getter = getattr(parsed, "get", None)
+    if callable(getter):
+        return str(getter("version") or "")
+    return str(getattr(parsed, "version", "") or "")
+
+
+def _non_feed_response(parsed: Any) -> bool:
+    """True when feedparser accepted the body but recognized no feed format.
+
+    Issue #36: an HTTP 200 with an empty body or an HTML error page parses as
+    ``bozo=False`` with ``entries=[]`` — visually identical to a legitimate
+    empty feed, so no structured error reaches control. The distinguishing
+    signal is the detected feed version: a real (even empty) RSS/Atom feed
+    parses with ``version`` set (``'rss20'``/``'atom10'``/...), while
+    empty/HTML/non-feed bodies leave it falsy (``''``/``None``). Conservative
+    by design: this only fires when zero entries were parsed, so a partial
+    parse that yielded items still succeeds. ``ParseError`` maps to
+    SCHEMA_DRIFT in backend/control/error_kinds.py, so these responses now
+    reach the control recorder instead of looking like a healthy empty feed.
+    """
+    return (
+        not getattr(parsed, "bozo", False)
+        and not getattr(parsed, "entries", None)
+        and not _parsed_version(parsed)
+    )
+
+
 @register_channel
 class RSSChannel(AbstractChannel):
     """Collect entries from RSS/Atom feeds."""
@@ -126,6 +157,16 @@ class RSSChannel(AbstractChannel):
             return ChannelResult.fail(
                 f"Failed to parse feed: {getattr(parsed, 'bozo_exception', 'unknown error')}",
                 error_type=_bozo_error_type(parsed),
+            )
+        # Issue #36: feedparser treats an empty body or an HTML error page as a
+        # successful non-bozo parse with entries=[] — indistinguishable from a
+        # legitimate empty feed by bozo alone. Fail explicitly (ParseError maps
+        # to SCHEMA_DRIFT) when no feed format was recognized.
+        if _non_feed_response(parsed):
+            return ChannelResult.fail(
+                "RSS feed returned no recognized feed content "
+                "(empty body or HTML/non-feed response)",
+                error_type="ParseError",
             )
 
         entries = parsed.entries[:max_entries]
@@ -222,6 +263,15 @@ class RSSChannel(AbstractChannel):
             raise ChannelFetchError(
                 f"Failed to parse feed: {getattr(parsed, 'bozo_exception', 'unknown error')}",
                 error_type=_bozo_error_type(parsed),
+            )
+        # Issue #36: see collect()'s twin comment — an empty/HTML response
+        # parses as bozo=False with entries=[] and must not look like a
+        # healthy empty feed.
+        if _non_feed_response(parsed):
+            raise ChannelFetchError(
+                "RSS feed returned no recognized feed content "
+                "(empty body or HTML/non-feed response)",
+                error_type="ParseError",
             )
         items = [self._entry_to_dict(entry) for entry in parsed.entries[:max_entries]]
 
