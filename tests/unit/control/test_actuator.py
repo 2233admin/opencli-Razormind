@@ -264,3 +264,38 @@ async def test_dangerous_suggestion_downgrades_and_preserves_original(db_session
     # Source was NOT paused or otherwise mutated beyond the review flag —
     # the downgrade never performs the originally-suggested action.
     assert source.enabled is True
+
+
+# ── pause_source_for_captcha (captcha governance, PR-captcha-governance) ──
+
+
+@pytest.mark.asyncio
+async def test_pause_source_for_captcha_pauses_and_flags_review(db_session):
+    source = await _make_source(db_session)
+
+    detail = await actuator.pause_source_for_captcha(
+        db_session, source=source, now=NOW, ttl_seconds=900
+    )
+
+    assert source.enabled is False
+    assert source.paused_until == NOW + timedelta(seconds=900)
+    assert source.review_required is True
+    assert detail["paused_until"] == source.paused_until.isoformat()
+    assert detail["review_required"] is True
+    assert detail["was_enabled"] is True
+
+
+@pytest.mark.asyncio
+async def test_pause_source_for_captcha_refreshes_ttl_when_already_paused(db_session):
+    source = await _make_source(db_session, enabled=False)
+    source.paused_until = NOW - timedelta(seconds=1)
+    source.review_required = True
+    await db_session.flush()
+
+    detail = await actuator.pause_source_for_captcha(
+        db_session, source=source, now=NOW, ttl_seconds=1800
+    )
+
+    assert source.paused_until == NOW + timedelta(seconds=1800)
+    assert source.review_required is True
+    assert detail["was_enabled"] is False

@@ -34,6 +34,9 @@ class ErrorKind(str, Enum):
     ODP_UNAVAILABLE = "odp_unavailable"
     STORE_FAILED = "store_failed"
     POISON_MESSAGE = "poison_message"
+    # Human-cleared challenge wall (Doubao captcha) — the controller should
+    # pause + require review, not backoff/retry on its own.
+    CAPTCHA = "captcha"
     UNKNOWN = "unknown"
 
 
@@ -95,6 +98,9 @@ _ERROR_TYPE_MAP: dict[str, ErrorKind] = {
     # Poison message (DLQ-bound: a message that will never succeed no matter
     # how many times it's retried)
     "PoisonMessageError": ErrorKind.POISON_MESSAGE,
+    # Human-cleared challenge wall (doubao_research_channel's captcha
+    # classification — see error_taxonomy.CAPTCHA_CHALLENGE)
+    "captcha_challenge": ErrorKind.CAPTCHA,
 }
 
 

@@ -205,6 +205,30 @@ async def execute_action(
     )
 
 
+async def pause_source_for_captcha(
+    session: AsyncSession, *, source: DataSource, now: datetime, ttl_seconds: int
+) -> dict[str, Any]:
+    """Pause a source that hit a human-cleared challenge wall (captcha) and
+    flag it for review.
+
+    The pipeline calls this when a channel classifies a collect failure as
+    ``captcha_challenge`` (see ``backend.pipeline.error_taxonomy.is_captcha``):
+    automatic retry would burn budget on the same wall, so instead the source
+    is disabled for ``ttl_seconds`` (the normal pause TTL semantics — the
+    scheduler already skips disabled sources, and
+    :func:`auto_resume_expired_pauses` re-enables it when the wall should have
+    cooled down) and ``review_required`` is set so the UI surfaces it for a
+    human to confirm/clear.
+
+    Stays inside the actuator: this module remains the ONLY code allowed to
+    mutate a ``DataSource`` on the control system's behalf.
+    """
+    detail = await _apply_pause(session, source=source, now=now, ttl_seconds=ttl_seconds)
+    review_detail = await _apply_require_review(session, source=source)
+    detail["review_required"] = review_detail["already_flagged"] or True
+    return detail
+
+
 async def auto_resume_expired_pauses(
     session: AsyncSession, *, now: datetime
 ) -> list[tuple[DataSource, ExecutionResult]]:

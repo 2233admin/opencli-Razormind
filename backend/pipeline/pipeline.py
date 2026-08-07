@@ -13,7 +13,7 @@ from backend.control.error_kinds import map_error_type, map_exception
 from backend.control.recorder import FreshnessInfo, record_run_measurement
 from backend.models.source import DataSource
 from backend.pipeline import events
-from backend.pipeline.error_taxonomy import effective_error_type, is_retryable
+from backend.pipeline.error_taxonomy import effective_error_type, is_captcha, is_retryable
 
 logger = logging.getLogger(__name__)
 
@@ -255,6 +255,48 @@ async def run_pipeline(
             )
         if is_retryable(channel_result.error_type):
             raise ChannelFetchError(channel_result.error or "collect failed")
+        if is_captcha(channel_result.error_type):
+            # Human-cleared challenge wall (Doubao captcha). Automatic retry
+            # would burn budget on the same wall and a permanent failure hides
+            # the recovery path, so instead pause the source (scheduler
+            # already skips disabled sources) and flag it for review — a human
+            # clears the wall, TTL expiry auto-resumes. Best-effort: a DB or
+            # actuator failure here must not mask the original collect error.
+            try:
+                from backend.config import get_settings
+                from backend.control.actuator import pause_source_for_captcha
+                from backend.database import AsyncSessionLocal
+
+                ttl = get_settings().control_pause_ttl_seconds
+                async with AsyncSessionLocal() as session:
+                    src = await session.get(DataSource, source.id)
+                    if src is not None:
+                        await pause_source_for_captcha(
+                            session,
+                            source=src,
+                            now=datetime.now(timezone.utc),
+                            ttl_seconds=ttl,
+                        )
+                        await session.commit()
+                        logger.warning(
+                            "[task:%s] captcha wall | paused source=%s (ttl=%ss, review_required)",
+                            task_id, source.id, ttl,
+                        )
+                        if run_id:
+                            await events.emit(
+                                run_id, "collect",
+                                "验证码拦截：数据源已暂停，等待人工处理",
+                                level="warning",
+                                detail={"captcha_paused": True, "pause_ttl_seconds": ttl},
+                            )
+            except Exception:
+                logger.exception("[task:%s] failed to pause source on captcha", task_id)
+            return PipelineResult(
+                success=False,
+                source_id=source.id,
+                error=channel_result.error,
+                metadata={"captcha_paused": True},
+            )
         if run_id:
             await _record_measurement_best_effort(
                 source_id=source.id, run_id=run_id,

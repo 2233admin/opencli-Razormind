@@ -29,6 +29,11 @@ async def _get_enabled_schedules() -> list[dict]:
             select(CronSchedule, DataSource)
             .join(DataSource, CronSchedule.source_id == DataSource.id)
             .where(CronSchedule.enabled.is_(True), DataSource.enabled.is_(True))
+            # A source flagged review_required (e.g. by a captcha pause — see
+            # backend.pipeline.pipeline's captcha branch) must not be
+            # dispatched until a human clears the flag; the control loop
+            # writes the state, the scheduler honors it.
+            .where(DataSource.review_required.is_(False))
         )
         return [
             {

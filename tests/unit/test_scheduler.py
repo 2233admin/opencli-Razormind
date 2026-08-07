@@ -6,7 +6,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from backend.scheduler import _fires_in_window, start_scheduler, stop_scheduler
+from backend.scheduler import (
+    _fires_in_window,
+    _get_enabled_schedules,
+    start_scheduler,
+    stop_scheduler,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -529,3 +534,72 @@ async def test_scheduler_loop_dispatch_failure_does_not_stall_watermark():
 
     assert len(ok_calls) == 1, "sched-ok must not be re-dispatched after sched-fail's failure"
     assert len(fail_calls) == 1
+
+
+# ── review_required gating (PR-captcha-governance) ────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_get_enabled_schedules_skips_review_required_sources(db_session):
+    """A source flagged review_required (e.g. by a captcha pause) must not be
+    dispatched by the scheduler until a human clears the flag — the control
+    loop writes the state, the scheduler must honor it."""
+    from backend.models.schedule import CronSchedule
+    from backend.models.source import DataSource
+
+    good = DataSource(
+        name="good", channel_type="rss",
+        channel_config={"feed_url": "https://ex.com/good.xml"},
+        enabled=True, review_required=False,
+    )
+    flagged = DataSource(
+        name="flagged", channel_type="rss",
+        channel_config={"feed_url": "https://ex.com/flagged.xml"},
+        enabled=True, review_required=True,
+    )
+    db_session.add_all([good, flagged])
+    await db_session.flush()
+
+    db_session.add_all([
+        CronSchedule(
+            source_id=good.id, name="s-good", cron_expression="* * * * *", enabled=True
+        ),
+        CronSchedule(
+            source_id=flagged.id,
+            name="s-flagged",
+            cron_expression="* * * * *",
+            enabled=True,
+        ),
+    ])
+    await db_session.flush()
+
+    with patch("backend.database.AsyncSessionLocal", return_value=db_session):
+        schedules = await _get_enabled_schedules()
+
+    source_ids = {s["source_id"] for s in schedules}
+    assert good.id in source_ids
+    assert flagged.id not in source_ids
+
+
+@pytest.mark.asyncio
+async def test_get_enabled_schedules_still_skips_disabled_sources(db_session):
+    """The existing enabled gating keeps working alongside the review gate."""
+    from backend.models.schedule import CronSchedule
+    from backend.models.source import DataSource
+
+    disabled = DataSource(
+        name="disabled", channel_type="rss",
+        channel_config={"feed_url": "https://ex.com/d.xml"},
+        enabled=False, review_required=False,
+    )
+    db_session.add(disabled)
+    await db_session.flush()
+    db_session.add(
+        CronSchedule(source_id=disabled.id, name="s-d", cron_expression="* * * * *", enabled=True)
+    )
+    await db_session.flush()
+
+    with patch("backend.database.AsyncSessionLocal", return_value=db_session):
+        schedules = await _get_enabled_schedules()
+
+    assert schedules == []

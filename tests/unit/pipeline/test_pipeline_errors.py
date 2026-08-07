@@ -61,6 +61,89 @@ async def test_pipeline_collect_exception(db_session):
     assert "network down" in result.error
 
 
+# ── captcha governance wiring (PR-captcha-governance) ────────────────────
+
+
+@pytest.mark.asyncio
+async def test_pipeline_captcha_failure_pauses_source_for_review(db_session):
+    """A collect failure classified as captcha_challenge pauses the source
+    (enabled=False + review_required=True) instead of failing permanently or
+    retrying automatically."""
+    from backend.models.source import DataSource
+    from backend.models.task import CollectionTask
+
+    source = DataSource(
+        name="Captcha Source",
+        channel_type="doubao_research",
+        channel_config={"question": "x"},
+    )
+    db_session.add(source)
+    await db_session.flush()
+
+    task = CollectionTask(source_id=source.id, trigger_type="manual", parameters={})
+    db_session.add(task)
+    await db_session.flush()
+
+    channel_result = ChannelResult.fail("verification challenge", error_type="captcha_challenge")
+
+    mock_session = AsyncMock()
+    mock_session.get = AsyncMock(return_value=source)
+    mock_session.commit = AsyncMock()
+    mock_session_cm = AsyncMock()
+    mock_session_cm.__aenter__ = AsyncMock(return_value=mock_session)
+    mock_session_cm.__aexit__ = AsyncMock(return_value=False)
+
+    with (
+        patch("backend.pipeline.collector.collect", return_value=channel_result),
+        patch("backend.database.AsyncSessionLocal", return_value=mock_session_cm),
+        patch("backend.control.actuator.pause_source_for_captcha", new_callable=AsyncMock) as mock_pause,
+        patch("backend.config.get_settings") as mock_settings,
+    ):
+        mock_settings.return_value.control_pause_ttl_seconds = 900
+        result = await run_pipeline(task.id, source)
+
+    assert result.success is False
+    assert "verification challenge" in result.error
+    assert result.metadata.get("captcha_paused") is True
+    mock_pause.assert_awaited_once()
+    assert mock_pause.await_args.kwargs["source"].id == source.id
+    assert mock_pause.await_args.kwargs["ttl_seconds"] == 900
+    assert source.enabled is True  # the real pause happens in the actuator via the mocked call
+
+
+@pytest.mark.asyncio
+async def test_pipeline_ordinary_failure_does_not_pause_source(db_session):
+    """Non-captcha failures keep the existing permanent-failure path and never
+    touch the actuator."""
+    from backend.models.source import DataSource
+    from backend.models.task import CollectionTask
+
+    source = DataSource(
+        name="Plain Fail Source",
+        channel_type="rss",
+        channel_config={"feed_url": "https://ex.com/feed.xml"},
+    )
+    db_session.add(source)
+    await db_session.flush()
+
+    task = CollectionTask(source_id=source.id, trigger_type="manual", parameters={})
+    db_session.add(task)
+    await db_session.flush()
+
+    channel_result = ChannelResult.fail("feed malformed", error_type="JSONDecodeError")
+
+    with (
+        patch("backend.pipeline.collector.collect", return_value=channel_result),
+        patch("backend.control.actuator.pause_source_for_captcha", new_callable=AsyncMock) as mock_pause,
+    ):
+        result = await run_pipeline(db_session, source, task.id)
+
+    assert result.success is False
+    assert "feed malformed" in result.error
+    assert "captcha_paused" not in (result.metadata or {})
+    mock_pause.assert_not_awaited()
+
+
 @pytest.mark.asyncio
 async def test_pipeline_with_ai_failure_still_returns_success(db_session):
     from backend.models.source import DataSource

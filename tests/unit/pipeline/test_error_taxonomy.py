@@ -2,7 +2,12 @@
 
 import pytest
 
-from backend.pipeline.error_taxonomy import is_retryable, is_retryable_http_status
+from backend.pipeline.error_taxonomy import (
+    CAPTCHA_CHALLENGE,
+    is_captcha,
+    is_retryable,
+    is_retryable_http_status,
+)
 
 
 @pytest.mark.parametrize("error_type", [
@@ -60,3 +65,33 @@ def test_request_timeout_408_is_retryable():
     """408 is a transient per-request timeout, not a durably broken request —
     it belongs with 429/5xx, not with the permanent 4xx family."""
     assert is_retryable_http_status(408) is True
+
+
+# ── captcha_challenge: third category (needs human, not retry/permanent) ─────
+
+
+def test_captcha_challenge_constant_value():
+    assert CAPTCHA_CHALLENGE == "captcha_challenge"
+
+
+def test_captcha_challenge_is_not_retryable():
+    """A captcha wall is not a transient fault — retrying immediately burns
+    retry budget on a wall that only a human can clear."""
+    assert is_retryable(CAPTCHA_CHALLENGE) is False
+
+
+def test_captcha_challenge_is_captcha():
+    assert is_captcha(CAPTCHA_CHALLENGE) is True
+
+
+def test_none_is_not_captcha():
+    assert is_captcha(None) is False
+
+
+def test_empty_string_is_not_captcha():
+    assert is_captcha("") is False
+
+
+def test_ordinary_errors_are_not_captcha():
+    for t in ("TimeoutException", "ValueError", "RetryableHTTPStatus", "SomeNewError"):
+        assert is_captcha(t) is False

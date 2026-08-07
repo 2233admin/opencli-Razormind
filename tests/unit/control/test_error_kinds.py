@@ -45,6 +45,9 @@ class TestMapErrorType:
     def test_store_failed(self):
         assert map_error_type("IntegrityError") is ErrorKind.STORE_FAILED
 
+    def test_captcha_challenge_maps_to_captcha(self):
+        assert map_error_type("captcha_challenge") is ErrorKind.CAPTCHA
+
 
 class TestMapException:
     def test_none_maps_to_unknown(self):

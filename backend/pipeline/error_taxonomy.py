@@ -42,6 +42,24 @@ _PERMANENT = frozenset({
 })
 
 
+#: Explicit error_type for a site wall that only a human can clear (Doubao's
+#: captcha/人机验证, set by doubao_research_channel). Deliberately NOT in either
+#: set below: it is not a transient fault (retrying burns budget on the same
+#: wall) and not a permanent fault (the source is fine once a human clears it)
+#: — the pipeline treats it via :func:`is_captcha` (pause + require review).
+CAPTCHA_CHALLENGE = "captcha_challenge"
+
+
+def is_captcha(error_type: str | None) -> bool:
+    """True when the failure is a human-cleared challenge wall (captcha).
+
+    Distinct from retryability: a captcha is neither transient nor permanent —
+    the correct response is to pause the source and surface it for human
+    action, not to retry automatically.
+    """
+    return error_type == CAPTCHA_CHALLENGE
+
+
 def is_retryable(error_type: str | None) -> bool:
     """Classify a failure by its exception class name.
 
