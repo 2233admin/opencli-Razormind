@@ -1,6 +1,6 @@
 version: 1
 source: backend.main.app.openapi
-openapi_operation_count: 231
+openapi_operation_count: 234
 allowed_dispositions:
 - operator_ui
 - studio_binding
@@ -232,6 +232,14 @@ capability_groups:
 - capability_id: operator.workspace-governance
   label: 工作区治理
   projection: operator_resource
+  distribution: builtin
+  lifecycle: active
+  owner: opencli-admin
+  wrapper_names: []
+  workflow_node_ids: []
+- capability_id: auth.local
+  label: 本地管理员认证
+  projection: setup_card
   distribution: builtin
   lifecycle: active
   owner: opencli-admin
@@ -2317,6 +2325,33 @@ operations:
   decision: Start only published project workflows through the Studio runtime boundary.
   target_epic: Epic 8
   capability_id: studio.workflow
+- method: GET
+  path: /api/v1/auth/local/status
+  operation_id: local_status_api_v1_auth_local_status_get
+  disposition: setup_status
+  frontend_route: /login
+  wrapper: null
+  decision: First-run local administrator onboarding status check (T1 local admin onboarding, ex-PR #61).
+  target_epic: Epic 8
+  capability_id: auth.local
+- method: POST
+  path: /api/v1/auth/local/setup
+  operation_id: setup_local_admin_api_v1_auth_local_setup_post
+  disposition: setup_status
+  frontend_route: /login
+  wrapper: null
+  decision: Create the fixed local-admin record on first run (requires BOOTSTRAP_ADMIN_TOKEN).
+  target_epic: Epic 8
+  capability_id: auth.local
+- method: POST
+  path: /api/v1/auth/local/login
+  operation_id: local_login_api_v1_auth_local_login_post
+  disposition: machine_ingress
+  frontend_route: null
+  wrapper: null
+  decision: Local administrator password login issuing a server-signed 12-hour session.
+  target_epic: Epic 8
+  capability_id: auth.local
 unreferenced_wrappers:
 - wrapper: getOperationsAgentVersion
   operation_id: get_agent_version_api_v1_workspaces__workspace_id__operations_agents__agent_id__versions__version_number__get
