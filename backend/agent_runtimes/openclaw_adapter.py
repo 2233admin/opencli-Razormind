@@ -108,7 +108,9 @@ class OpenClawRuntimeAdapter(RuntimeAdapter):
             config["agent_id"], str
         ):
             errors.append("'agent_id' must be a string when provided")
-        if "model" in config and config["model"] is not None and not isinstance(config["model"], str):
+        if "model" in config and config["model"] is not None and not isinstance(
+            config["model"], str
+        ):
             errors.append("'model' must be a string when provided")
         if "local" in config and config["local"] is not None and not isinstance(
             config["local"], bool

@@ -80,7 +80,9 @@ class HermesRuntimeAdapter(RuntimeAdapter):
             errors.append("'cwd' must be a string when provided")
         if "env" in config and config["env"] is not None and not isinstance(config["env"], dict):
             errors.append("'env' must be a dict when provided")
-        if "model" in config and config["model"] is not None and not isinstance(config["model"], str):
+        if "model" in config and config["model"] is not None and not isinstance(
+            config["model"], str
+        ):
             errors.append("'model' must be a string when provided")
         if "provider" in config and config["provider"] is not None and not isinstance(
             config["provider"], str
