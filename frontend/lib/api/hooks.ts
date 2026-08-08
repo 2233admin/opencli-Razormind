@@ -740,10 +740,11 @@ export function useControlActions(params?: {
   })
 }
 
-export function useKillSwitch() {
+export function useKillSwitch(options?: { refetchInterval?: number }) {
   return useQuery({
     queryKey: ['kill-switch'],
     queryFn: api.getKillSwitch,
+    refetchInterval: options?.refetchInterval,
   })
 }
 
@@ -755,17 +756,19 @@ export function useSetKillSwitch() {
   })
 }
 
-export function useAdvisoryReport() {
+export function useAdvisoryReport(options?: { refetchInterval?: number }) {
   return useQuery({
     queryKey: ['advisory-report'],
     queryFn: api.getAdvisoryReport,
+    refetchInterval: options?.refetchInterval,
   })
 }
 
-export function useOdpState() {
+export function useOdpState(options?: { refetchInterval?: number }) {
   return useQuery({
     queryKey: ['odp-state'],
     queryFn: api.getOdpState,
+    refetchInterval: options?.refetchInterval,
   })
 }
 
