@@ -23,6 +23,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.control.agent_control import ACTION_REGISTRY, agent_control_service
 from backend.database import get_db
+from backend.llm import ResolverError, resolver
+from backend.llm.base import LlmAdapterError, classify_retryable
 from backend.models.provider import ModelProvider
 from backend.schemas.common import ApiResponse
 from backend.security.identity import RequestIdentity, get_request_identity
@@ -341,16 +343,25 @@ async def _build_proposal(
     )
 
 
-@router.post("", response_model=ApiResponse[ChatReply])
-async def chat(
+async def _chat_with_client(
+    client: Any,
+    model: str,
     body: ChatRequest,
-    identity: RequestIdentity | None = Depends(_optional_request_identity),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession,
+    identity: RequestIdentity | None,
 ) -> ApiResponse:
-    provider = await _pick_provider(db, body.provider_id)
-    client = await _build_client(provider)
-    model = provider.default_model or "gpt-4o-mini"
+    """Run the agent-dock tool loop against ``client`` with ``model``.
 
+    Extracted from the ``chat`` endpoint so the same loop serves both the
+    legacy single-provider path and each candidate tried inside
+    ``ProviderResolver.resolve_with_fallback`` (model-provider runtime
+    PR-E, issue #55). LLM-call failures are re-raised as
+    :class:`~backend.llm.base.LlmAdapterError` carrying
+    :func:`~backend.llm.base.classify_retryable`'s connection-vs-business
+    split (decision #7) — the resolver only fails over connection-level
+    failures, and the HTTP 502 conversion happens once at the endpoint
+    boundary instead of being baked into the loop.
+    """
     system = SYSTEM_PROMPT
     if body.context:
         system += f"\n\n当前用户操作上下文 (JSON): {json.dumps(body.context, ensure_ascii=False)}"
@@ -366,9 +377,13 @@ async def chat(
             response = await client.chat.completions.create(
                 model=model, messages=messages, tools=TOOLS, tool_choice="auto"
             )
+        except LlmAdapterError:
+            raise
         except Exception as exc:
             logger.error("chat llm error | %s", exc)
-            raise HTTPException(status_code=502, detail=f"模型调用失败: {exc}") from exc
+            raise LlmAdapterError(
+                f"chat llm error: {exc}", retryable=classify_retryable(exc)
+            ) from exc
 
         msg = response.choices[0].message
         tool_calls = msg.tool_calls or []
@@ -411,6 +426,61 @@ async def chat(
             )
 
     return ApiResponse.ok(ChatReply(type="message", content="(达到工具调用步数上限, 请换个说法再试)"))
+
+
+async def _chat_single_provider(
+    db: AsyncSession,
+    body: ChatRequest,
+    identity: RequestIdentity | None,
+    provider_id: Optional[str],
+) -> ApiResponse:
+    """Legacy pre-failover chat path (issue #55): one provider — the
+    explicit ``provider_id`` or the first enabled one — no candidate
+    failover. Kept as the fallback when the ``chat`` role has no
+    ``model_defaults.candidates`` configured, so existing installs behave
+    exactly as before the failover wiring.
+    """
+    provider = await _pick_provider(db, provider_id)
+    client = await _build_client(provider)
+    model = provider.default_model or "gpt-4o-mini"
+    return await _chat_with_client(client, model, body, db, identity)
+
+
+@router.post("", response_model=ApiResponse[ChatReply])
+async def chat(
+    body: ChatRequest,
+    identity: RequestIdentity | None = Depends(_optional_request_identity),
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse:
+    """Agent dock chat (model-provider runtime PR-E, issue #55).
+
+    Provider selection now runs through
+    :func:`backend.llm.resolver.ProviderResolver.resolve_with_fallback` for
+    the ``chat`` role whenever ``model_defaults.candidates`` are configured
+    for it: candidates are tried in order and a connection-level failure
+    (connect error / timeout / 5xx — decision #7) fails over to the next
+    candidate, while a business failure (4xx: bad key, malformed request)
+    is re-raised immediately. An explicit ``provider_id`` still bypasses
+    failover (the user picked that provider on purpose), and a role with no
+    candidates falls back to the legacy first-enabled-provider lookup.
+    """
+    if body.provider_id or not await resolver.has_candidates(db, "chat"):
+        return await _chat_single_provider(db, body, identity, body.provider_id)
+
+    async def operation(adapter: Any, model_id: str) -> ApiResponse:
+        provider = adapter.provider
+        client = await _build_client(provider)
+        model = model_id or provider.default_model or "gpt-4o-mini"
+        return await _chat_with_client(client, model, body, db, identity)
+
+    try:
+        return await resolver.resolve_with_fallback(db, "chat", operation)
+    except (LlmAdapterError, ResolverError) as exc:
+        # Business-level failure (re-raised immediately, no candidate left
+        # untried) or every candidate skipped/failed → single 502 explaining
+        # why; never leaks a provider api_key (adapters sanitize).
+        logger.error("chat failover | %s", exc)
+        raise HTTPException(status_code=502, detail=f"模型调用失败: {exc}") from exc
 
 
 @router.post("/confirm", response_model=ApiResponse[dict])
@@ -502,9 +572,13 @@ async def _chat_xml(
     for _step in range(MAX_TOOL_STEPS):
         try:
             response = await client.chat.completions.create(model=model, messages=messages, max_tokens=1024)
+        except LlmAdapterError:
+            raise
         except Exception as exc:
             logger.error("chat(xml) llm error | %s", exc)
-            raise HTTPException(status_code=502, detail=f"模型调用失败: {exc}") from exc
+            raise LlmAdapterError(
+                f"chat(xml) llm error: {exc}", retryable=classify_retryable(exc)
+            ) from exc
 
         content = response.choices[0].message.content or ""
         calls = _parse_tool_use(content)

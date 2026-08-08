@@ -102,24 +102,37 @@ class ProviderResolver:
             return []
         return list(row.candidates or [])
 
+    async def has_candidates(self, db: AsyncSession, role: str) -> bool:
+        """``True`` iff a non-empty ``model_defaults.candidates`` list exists
+        for ``role``.
+
+        A cheap pre-check for callers that want to keep a legacy fallback
+        path when the role has no failover order configured (e.g.
+        ``chat.py``: candidates configured → failover runtime; no candidates
+        → the pre-failover single-provider lookup, so existing installs
+        keep working unchanged).
+        """
+        return bool(await self._candidates_for(db, role))
+
     async def resolve(self, db: AsyncSession, role: str) -> ResolvedModel | None:
         """Return the primary (first) candidate configured for ``role``.
 
         Returns ``None`` — rather than raising — when no ``model_defaults``
-        row exists for ``role``, its ``candidates`` list is empty, or the
+        row exists for ``role``, its ``candidates`` list is empty, the
         first candidate's ``provider_id`` no longer resolves to a real
-        provider row: this is a direct "what's configured" lookup for
-        callers that want the single default, not a "try until one works"
-        search (that's :meth:`resolve_with_fallback`) — there is nothing to
-        fail over to here, so a clean ``None`` is more useful to a caller
-        than an exception for what is often just "nothing configured yet".
+        provider row, or that provider is currently disabled: this is a
+        direct "what's configured AND usable" lookup for callers that want
+        the single default, not a "try until one works" search (that's
+        :meth:`resolve_with_fallback`) — there is nothing to fail over to
+        here, so a clean ``None`` is more useful to a caller than an
+        exception for what is often just "nothing configured yet".
         """
         candidates = await self._candidates_for(db, role)
         if not candidates:
             return None
         candidate = candidates[0]
         provider = await db.get(ModelProvider, candidate["provider_id"])
-        if provider is None:
+        if provider is None or not provider.enabled:
             return None
         return ResolvedModel(
             provider=provider,
@@ -140,7 +153,10 @@ class ProviderResolver:
         - A candidate whose ``provider_id`` no longer resolves to a real
           provider row (deleted since the default was configured) is
           skipped the same way, without being put in cooldown (there is no
-          "it" to cool down).
+          "it" to cool down). A candidate whose provider row is currently
+          ``enabled=False`` is skipped identically — disabling a provider
+          in governance is an operator choice, not a liveness failure, so
+          it must not be used and must not go into cooldown either.
         - ``operation`` succeeding returns that result immediately — no
           further candidates are tried.
         - ``operation`` raising :class:`~backend.llm.base.LlmAdapterError`
@@ -169,6 +185,11 @@ class ProviderResolver:
             if provider is None:
                 # Candidate references a since-deleted provider — dead, but
                 # not "this provider just failed", so no cooldown to set.
+                continue
+            if not provider.enabled:
+                # Disabled in governance — an operator choice, not a
+                # liveness failure: skip without cooldown, same as a
+                # deleted provider.
                 continue
             adapter = get_adapter(provider)
             tried += 1

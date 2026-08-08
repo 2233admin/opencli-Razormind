@@ -111,6 +111,34 @@ async def test_resolve_returns_none_when_candidates_empty(db_session: AsyncSessi
     assert await resolver.resolve(db_session, "executor") is None
 
 
+@pytest.mark.asyncio
+async def test_resolve_returns_none_when_primary_provider_disabled(db_session: AsyncSession):
+    provider_a = await _make_provider(db_session, "provider-a")
+    provider_a.enabled = False
+    await db_session.commit()
+    await _make_default(
+        db_session,
+        "chat",
+        [{"provider_id": provider_a.id, "model_id": "model-a"}],
+    )
+    resolver = ProviderResolver(now=FakeClock())
+    assert await resolver.resolve(db_session, "chat") is None
+
+
+@pytest.mark.asyncio
+async def test_has_candidates_true_only_for_nonempty_role(db_session: AsyncSession):
+    resolver = ProviderResolver(now=FakeClock())
+    assert await resolver.has_candidates(db_session, "chat") is False
+    await _make_default(
+        db_session,
+        "chat",
+        [{"provider_id": "any-provider-id", "model_id": "model-a"}],
+    )
+    assert await resolver.has_candidates(db_session, "chat") is True
+    await _make_default(db_session, "executor", [])
+    assert await resolver.has_candidates(db_session, "executor") is False
+
+
 # ---------------------------------------------------------------------------
 # resolve_with_fallback() — sequential failover
 # ---------------------------------------------------------------------------
@@ -155,6 +183,65 @@ async def test_no_default_raises_resolver_error(db_session: AsyncSession):
     resolver = ProviderResolver(now=FakeClock())
     operation = AsyncMock()
     with pytest.raises(ResolverError):
+        await resolver.resolve_with_fallback(db_session, "chat", operation)
+    operation.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_disabled_provider_skipped_without_cooldown_uses_next(
+    db_session: AsyncSession,
+):
+    provider_a = await _make_provider(db_session, "provider-a")
+    provider_b = await _make_provider(db_session, "provider-b")
+    provider_a.enabled = False
+    await db_session.commit()
+    await _make_default(
+        db_session,
+        "chat",
+        [
+            {"provider_id": provider_a.id, "model_id": "model-a"},
+            {"provider_id": provider_b.id, "model_id": "model-b"},
+        ],
+    )
+
+    resolver = ProviderResolver(now=FakeClock())
+    operation = AsyncMock(side_effect=["b-result"])
+
+    patched_adapter = patch(
+        "backend.llm.resolver.get_adapter", side_effect=lambda p: object()
+    )
+    with patched_adapter as mock_get_adapter:
+        result = await resolver.resolve_with_fallback(db_session, "chat", operation)
+
+    assert result == "b-result"
+    # the disabled candidate never reached adapter construction or the operation
+    operation.assert_called_once()
+    assert operation.call_args.args[1] == "model-b"
+    assert mock_get_adapter.call_count == 1
+    # disabling is an operator choice, not a liveness failure → no cooldown
+    assert resolver._is_cooled(provider_a.id) is False
+    assert resolver._is_cooled(provider_b.id) is False
+
+
+@pytest.mark.asyncio
+async def test_all_candidates_disabled_raises_resolver_error(db_session: AsyncSession):
+    provider_a = await _make_provider(db_session, "provider-a")
+    provider_b = await _make_provider(db_session, "provider-b")
+    provider_a.enabled = False
+    provider_b.enabled = False
+    await db_session.commit()
+    await _make_default(
+        db_session,
+        "chat",
+        [
+            {"provider_id": provider_a.id, "model_id": "model-a"},
+            {"provider_id": provider_b.id, "model_id": "model-b"},
+        ],
+    )
+
+    resolver = ProviderResolver(now=FakeClock())
+    operation = AsyncMock()
+    with pytest.raises(ResolverError, match="tried=0"):
         await resolver.resolve_with_fallback(db_session, "chat", operation)
     operation.assert_not_called()
 
@@ -314,10 +401,15 @@ async def test_concurrent_resolve_with_fallback_is_consistent(db_engine):
 
     async def run_one():
         async with session_factory() as session:
-            with patch("backend.llm.resolver.get_adapter", side_effect=lambda p: object()):
-                return await resolver.resolve_with_fallback(session, "chat", operation)
+            return await resolver.resolve_with_fallback(session, "chat", operation)
 
-    results = await asyncio.gather(*(run_one() for _ in range(20)))
+    # The get_adapter patch must wrap the whole gather, NOT each task: a
+    # `with patch(...)` entered per-task around an `await` makes the
+    # enter/exit attribute-restore race under concurrent scheduling and can
+    # leak the mock onto the module attribute after the test (breaking any
+    # later test that resolves a real adapter).
+    with patch("backend.llm.resolver.get_adapter", side_effect=lambda p: object()):
+        results = await asyncio.gather(*(run_one() for _ in range(20)))
 
     assert results == ["result-model-b"] * 20
     assert resolver._is_cooled(provider_a.id) is True
