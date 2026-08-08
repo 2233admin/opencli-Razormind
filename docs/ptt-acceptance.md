@@ -26,11 +26,11 @@ LAN is allowed only for a local dry run.
 
 ## PTT-0 Local Commands
 
-Run these from the backend repository root. On this Windows workstation, use the
-repository virtualenv explicitly:
+Run these from the repository root. `uv sync --extra dev` creates and maintains
+the repository-local `.venv`; do not call its interpreter directly.
 
 ```powershell
-.\.venv\Scripts\python.exe -m pytest `
+uv run pytest `
   tests/unit/test_agent_image_runtime_packaging.py `
   tests/unit/test_agent_server.py `
   tests/unit/test_ws_agent_manager.py `

@@ -167,39 +167,44 @@ flowchart LR
 
 ## 从源码开发
 
-前置要求：Python 3.13+、Node.js 26.3.1（见 `.nvmrc`）、uv、pnpm。
+前置要求：Python 3.13+、Node.js 24（见 `.nvmrc`）、uv、pnpm。
 
 ~~~bash
 git clone https://github.com/2233admin/opencli-Razormind.git
 cd opencli-Razormind
 
-uv sync
-uv run uvicorn backend.main:app --host 127.0.0.1 --port 8031
+uv sync --extra dev
+npm run doctor
+npm run dev:backend
 ~~~
 
 另开终端：
 
 ~~~bash
-cd frontend
-pnpm install
-pnpm dev --hostname 127.0.0.1 --port 3010
+npm run dev:frontend
 ~~~
 
 常用验证：
 
 ~~~bash
-npm run lint:frontend
-npm run typecheck:frontend
-npm run build:frontend
-uv run pytest
+npm run check
+npm run test:backend
 ~~~
+
+可选能力在启动前使用同一套环境预检：`npm run doctor:agent`、
+`npm run doctor:celery`、`npm run doctor:ai`、`npm run doctor:dify`、
+`npm run doctor:kats`、`npm run doctor:image-studio`。对应 Docker 入口为
+`npm run docker:agent|docker:celery|docker:dify|docker:kats|docker:image-studio`。
+`CHROME_SUFFIX` 在默认栈中应为空；
+启用远程 Agent 的内置 Chrome 镜像时必须设为 `-chrome`，并运行
+`node scripts/dev-environment.mjs --profiles=agent,embedded-chrome`。预检只报告变量名，不输出密钥值。
 
 从源码构建完整 Docker 栈：
 
 ~~~bash
 cp .env.docker.example .env
 # 设置 API_AUTH_TOKEN、BOOTSTRAP_ADMIN_TOKEN、SECRET_KEY、CREDENTIAL_ENCRYPTION_KEY
-docker compose -f docker-compose.yml -f docker-compose.build.yml up --build -d
+npm run docker:up
 ~~~
 
 ## 发布镜像
