@@ -51,6 +51,15 @@ function parseJsonObject(value: string, label: string) {
   return parsed as Record<string, unknown>
 }
 
+function publicRunSummary(payload: Record<string, unknown> | null) {
+  if (!payload) return null
+  const values = Object.entries(payload)
+    .filter(([, value]) => ['string', 'number', 'boolean'].includes(typeof value))
+    .slice(0, 4)
+    .map(([key, value]) => `${key}: ${String(value)}`)
+  return values.length ? values.join(' · ') : '已生成结构化执行结果，可在运行记录中审计。'
+}
+
 function ContractEditor({ workspaceId, agent }: { workspaceId: string; agent: OperationsAgent }) {
   const draft = useOperationsAgentDraft(workspaceId, agent.id)
   const versions = useOperationsAgentVersions(workspaceId, agent.id)
@@ -346,7 +355,7 @@ export default function OperationsAgentsPage() {
               <div className="flex min-h-0 flex-col bg-[#090a0b]">
                 <div className="flex items-center gap-2 border-b border-white/[0.06] px-5 py-2 font-mono text-[11px] text-muted-foreground"><Terminal className="size-3" />SESSION OUTPUT</div>
                 <div className="min-h-0 flex-1 overflow-y-auto p-5 font-mono text-xs leading-6">
-                  {(activity.data ?? []).filter((run) => run.operations_agent_id === selectedAgent.id).length ? <div className="space-y-5">{(activity.data ?? []).filter((run) => run.operations_agent_id === selectedAgent.id).map((run) => <div key={run.id}><div className="text-muted-foreground"><span className="text-emerald-400">[{run.status}]</span> {new Date(run.updated_at).toLocaleString()}</div><div className="mt-1 text-white/80">{run.trigger_type} → {run.target_resource_type}/{run.target_resource_id}</div><div className="text-white/45">profile v{run.profile_version} · agent v{run.published_version}</div>{run.error_message ? <div className="mt-2 whitespace-pre-wrap text-red-300">{run.error_message}</div> : null}{run.output_payload ? <pre className="mt-2 overflow-x-auto whitespace-pre-wrap text-white/75">{JSON.stringify(run.output_payload, null, 2)}</pre> : null}</div>)}</div> : <div className="flex h-full min-h-56 flex-col items-center justify-center text-center font-sans"><Terminal className="mb-3 size-6 text-white/25" /><p className="text-sm text-white/65">还没有会话输出</p><p className="mt-1 max-w-xs text-xs leading-5 text-white/35">智能体收到任务后，这里会显示真实的 CLI 活动和运行状态。</p></div>}
+                  {(activity.data ?? []).filter((run) => run.operations_agent_id === selectedAgent.id).length ? <div className="space-y-4">{(activity.data ?? []).filter((run) => run.operations_agent_id === selectedAgent.id).map((run) => <article key={run.id} className="rounded-lg border border-white/[0.08] bg-white/[0.025] p-4"><div className="flex items-center justify-between gap-3"><span className={cn('font-medium', run.status === 'failed' ? 'text-red-300' : run.status === 'completed' ? 'text-emerald-400' : 'text-sky-300')}>{run.status === 'queued' ? '等待执行' : run.status === 'running' ? '正在执行' : run.status === 'completed' ? '已完成' : run.status === 'paused' ? '等待确认' : run.status === 'cancelled' ? '已取消' : '执行失败'}</span><time className="text-muted-foreground">{new Date(run.updated_at).toLocaleString()}</time></div><p className="mt-2 text-sm text-white/85">目标：{run.target_resource_type} · {run.target_resource_id}</p>{run.error_message ? <div className="mt-3 rounded-md bg-red-400/10 px-3 py-2 text-red-200">{run.error_message}<p className="mt-1 text-red-200/70">检查目标状态后可以重新启动。</p></div> : null}{publicRunSummary(run.output_payload) ? <div className="mt-3 rounded-md bg-emerald-400/10 px-3 py-2 text-emerald-100">结果：{publicRunSummary(run.output_payload)}</div> : null}</article>)}</div> : <div className="flex h-full min-h-56 flex-col items-center justify-center text-center font-sans"><Terminal className="mb-3 size-6 text-white/25" /><p className="text-sm text-white/65">还没有执行活动</p><p className="mt-1 max-w-xs text-xs leading-5 text-white/35">智能体收到任务后，这里会显示目标、当前状态和结果摘要。</p></div>}
                 </div>
                 <div className="border-t border-white/[0.06] p-3">
                   <details className="rounded-xl border border-white/[0.08] bg-white/[0.03] px-3 py-2">

@@ -75,6 +75,7 @@ from backend.models.task import CollectionTask, TaskRun, TaskRunEvent
 from backend.models.worker import WorkerNode
 from backend.models.workflow import Project, Workflow, WorkflowDraft, WorkflowVersion
 from backend.models.workflow_run import WorkflowRun, WorkflowRunEvent
+from backend.models.agent_run import AgentRun, AgentRunEvent, AgentSession
 
 __all__ = [
     "TimestampMixin",
@@ -152,4 +153,7 @@ __all__ = [
     "WorkflowVersion",
     "WorkflowRun",
     "WorkflowRunEvent",
+    "AgentSession",
+    "AgentRun",
+    "AgentRunEvent",
 ]

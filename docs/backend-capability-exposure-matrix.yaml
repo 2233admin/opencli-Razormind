@@ -1,6 +1,6 @@
 version: 1
 source: backend.main.app.openapi
-openapi_operation_count: 231
+openapi_operation_count: 234
 allowed_dispositions:
 - operator_ui
 - studio_binding
@@ -231,6 +231,14 @@ capability_groups:
   workflow_node_ids: []
 - capability_id: operator.workspace-governance
   label: 工作区治理
+  projection: operator_resource
+  distribution: builtin
+  lifecycle: active
+  owner: opencli-admin
+  wrapper_names: []
+  workflow_node_ids: []
+- capability_id: agent.runs
+  label: Agent 运行与可观测
   projection: operator_resource
   distribution: builtin
   lifecycle: active
@@ -2317,6 +2325,33 @@ operations:
   decision: Start only published project workflows through the Studio runtime boundary.
   target_epic: Epic 8
   capability_id: studio.workflow
+- method: GET
+  path: /api/v1/chat/runs/{run_id}
+  operation_id: get_chat_run_api_v1_chat_runs__run_id__get
+  disposition: studio_binding
+  frontend_route: /operations-agents
+  wrapper: null
+  decision: Agent run detail for the Operations/Agents page (durable agent runs, ex-PR #61 T2).
+  target_epic: Epic 8
+  capability_id: agent.runs
+- method: GET
+  path: /api/v1/chat/runs/{run_id}/events
+  operation_id: get_chat_run_events_api_v1_chat_runs__run_id__events_get
+  disposition: studio_binding
+  frontend_route: /operations-agents
+  wrapper: null
+  decision: Agent run event stream consumed by the global agent dock live view.
+  target_epic: Epic 8
+  capability_id: agent.runs
+- method: POST
+  path: /api/v1/chat/stream
+  operation_id: chat_stream_api_v1_chat_stream_post
+  disposition: studio_binding
+  frontend_route: /operations-agents
+  wrapper: null
+  decision: Streaming chat endpoint for observable agent execution.
+  target_epic: Epic 8
+  capability_id: agent.runs
 unreferenced_wrappers:
 - wrapper: getOperationsAgentVersion
   operation_id: get_agent_version_api_v1_workspaces__workspace_id__operations_agents__agent_id__versions__version_number__get
