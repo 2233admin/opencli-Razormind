@@ -376,4 +376,4 @@ def select_active_union(project: WorkflowProject) -> ActiveUnionResult:
         parked_node_ids=parked_ids,
         trigger_node_ids=trigger_ids,
         has_supported_trigger=bool(trigger_ids),
-    )
+        )
