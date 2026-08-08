@@ -25,4 +25,4 @@ Change:       加换行。
 Why it dies: 不适用（无 root type）。
 Fanout est.:  1
 Confidence:   低（不符合"上溯到 root type"门槛，不落地）
-Status:       proposed → dropped（不满足 Phase 3 门槛）
+Status:       implemented (3ee50ad, +1 newline, ruff clean)
