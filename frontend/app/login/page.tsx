@@ -1,6 +1,6 @@
 'use client'
 
-import { Droplets, Grid3X3, KeyRound, LoaderCircle, ShieldCheck, SquareTerminal } from 'lucide-react'
+import { Droplets, Grid3X3, LoaderCircle, ShieldCheck, SquareTerminal } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Suspense, useEffect, useState } from 'react'
@@ -9,6 +9,7 @@ import { toast } from 'sonner'
 import FaultyTerminal from '@/components/FaultyTerminal'
 import Dither from '@/components/Dither'
 import { useAuth } from '@/components/auth/auth-provider'
+import { LocalAdminAccess } from '@/components/auth/local-admin-access'
 import { PixelLiquidBg } from '@/components/unlumen-ui/pixel-liquid-bg'
 import { Button } from '@/components/ui/button'
 import {
@@ -19,7 +20,7 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
-import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field'
+import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Separator } from '@/components/ui/separator'
 import RevealText from '@/components/ui/smoothui/reveal-text'
@@ -137,12 +138,10 @@ function LoginForm() {
     oidcEnabled,
     developmentLoginEnabled,
     signInWithOidc,
-    signInWithBootstrap,
     enterDevelopmentMode,
   } = useAuth()
-  const [identityToken, setIdentityToken] = useState('')
   const [fleetToken, setFleetToken] = useState('')
-  const [submitting, setSubmitting] = useState<'oidc' | 'bootstrap' | 'development' | null>(null)
+  const [submitting, setSubmitting] = useState<'oidc' | 'development' | null>(null)
   const [reduceMotion, setReduceMotion] = useState(true)
   const [backdrop, setBackdrop] = useState<LoginBackdrop>('liquid')
   const [headlineWord, setHeadlineWord] = useState(0)
@@ -185,19 +184,6 @@ function LoginForm() {
     }
   }
 
-  async function handleBootstrapLogin(event: React.FormEvent) {
-    event.preventDefault()
-    setSubmitting('bootstrap')
-    try {
-      await signInWithBootstrap(identityToken, optionalFleetToken)
-      toast.success('管理员身份验证成功')
-      router.replace(returnTo)
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : '身份验证失败')
-      setSubmitting(null)
-    }
-  }
-
   function handleDevelopmentLogin() {
     setSubmitting('development')
     try {
@@ -211,7 +197,7 @@ function LoginForm() {
 
   return (
     <motion.main
-      className="relative min-h-screen overflow-hidden bg-[#070604] text-white"
+      className="relative min-h-screen overflow-x-hidden bg-[#070604] text-white"
       animate={
         submitting === 'development' && !reduceMotion
           ? { x: '-100%' }
@@ -329,11 +315,18 @@ function LoginForm() {
             <CardHeader>
               <CardTitle>登录控制台</CardTitle>
               <CardDescription>
-                使用组织账号登录；Bootstrap Admin 仅用于首次部署和紧急恢复。
+                首次部署创建本地管理员；组织登录可在需要时接入。
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-5">
-              {oidcEnabled ? (
+              <LocalAdminAccess onAuthenticated={() => router.replace(returnTo)} />
+
+              {oidcEnabled ? <>
+                <div className="flex items-center gap-3">
+                  <Separator className="flex-1" />
+                  <span className="text-xs text-muted-foreground">组织登录</span>
+                  <Separator className="flex-1" />
+                </div>
                 <Button
                   className={`w-full overflow-hidden transition-[height,border-radius,background-color] duration-300 ${submitting === 'oidc' ? 'h-16 rounded-2xl' : 'h-10'}`}
                   data-triggered={submitting === 'oidc'}
@@ -352,33 +345,14 @@ function LoginForm() {
                     <><ShieldCheck />使用组织账号登录</>
                   )}
                 </Button>
-              ) : (
-                <div className="rounded-lg border bg-muted/40 p-3 text-sm text-muted-foreground">
-                  当前未配置组织登录。请配置 OIDC issuer、client ID 和授权端点。
-                </div>
-              )}
+              </> : null}
 
-              <div className="flex items-center gap-3">
-                <Separator className="flex-1" />
-                <span className="text-xs text-muted-foreground">紧急管理员访问</span>
-                <Separator className="flex-1" />
-              </div>
-
-              <form id="bootstrap-login" onSubmit={handleBootstrapLogin}>
-                <FieldGroup>
-                  <Field>
-                    <FieldLabel htmlFor="identity-token">管理员身份令牌</FieldLabel>
-                    <Input
-                      id="identity-token"
-                      type="password"
-                      placeholder="BOOTSTRAP_ADMIN_TOKEN"
-                      value={identityToken}
-                      onChange={(event) => setIdentityToken(event.target.value)}
-                      autoComplete="off"
-                    />
-                    <FieldDescription>验证成功后仅保存在当前标签页会话中。</FieldDescription>
-                  </Field>
-                  <Field>
+              {oidcEnabled || developmentLoginEnabled ? (
+                <details className="rounded-lg border bg-muted/25 px-3 py-2 text-sm">
+                  <summary className="cursor-pointer text-muted-foreground">
+                    Fleet 连接设置
+                  </summary>
+                  <Field className="mt-3">
                     <FieldLabel htmlFor="fleet-token">Fleet API 令牌（可选）</FieldLabel>
                     <Input
                       id="fleet-token"
@@ -389,33 +363,14 @@ function LoginForm() {
                       autoComplete="off"
                     />
                     <FieldDescription>
-                      后端启用 Fleet Auth 时填写；留空沿用部署配置或浏览器中已有值。
+                      仅在组织登录或开发模式需要单独通过 Fleet Auth 时填写。
                     </FieldDescription>
                   </Field>
-                </FieldGroup>
-              </form>
+                </details>
+              ) : null}
+
             </CardContent>
             <CardFooter className="flex-col gap-2">
-              <Button
-                type="submit"
-                form="bootstrap-login"
-                variant={oidcEnabled ? 'outline' : 'default'}
-                className={`w-full overflow-hidden transition-[height,border-radius,background-color] duration-300 ${submitting === 'bootstrap' ? 'h-16 rounded-2xl' : 'h-10'}`}
-                data-triggered={submitting === 'bootstrap'}
-                disabled={submitting !== null}
-              >
-                {submitting === 'bootstrap' ? (
-                  <span className="flex items-center gap-3 text-left">
-                    <LoaderCircle className="size-5 animate-spin" />
-                    <span className="grid">
-                      <span>正在验证管理员令牌</span>
-                      <span className="text-xs font-normal opacity-65">验证通过后建立本地会话</span>
-                    </span>
-                  </span>
-                ) : (
-                  <><KeyRound />使用管理员令牌登录</>
-                )}
-              </Button>
               {developmentLoginEnabled ? (
                 <Button
                   type="button"

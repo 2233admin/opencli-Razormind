@@ -1,3 +1,7 @@
+---
+name: OpenCLI Admin design system
+---
+
 # Design
 
 ## Source of truth
@@ -400,3 +404,36 @@
 - [ ] Workflow UX / `manifest.presentation` 的 experience descriptor 首版字段名和版本如何定义，使内建专用编辑器可声明但不把任意插件前端带入平台？
 - [ ] Workflow UX / 跨工作流复制首版是否仅支持同一 OpenCLI 实例，还是同时定义跨实例剪贴板格式与兼容性报告？
 - [ ] Workbench engines / Perspective + DuckDB-Wasm 与 OpenTelemetry + Langfuse 的首个生产适配器边界、数据量阈值和许可证复核何时进入 ADR？当前页面只验证 OpenCLI 内的信息架构与真实数据交互。
+
+## Product Context
+
+OpenCLI Admin 是面向自托管操作者的研究、采集和工作流控制台。界面必须优先表达真实状态、明确权限边界，并为失败提供可执行的恢复路径。
+
+## Overview
+
+产品采用桌面优先、信息密集、渐进披露的控制台体验。首次部署必须能够完成安全初始化，后续高频操作不暴露底层部署凭据。
+
+## Colors
+
+沿用 `docs/DESIGN_SYSTEM.md` 与 `frontend/app/globals.css` 的语义色；橙色用于主要操作和品牌信号，状态不能只依赖颜色表达。
+
+## Typography
+
+正文使用现有界面字体栈，运行标识、端口和令牌类内容使用等宽字体。紧凑布局不得牺牲标签、错误信息和正文可读性。
+
+## Layout
+
+控制台保持现有侧栏、内容区和检查器边界。认证界面在窄屏采用单列，在桌面保留产品背景与固定宽度表单，并保证表单顺序稳定。
+
+## Do's and Don'ts
+
+- Do：先显示用户要完成的任务，再按需揭示实现细节和恢复入口。
+- Do：为加载、空、错误、阻塞和成功状态提供明确文案与下一步。
+- Don't：把环境变量、OIDC 术语或 Fleet Token 当作新用户必须理解的产品概念。
+- Don't：使用装饰动画遮盖状态变化，或把不可用能力表现为可执行。
+
+## Source Decisions
+
+- Adopted：现有 Dark Ops Console 视觉体系、shadcn 组件、渐进披露和可恢复状态原则。
+- Rejected：要求首次用户先配置外部身份提供方或从 `.env` 中寻找日常登录凭据的流程。
+- Active change：`openspec/changes/local-admin-onboarding`。

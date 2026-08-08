@@ -23,6 +23,12 @@ class User(TimestampMixin):
     disabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
 
+class LocalAdmin(TimestampMixin):
+    __tablename__ = "local_admin_credentials"
+
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+
+
 class Workspace(TimestampMixin):
     __tablename__ = "workspaces"
 
