@@ -161,3 +161,32 @@ class RuntimeAdapter(ABC):
         a session directory). Default is a no-op; adapters override as
         needed. Mirrors OpenAlice's ``bootstrap()`` pattern."""
         return None
+
+
+#: Keys every stdio subprocess adapter shares; validated identically.
+_COMMON_CONFIG_KEYS: tuple[str, ...] = ("binary", "cwd", "env", "args", "timeout_seconds")
+
+
+def validate_common_config(config: dict[str, Any]) -> list[str]:
+    """Shared validation for the config keys every stdio subprocess adapter
+    uses (binary/cwd/env/args/timeout_seconds). Returns error strings; empty
+    list = valid. Adapters call this first, then validate their own keys —
+    the duplication this removes was copy-pasted identically across
+    pi/hermes/openclaw adapters."""
+    errors: list[str] = []
+    binary = config.get("binary", "pi")
+    if not isinstance(binary, str) or not binary:
+        errors.append("'binary' must be a non-empty string")
+    if "cwd" in config and config["cwd"] is not None and not isinstance(config["cwd"], str):
+        errors.append("'cwd' must be a string when provided")
+    if "env" in config and config["env"] is not None and not isinstance(config["env"], dict):
+        errors.append("'env' must be a dict when provided")
+    if "args" in config and config["args"] is not None:
+        args = config["args"]
+        if not isinstance(args, list) or not all(isinstance(a, str) for a in args):
+            errors.append("'args' must be a list of strings when provided")
+    if "timeout_seconds" in config and config["timeout_seconds"] is not None:
+        timeout = config["timeout_seconds"]
+        if not isinstance(timeout, (int, float)) or isinstance(timeout, bool) or timeout <= 0:
+            errors.append("'timeout_seconds' must be a positive number when provided")
+    return errors

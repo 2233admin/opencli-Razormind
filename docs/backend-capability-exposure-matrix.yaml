@@ -422,27 +422,27 @@ operations:
   path: /api/v1/control/advisory-report
   operation_id: get_advisory_report_api_v1_control_advisory_report_get
   disposition: operator_ui
-  frontend_route: /control/actions
+  frontend_route: /control
   wrapper: getAdvisoryReport
-  decision: Expose through the existing operator surface in the target Epic.
+  decision: Exposed via the control center advisory report panel (frontend/app/(app)/control/page.tsx).
   target_epic: Epic 7
   capability_id: operator.control-actions
 - method: GET
   path: /api/v1/control/kill-switch
   operation_id: get_kill_switch_api_v1_control_kill_switch_get
   disposition: operator_ui
-  frontend_route: /control/actions
+  frontend_route: /control
   wrapper: getKillSwitch
-  decision: Expose through the existing operator surface in the target Epic.
+  decision: Exposed via the control center kill-switch cockpit; engage requires a confirmation dialog.
   target_epic: Epic 7
   capability_id: operator.control-actions
 - method: POST
   path: /api/v1/control/kill-switch
   operation_id: set_kill_switch_api_v1_control_kill_switch_post
   disposition: operator_ui
-  frontend_route: /control/actions
+  frontend_route: /control
   wrapper: setKillSwitch
-  decision: Expose through the existing operator surface in the target Epic.
+  decision: Exposed via the control center kill-switch cockpit; engage is gated by a confirmation dialog.
   target_epic: Epic 7
   capability_id: operator.control-actions
 - method: GET
@@ -458,9 +458,9 @@ operations:
   path: /api/v1/control/odp-state
   operation_id: get_odp_state_api_v1_control_odp_state_get
   disposition: operator_ui
-  frontend_route: /control/actions
+  frontend_route: /control
   wrapper: getOdpState
-  decision: Expose through the existing operator surface in the target Epic.
+  decision: Exposed via the control center ODP data-plane panel (per-section degrade with backend reason).
   target_epic: Epic 7
   capability_id: operator.control-actions
 - method: POST
@@ -2378,26 +2378,6 @@ unreferenced_wrappers:
   disposition: operator_ui
   target_epic: Epic 1
   decision: Wire into source control objectives.
-- wrapper: getOdpState
-  operation_id: get_odp_state_api_v1_control_odp_state_get
-  disposition: operator_ui
-  target_epic: Epic 7
-  decision: Expose as governance status.
-- wrapper: getKillSwitch
-  operation_id: get_kill_switch_api_v1_control_kill_switch_get
-  disposition: operator_ui
-  target_epic: Epic 7
-  decision: Expose as governance status.
-- wrapper: setKillSwitch
-  operation_id: set_kill_switch_api_v1_control_kill_switch_post
-  disposition: operator_ui
-  target_epic: Epic 7
-  decision: Expose as a confirmed high-risk governance action.
-- wrapper: getAdvisoryReport
-  operation_id: get_advisory_report_api_v1_control_advisory_report_get
-  disposition: operator_ui
-  target_epic: Epic 7
-  decision: Expose after GET becomes read-only.
 - wrapper: getRecord
   operation_id: get_record_api_v1_records__record_id__get
   disposition: operator_ui

@@ -61,15 +61,16 @@ test('studio node selector exposes the complete Dify-compatible component split'
   const selector = await read('components/flow/command-palette.tsx')
   const nodeCatalog = await read('lib/workflow/node-catalog.ts')
 
-  assert.match(selector, /type SelectorTab = "blocks" \| "sources" \| "tools" \| "start" \| "snippets"/)
-  assert.match(selector, /\["blocks", "节点"\]/)
-  assert.match(selector, /\["sources", "数据源"\]/)
-  assert.match(selector, /\["tools", "工具"\]/)
-  assert.match(selector, /\["start", "开始"\]/)
-  assert.match(selector, /\["snippets", "片段"\]/)
-  assert.match(selector, /item\.category === "source"/)
-  assert.match(selector, /item\.category === "package"/)
-  assert.match(selector, /item\.category === "trigger"/)
+  assert.match(selector, /type PickerTab = "nodes" \| "tools" \| "start"/)
+  assert.match(selector, /id: "nodes", label: "节点"/)
+  assert.match(selector, /id: "tools", label: "工具"/)
+  assert.match(selector, /id: "start", label: "开始"/)
+  assert.match(selector, /TAB_META/)
+  assert.match(selector, /item\.category === "annotation"/)
+  assert.match(selector, /item\.category === "shape"/)
+  assert.match(selector, /nodeCatalogGroups/)
+  assert.match(selector, /groupOpenCLIAdapterPlugins/)
+  assert.match(selector, /OPENCLI_SITE_CATEGORIES/)
   for (const id of [
     'workflow.block.agent',
     'workflow.block.llm',
@@ -142,4 +143,35 @@ test('OpenCLI is one provider with a full live website adapter directory', async
   assert.match(registryHook, /load\(\{ signal: controller\.signal \}\)/)
   assert.match(adapterClient, /params\.set\("refresh"/)
   assert.match(adapterClient, /signal: options\.signal/)
+})
+
+test('control center wires kill switch, advisory report, and ODP state into one panel', async () => {
+  const [page, navigation, hooks] = await Promise.all([
+    read('app/(app)/control/page.tsx'),
+    read('lib/navigation.ts'),
+    read('lib/api/hooks.ts'),
+  ])
+
+  assert.match(page, /useKillSwitch\(/)
+  assert.match(page, /useSetKillSwitch\(\)/)
+  assert.match(page, /useAdvisoryReport\(/)
+  assert.match(page, /useOdpState\(/)
+  assert.match(page, /useControlActions\(/)
+  assert.match(page, /执行熔断开关/)
+  assert.match(page, /咨询报告/)
+  assert.match(page, /ODP 数据面状态/)
+  assert.match(page, /审计台账/)
+  assert.match(page, /handleKillToggle/)
+  assert.match(page, /refetchInterval: 30_000/)
+  assert.match(page, /refetchInterval: 15_000/)
+  assert.match(page, /确认熔断全部自动执行/)
+  assert.match(page, /recovery_rate/)
+  assert.match(page, /oldest_pending_idle_ms/)
+  assert.match(page, /formatMs/)
+  assert.match(navigation, /'\/control'/)
+  assert.match(navigation, /控制中心/)
+  assert.match(hooks, /queryKey: \['kill-switch'\]/)
+  assert.match(hooks, /queryKey: \['advisory-report'\]/)
+  assert.match(hooks, /queryKey: \['odp-state'\]/)
+  assert.match(hooks, /refetchInterval: options\?\.refetchInterval/)
 })
