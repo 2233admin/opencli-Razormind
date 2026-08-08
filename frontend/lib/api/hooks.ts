@@ -740,6 +740,38 @@ export function useControlActions(params?: {
   })
 }
 
+export function useKillSwitch(options?: { refetchInterval?: number }) {
+  return useQuery({
+    queryKey: ['kill-switch'],
+    queryFn: api.getKillSwitch,
+    refetchInterval: options?.refetchInterval,
+  })
+}
+
+export function useSetKillSwitch() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (engaged: boolean) => api.setKillSwitch(engaged),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['kill-switch'] }),
+  })
+}
+
+export function useAdvisoryReport(options?: { refetchInterval?: number }) {
+  return useQuery({
+    queryKey: ['advisory-report'],
+    queryFn: api.getAdvisoryReport,
+    refetchInterval: options?.refetchInterval,
+  })
+}
+
+export function useOdpState(options?: { refetchInterval?: number }) {
+  return useQuery({
+    queryKey: ['odp-state'],
+    queryFn: api.getOdpState,
+    refetchInterval: options?.refetchInterval,
+  })
+}
+
 export function useInfiniteControlActions(params?: {
   source_id?: string
   mode?: string

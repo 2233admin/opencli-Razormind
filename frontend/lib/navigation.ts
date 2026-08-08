@@ -71,7 +71,7 @@ export const NAV_GROUPS: NavGroup[] = [
         href: '/providers',
         label: '模型与连接',
         icon: ShieldCheck,
-        match: ['/providers', '/control/actions'],
+        match: ['/providers', '/control/actions', '/control'],
       },
     ],
   },
@@ -96,4 +96,5 @@ export const ROUTE_LABELS: Record<string, string> = {
   '/nodes': '执行资源',
   '/workers': 'Worker',
   '/control/actions': '控制与审计',
+  '/control': '控制中心',
 }
