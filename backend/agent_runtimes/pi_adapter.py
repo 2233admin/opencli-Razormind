@@ -83,6 +83,7 @@ from backend.agent_runtimes.base import (
     event_text,
     event_tool_call,
     event_tool_result,
+    validate_common_config,
 )
 from backend.agent_runtimes.registry import register_runtime
 
@@ -109,7 +110,7 @@ class PiRuntimeAdapter(RuntimeAdapter):
     )
 
     def validate_config(self, config: dict[str, Any]) -> list[str]:
-        errors: list[str] = []
+        errors = validate_common_config(config)
         permission_mode = config.get("permission_mode")
         if permission_mode in _READ_ONLY_PROFILE_MODES:
             unsupported = sorted(set(config) - {"permission_mode", "timeout_seconds"})
@@ -118,27 +119,12 @@ class PiRuntimeAdapter(RuntimeAdapter):
                     "read-only permission modes cannot override Fleet launch config: "
                     + ", ".join(unsupported)
                 )
-        binary = config.get("binary", "pi")
-        if not isinstance(binary, str) or not binary:
-            errors.append("'binary' must be a non-empty string")
-        if "cwd" in config and config["cwd"] is not None and not isinstance(config["cwd"], str):
-            errors.append("'cwd' must be a string when provided")
-        if "env" in config and config["env"] is not None and not isinstance(config["env"], dict):
-            errors.append("'env' must be a dict when provided")
         if "provider_dir" in config and config["provider_dir"] is not None and not isinstance(
             config["provider_dir"], str
         ):
             errors.append("'provider_dir' must be a string when provided")
-        if "args" in config and config["args"] is not None:
-            args = config["args"]
-            if not isinstance(args, list) or not all(isinstance(a, str) for a in args):
-                errors.append("'args' must be a list of strings when provided")
         if permission_mode not in {None, *_READ_ONLY_PROFILE_MODES}:
             errors.append("'permission_mode' must be 'observe_only' or 'suggest_changes'")
-        if "timeout_seconds" in config and config["timeout_seconds"] is not None:
-            timeout = config["timeout_seconds"]
-            if not isinstance(timeout, (int, float)) or isinstance(timeout, bool) or timeout <= 0:
-                errors.append("'timeout_seconds' must be a positive number when provided")
         return errors
 
     async def health(self) -> bool:

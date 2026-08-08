@@ -46,6 +46,7 @@ from backend.agent_runtimes.base import (
     event_error,
     event_started,
     event_text,
+    validate_common_config,
 )
 from backend.agent_runtimes.registry import register_runtime
 
@@ -100,10 +101,7 @@ class OpenClawRuntimeAdapter(RuntimeAdapter):
     )
 
     def validate_config(self, config: dict[str, Any]) -> list[str]:
-        errors: list[str] = []
-        binary = config.get("binary", "openclaw")
-        if not isinstance(binary, str) or not binary:
-            errors.append("'binary' must be a non-empty string")
+        errors = validate_common_config(config)
         if "agent_id" in config and config["agent_id"] is not None and not isinstance(
             config["agent_id"], str
         ):
@@ -116,18 +114,6 @@ class OpenClawRuntimeAdapter(RuntimeAdapter):
             config["local"], bool
         ):
             errors.append("'local' must be a boolean when provided")
-        if "cwd" in config and config["cwd"] is not None and not isinstance(config["cwd"], str):
-            errors.append("'cwd' must be a string when provided")
-        if "env" in config and config["env"] is not None and not isinstance(config["env"], dict):
-            errors.append("'env' must be a dict when provided")
-        if "args" in config and config["args"] is not None:
-            args = config["args"]
-            if not isinstance(args, list) or not all(isinstance(a, str) for a in args):
-                errors.append("'args' must be a list of strings when provided")
-        if "timeout_seconds" in config and config["timeout_seconds"] is not None:
-            timeout = config["timeout_seconds"]
-            if not isinstance(timeout, (int, float)) or isinstance(timeout, bool) or timeout <= 0:
-                errors.append("'timeout_seconds' must be a positive number when provided")
         return errors
 
     async def health(self) -> bool:
