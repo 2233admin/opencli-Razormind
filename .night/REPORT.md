@@ -35,7 +35,8 @@
   - 5 类错误路径全部 event_error + 正确 error_type
   - 超时 terminate→kill→CancelledError 重抛完整
   - 非零退出读 stderr tail、done 带 result dict
-  - 唯一标注: 两处 stdin.close() 的 `except Exception` + pragma: no cover（防御性，不阻塞）
+  - 唯一标注: 两处 stdin.close() 的 `except Exception` + pragma: no cover
+    → **已修复** (c4e8bbc): 收窄为 (BrokenPipeError, ConnectionResetError)，与 pi 一致
 - 结论: **达成**（外部复核，映射表原文见复核 transcript）
 - QUARANTINE: 0 条（无测试隔离）
 
