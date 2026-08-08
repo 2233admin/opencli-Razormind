@@ -18,10 +18,10 @@
 ## 基线对照表
 | 指标 | 基线 | 结束 |
 |---|---|---|
-| 后端测试 | 2701 pass / 1 fail / 50 skip | 2701+19 pass / 0 fail / 50 skip（F2 修后全绿） |
-| 覆盖率 | 87.57% (红线 80%) | ≥87.57% |
-| 前端回归 | 21 pass / 1 fail | 22 pass / 0 fail（F1 修后全绿） |
-| 后端 LOC | ~97,992 | +~550（两个 adapter + 测试） |
+| 后端测试 | 2701 pass / 1 fail / 50 skip | **2721 pass / 0 fail / 50 skip**（+20 新测试） |
+| 覆盖率 | 87.57% (红线 80%) | **88.37%** |
+| 前端回归 | 21 pass / 1 fail | **22 pass / 0 fail** |
+| 后端 LOC | ~97,992 | ~98,000（净 +8，两个 adapter 增 ~300，F3-1 减 22） |
 
 ## FLAKY 集
 无（基线两遍未见不一致测试；50 skip 为 live/postgres_conformance 标记）
@@ -40,9 +40,11 @@
 - QUARANTINE: 0 条（无测试隔离）
 
 ## Phase 3 发现
-- implemented: (待补)
-- proposed: (待补)
-- failed: (待补)
+- implemented:
+  - F3-1 (f3124bb): 提取 validate_common_config，消除 pi/hermes/openclaw 的 4 处重复 isinstance 守卫，ΔLOC -22，106 tests pass
+  - F3-2 (3ee50ad): trigger_scope.py W292 补 EOF 换行，ruff clean
+- proposed: 无（F3-3 opentabs timeout 校验特化度高，不并入——F3-1 范围正确）
+- failed: 无
 
 ## BLOCKERS
 - **OpenClaw 真实运行验证阻塞**（非规格反例）: main agent 模型 volcengine/kimi-k2.6 billing 过期，拿不到正常 JSON 输出。adapter 已按容错解析交付（JSON 探测 + 非 JSON 退化 + 非零退出 error），fake binary 测试 13 个全过。真实输出结构待 key 恢复后校准。
