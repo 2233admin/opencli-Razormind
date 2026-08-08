@@ -229,7 +229,8 @@ class OpenClawRuntimeAdapter(RuntimeAdapter):
         if proc.stdin is not None:
             try:
                 proc.stdin.close()
-            except Exception:  # pragma: no cover - child may have exited already
+            except (BrokenPipeError, ConnectionResetError):
+                # pragma: no cover - child may have exited already
                 pass
 
         try:
