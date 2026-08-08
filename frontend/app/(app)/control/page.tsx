@@ -23,7 +23,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { Switch } from '@/components/ui/switch'
 import {
   Table,
   TableBody,
@@ -47,26 +46,112 @@ function formatNum(n: number): string {
   return n.toLocaleString('en-US')
 }
 
-function Metric({
+/* ────────────────────────────────────────────────────────────────
+ * Status strip — the glanceable Monitor layer.
+ * Four compact cells: kill state, automation gate, ODP availability,
+ * ledger volume. No card chrome, just label + value + dot.
+ * ──────────────────────────────────────────────────────────────── */
+
+function StripCell({
   label,
   value,
-  tone,
+  dot,
+  dotTone,
 }: {
   label: string
   value: string
-  tone?: 'good' | 'bad' | 'muted'
+  dot?: boolean
+  dotTone?: 'good' | 'warn' | 'bad' | 'muted'
 }) {
-  const toneClass =
-    tone === 'good' ? 'text-success' : tone === 'bad' ? 'text-destructive' : 'text-muted-foreground'
+  const dotClass =
+    dotTone === 'good'
+      ? 'bg-success'
+      : dotTone === 'bad'
+        ? 'bg-destructive'
+        : dotTone === 'warn'
+          ? 'bg-warning'
+          : 'bg-muted-foreground/50'
   return (
-    <div className="flex flex-col gap-0.5">
-      <span className="text-xs text-muted-foreground">{label}</span>
-      <span className={`font-mono text-sm font-medium ${toneClass}`}>{value}</span>
+    <div className="flex items-center gap-3 rounded-lg border bg-card px-4 py-3">
+      {dot ? <span className={`size-2 shrink-0 rounded-full ${dotClass}`} /> : null}
+      <div className="flex min-w-0 flex-col gap-0.5">
+        <span className="text-3xs uppercase tracking-wide text-muted-foreground">{label}</span>
+        <span className="truncate font-mono text-sm font-medium">{value}</span>
+      </div>
     </div>
   )
 }
 
-function OdpSection({
+/* ────────────────────────────────────────────────────────────────
+ * Kill-switch — the Operate layer's primary action. Rendered as a
+ * raised ops-panel cockpit (dark surface, distinct from cards) with
+ * a large action button, not a buried mini-switch.
+ * ──────────────────────────────────────────────────────────────── */
+
+function KillCockpit({
+  engaged,
+  runtimeOverride,
+  configDefault,
+  isPending,
+  onToggle,
+}: {
+  engaged: boolean
+  runtimeOverride: boolean | null
+  configDefault: boolean
+  isPending: boolean
+  onToggle: (engaged: boolean) => void
+}) {
+  const source = runtimeOverride != null ? '运行期覆盖' : configDefault ? '配置默认 · 启用' : '配置默认 · 停用'
+  return (
+    <div className="rounded-xl border border-ops-line bg-ops-panel p-5">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="flex items-center gap-4">
+          {engaged ? (
+            <Badge variant="destructive" className="h-7 px-3 text-sm">
+              ● 已熔断
+            </Badge>
+          ) : (
+            <Badge variant="secondary" className="h-7 px-3 text-sm">
+              ● 未熔断
+            </Badge>
+          )}
+          <div className="flex flex-col gap-0.5">
+            <span className="text-3xs uppercase tracking-wide text-muted-foreground">生效来源</span>
+            <span className="font-mono text-sm">{source}</span>
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          {engaged ? (
+            <Button variant="secondary" onClick={() => onToggle(false)} disabled={isPending}>
+              {isPending ? '执行中…' : '解除熔断'}
+            </Button>
+          ) : (
+            <Button variant="destructive" onClick={() => onToggle(true)} disabled={isPending}>
+              {isPending ? '执行中…' : '熔断全部自动执行'}
+            </Button>
+          )}
+        </div>
+      </div>
+      {engaged ? (
+        <p className="mt-4 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+          所有 automatic 模式的 Control Cycle 执行将在下一次 tick 被无条件短路。
+          运行期覆盖在进程重启后被清除，恢复为配置默认值。
+        </p>
+      ) : (
+        <p className="mt-4 text-xs text-muted-foreground">
+          熔断关闭不代表自动模式已开启——仍需 <code className="font-mono">CONTROL_MODE=automatic</code> 及全部门禁通过才会执行。
+        </p>
+      )}
+    </div>
+  )
+}
+
+/* ────────────────────────────────────────────────────────────────
+ * ODP data plane — Monitor layer, compact. Five small cells, each
+ * degrades independently with the backend's reason surfaced.
+ * ──────────────────────────────────────────────────────────────── */
+
+function OdpCell({
   title,
   state,
   children,
@@ -76,114 +161,133 @@ function OdpSection({
   children: React.ReactNode
 }) {
   return (
-    <div className="flex flex-col gap-2 rounded-lg border p-3">
+    <div className="flex flex-col gap-1.5 rounded-lg border bg-card p-3">
       <div className="flex items-center justify-between gap-2">
-        <span className="text-sm font-medium">{title}</span>
+        <span className="text-3xs uppercase tracking-wide text-muted-foreground">{title}</span>
         {state.available ? (
-          <StatusBadge status="healthy" />
+          <span className="size-1.5 rounded-full bg-success" />
         ) : (
-          <StatusBadge status="offline" />
+          <span className="size-1.5 rounded-full bg-muted-foreground/50" />
         )}
       </div>
       {state.available ? (
-        <div className="grid grid-cols-2 gap-2">{children}</div>
+        <div className="grid grid-cols-2 gap-x-3 gap-y-1">{children}</div>
       ) : (
-        <p className="text-xs text-muted-foreground">
-          {state.error || '当前不可用（依赖的 Redis / 数据面未部署）'}
+        <p className="truncate text-3xs text-muted-foreground" title={state.error ?? undefined}>
+          {state.error || '不可用'}
         </p>
       )}
     </div>
   )
 }
 
-function OdpPanels({ state }: { state: OdpSystemState }) {
+function OdpGrid({ state }: { state: OdpSystemState }) {
+  const availableCount = [
+    state.ingest.available,
+    state.stream.available,
+    state.dlq.available,
+    state.store.available,
+    state.outbox.available,
+  ].filter(Boolean).length
   return (
-    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-      <OdpSection title="Ingest 入口" state={state.ingest}>
-        <Metric
-          label="健康"
-          value={
-            state.ingest.healthy === true
-              ? '健康'
-              : state.ingest.healthy === false
-                ? '异常'
-                : '未知'
-          }
-          tone={
-            state.ingest.healthy === true
-              ? 'good'
-              : state.ingest.healthy === false
-                ? 'bad'
-                : 'muted'
-          }
-        />
-      </OdpSection>
-      <OdpSection title="Stream 消费组" state={state.stream}>
-        <Metric label="消费组" value={state.stream.group || '—'} />
-        <Metric label="Lag" value={state.stream.lag == null ? '—' : formatNum(state.stream.lag)} />
-        <Metric
-          label="Pending"
-          value={state.stream.pending == null ? '—' : formatNum(state.stream.pending)}
-        />
-        <Metric
-          label="最旧滞留"
-          value={
-            state.stream.oldest_pending_idle_ms == null
+    <div className="flex flex-col gap-2">
+      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+        <OdpCell title="Ingest" state={state.ingest}>
+          <span className="text-xs">
+            {state.ingest.healthy === true ? '健康' : state.ingest.healthy === false ? '异常' : '未知'}
+          </span>
+        </OdpCell>
+        <OdpCell title="Stream 消费组" state={state.stream}>
+          <span className="font-mono text-xs">{state.stream.group || '—'}</span>
+          <span className="font-mono text-xs text-muted-foreground">
+            lag {state.stream.lag == null ? '—' : formatNum(state.stream.lag)}
+          </span>
+          <span className="font-mono text-xs text-muted-foreground">
+            pend {state.stream.pending == null ? '—' : formatNum(state.stream.pending)}
+          </span>
+          <span className="font-mono text-xs text-muted-foreground">
+            idle{' '}
+            {state.stream.oldest_pending_idle_ms == null
               ? '—'
-              : formatMs(state.stream.oldest_pending_idle_ms)
-          }
-        />
-      </OdpSection>
-      <OdpSection title="DLQ 死信" state={state.dlq}>
-        <Metric
-          label="总量"
-          value={state.dlq.total == null ? '—' : formatNum(state.dlq.total)}
-        />
-        <Metric
-          label="近 24h"
-          value={state.dlq.last_24h == null ? '—' : formatNum(state.dlq.last_24h)}
-        />
-      </OdpSection>
-      <OdpSection title="Store 存储" state={state.store}>
-        <Metric
-          label="心跳年龄"
-          value={
-            state.store.heartbeat_age_seconds == null
+              : formatMs(state.stream.oldest_pending_idle_ms)}
+          </span>
+        </OdpCell>
+        <OdpCell title="DLQ 死信" state={state.dlq}>
+          <span className="font-mono text-xs">{state.dlq.total == null ? '—' : formatNum(state.dlq.total)}</span>
+          <span className="font-mono text-xs text-muted-foreground">
+            24h {state.dlq.last_24h == null ? '—' : formatNum(state.dlq.last_24h)}
+          </span>
+        </OdpCell>
+        <OdpCell title="Store 存储" state={state.store}>
+          <span className="font-mono text-xs">
+            {state.store.heartbeat_age_seconds == null
               ? '—'
-              : `${state.store.heartbeat_age_seconds}s`
-          }
-        />
-        {state.store.note ? (
-          <span className="col-span-2 text-[11px] text-muted-foreground">{state.store.note}</span>
-        ) : null}
-      </OdpSection>
-      <OdpSection title="Outbox" state={state.outbox}>
-        <Metric
-          label="未发布"
-          value={state.outbox.unpublished == null ? '—' : formatNum(state.outbox.unpublished)}
-        />
-        {state.outbox.note ? (
-          <span className="col-span-2 text-[11px] text-muted-foreground">{state.outbox.note}</span>
-        ) : null}
-      </OdpSection>
+              : `${state.store.heartbeat_age_seconds}s`}
+          </span>
+          {state.store.note ? (
+            <span className="truncate text-3xs text-muted-foreground" title={state.store.note}>
+              {state.store.note}
+            </span>
+          ) : null}
+        </OdpCell>
+        <OdpCell title="Outbox" state={state.outbox}>
+          <span className="font-mono text-xs">
+            {state.outbox.unpublished == null ? '—' : formatNum(state.outbox.unpublished)}
+          </span>
+          {state.outbox.note ? (
+            <span className="truncate text-3xs text-muted-foreground" title={state.outbox.note}>
+              {state.outbox.note}
+            </span>
+          ) : null}
+        </OdpCell>
+      </div>
+      <span className="text-3xs text-muted-foreground">
+        可用区块 {availableCount}/5 · 采集于 {formatRelative(state.collected_at)}
+      </span>
     </div>
   )
+}
+
+/* ────────────────────────────────────────────────────────────────
+ * Advisory report — the automation-gate data. Buckets carry a gate
+ * badge: mostly-recovered buckets must NOT be automated, mostly-
+ * persisted ones qualify.
+ * ──────────────────────────────────────────────────────────────── */
+
+function gateEligible(bucket: AdvisoryReport['buckets'][number]): boolean {
+  if (bucket.recovery_rate == null) return false
+  return bucket.recovery_rate < 0.8 && bucket.persisted > 0
 }
 
 function AdvisoryTotalsRow({ report }: { report: AdvisoryReport }) {
   const t = report.totals
   return (
-    <div className="flex flex-wrap gap-6">
-      <Metric label="总数" value={formatNum(t.total)} />
-      <Metric label="待评估" value={formatNum(t.pending)} />
-      <Metric label="已评估" value={formatNum(t.evaluated)} />
-      <Metric label="已恢复" value={formatNum(t.recovered)} tone="good" />
-      <Metric label="已固化" value={formatNum(t.persisted)} />
-      <Metric
-        label="恢复率"
-        value={t.recovery_rate == null ? '—' : `${(t.recovery_rate * 100).toFixed(1)}%`}
-        tone={t.recovery_rate != null && t.recovery_rate >= 0.8 ? 'bad' : 'muted'}
-      />
+    <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+      <span className="font-mono text-sm">
+        <span className="text-muted-foreground">总数 </span>
+        {formatNum(t.total)}
+      </span>
+      <span className="font-mono text-sm">
+        <span className="text-muted-foreground">待评估 </span>
+        {formatNum(t.pending)}
+      </span>
+      <span className="font-mono text-sm">
+        <span className="text-muted-foreground">已恢复 </span>
+        <span className="text-success">{formatNum(t.recovered)}</span>
+      </span>
+      <span className="font-mono text-sm">
+        <span className="text-muted-foreground">已固化 </span>
+        {formatNum(t.persisted)}
+      </span>
+      <span className="font-mono text-sm">
+        <span className="text-muted-foreground">恢复率 </span>
+        {t.recovery_rate == null ? '—' : `${(t.recovery_rate * 100).toFixed(1)}%`}
+      </span>
+      {Object.entries(report.mode_breakdown).map(([mode, count]) => (
+        <Badge key={mode} variant={mode === 'automatic' ? 'default' : 'outline'}>
+          {mode === 'automatic' ? '自动' : '建议'} × {formatNum(count)}
+        </Badge>
+      ))}
     </div>
   )
 }
@@ -201,18 +305,14 @@ function AuditLedger() {
 
   return (
     <Card>
-      <CardHeader>
-        <div className="flex items-center justify-between gap-4">
-          <div>
-            <CardTitle>审计台账（控制动作）</CardTitle>
-            <CardDescription>
-              控制器的完整证据账本——每一次建议与执行，按状态类别 / 模式 / 结果过滤。
-            </CardDescription>
-          </div>
-          <Button variant="outline" size="sm" onClick={() => void refetch()} disabled={isFetching}>
-            {isFetching ? '刷新中…' : '刷新'}
-          </Button>
+      <CardHeader className="flex-row items-center justify-between gap-4">
+        <div>
+          <CardTitle className="text-base">审计台账（控制动作）</CardTitle>
+          <CardDescription>每一次建议与执行的证据账本。</CardDescription>
         </div>
+        <Button variant="outline" size="sm" onClick={() => void refetch()} disabled={isFetching}>
+          {isFetching ? '刷新中…' : '刷新'}
+        </Button>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
         {isLoading ? (
@@ -279,7 +379,7 @@ function AuditLedger() {
             {meta && meta.pages > 1 ? (
               <div className="flex items-center justify-between">
                 <span className="text-xs text-muted-foreground">
-                  共 {meta.total} 条 · 第 {meta.page}/{meta.pages} 页
+                  共 {formatNum(meta.total)} 条 · 第 {meta.page}/{meta.pages} 页
                 </span>
                 <div className="flex gap-2">
                   <Button
@@ -313,6 +413,7 @@ export default function ControlCenterPage() {
   const setKill = useSetKillSwitch()
   const advisory = useAdvisoryReport({ refetchInterval: 60_000 })
   const odp = useOdpState({ refetchInterval: 15_000 })
+  const ledger = useControlActions({ page: 1, limit: PAGE_SIZE })
   const [confirmOpen, setConfirmOpen] = useState(false)
 
   // 打开熔断是危险动作：弹确认；关闭熔断是恢复安全态：直接执行。
@@ -329,84 +430,83 @@ export default function ControlCenterPage() {
     setConfirmOpen(false)
   }
 
+  const odpAvailable = odp.data
+    ? [odp.data.ingest.available, odp.data.stream.available, odp.data.dlq.available, odp.data.store.available, odp.data.outbox.available].filter(Boolean).length
+    : null
+  const qualifiedBuckets = advisory.data?.buckets.filter(gateEligible).length ?? null
+  const ledgerTotal = ledger.data?.meta?.total ?? null
+
   return (
     <PageContainer
       title="控制中心"
       eyebrow="CONTROL PLANE"
       description="执行熔断、自动模式门禁、共享数据面与审计台账的系统级控制与观测。"
     >
-      {/* ── Panel 1: Kill switch ─────────────────────────────────────────── */}
+      {/* ── Status strip (Monitor) ──────────────────────────────────────── */}
+      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+        <StripCell
+          label="执行熔断开关"
+          value={kill.data?.engaged ? '已熔断' : '未熔断'}
+          dot
+          dotTone={kill.data?.engaged ? 'bad' : 'good'}
+        />
+        <StripCell
+          label="自动化门禁"
+          value={qualifiedBuckets == null ? '—' : `${qualifiedBuckets} 类可自动化`}
+          dotTone={qualifiedBuckets && qualifiedBuckets > 0 ? 'warn' : 'muted'}
+        />
+        <StripCell
+          label="ODP 数据面"
+          value={odpAvailable == null ? '—' : `${odpAvailable}/5 区块可用`}
+          dot
+          dotTone={odpAvailable == null ? 'muted' : odpAvailable === 5 ? 'good' : odpAvailable > 0 ? 'warn' : 'bad'}
+        />
+        <StripCell
+          label="审计台账"
+          value={ledgerTotal == null ? '—' : `${formatNum(ledgerTotal)} 条`}
+        />
+      </div>
+
+      {/* ── Kill switch cockpit (Operate) ───────────────────────────────── */}
+      {kill.isError ? (
+        <ErrorState message={(kill.error as Error)?.message} hint={BACKEND_HINT} />
+      ) : kill.isLoading ? (
+        <LoadingState rows={1} />
+      ) : kill.data ? (
+        <KillCockpit
+          engaged={kill.data.engaged}
+          runtimeOverride={kill.data.runtime_override}
+          configDefault={kill.data.config_default}
+          isPending={setKill.isPending}
+          onToggle={handleKillToggle}
+        />
+      ) : null}
+
+      {/* ── ODP data plane (Monitor) ───────────────────────────────────── */}
       <Card>
         <CardHeader>
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <CardTitle>执行熔断开关（Kill Switch）</CardTitle>
-              <CardDescription>
-                engaged 时无条件短路 Control Cycle 在 automatic 模式下的全部执行，下一次 tick 立即生效。
-              </CardDescription>
-            </div>
-            <Switch
-              checked={Boolean(kill.data?.engaged)}
-              onCheckedChange={handleKillToggle}
-              disabled={setKill.isPending}
-              aria-label="执行熔断开关"
-            />
-          </div>
+          <CardTitle className="text-base">ODP 数据面状态</CardTitle>
+          <CardDescription>
+            共享数据平面（Redis 消费组 / 死信队列 / 存储心跳）的系统级健康，与单数据源无关。任一环节不可用只降级自身区块。
+          </CardDescription>
         </CardHeader>
-        <CardContent className="flex flex-wrap items-center gap-6">
-          {kill.isLoading ? (
-            <LoadingState rows={1} />
-          ) : kill.isError ? (
-            <ErrorState message={(kill.error as Error)?.message} hint={BACKEND_HINT} />
-          ) : kill.data ? (
-            <>
-              <div className="flex items-center gap-2">
-                {kill.data.engaged ? (
-                  <Badge variant="destructive">已熔断</Badge>
-                ) : (
-                  <Badge variant="secondary">未熔断</Badge>
-                )}
-              </div>
-              <Metric
-                label="生效来源"
-                value={
-                  kill.data.runtime_override != null
-                    ? '运行期覆盖'
-                    : kill.data.config_default
-                      ? '配置默认（启用）'
-                      : '配置默认（停用）'
-                }
-              />
-              <Metric
-                label="运行期覆盖"
-                value={
-                  kill.data.runtime_override == null
-                    ? '未设置'
-                    : kill.data.runtime_override
-                      ? '启用'
-                      : '停用'
-                }
-              />
-              <Metric
-                label="配置默认"
-                value={kill.data.config_default ? '启用' : '停用'}
-                tone={kill.data.config_default ? 'bad' : 'muted'}
-              />
-              {kill.data.engaged ? (
-                <Badge variant="destructive">所有自动执行将在下一次 tick 被短路</Badge>
-              ) : null}
-            </>
+        <CardContent>
+          {odp.isLoading ? (
+            <LoadingState rows={3} />
+          ) : odp.isError ? (
+            <ErrorState message={(odp.error as Error)?.message} hint={BACKEND_HINT} />
+          ) : odp.data ? (
+            <OdpGrid state={odp.data} />
           ) : null}
         </CardContent>
       </Card>
 
-      {/* ── Panel 2: Advisory report ─────────────────────────────────────── */}
+      {/* ── Advisory report (gate data) ─────────────────────────────────── */}
       <Card>
         <CardHeader>
-          <CardTitle>咨询报告（Advisory Report）</CardTitle>
+          <CardTitle className="text-base">咨询报告（Advisory Report）</CardTitle>
           <CardDescription>
-            control_actions 证据台账的收敛/恢复统计 —— 某个 (state, action_type) 组合的建议大多「已恢复」说明该处过度建议，
-            不应自动化；大多「已固化」才具备翻转 automatic 模式的门禁资格。读取时自动完成一次懒评估。
+            control_actions 证据台账的收敛/恢复统计。某 (state, action_type) 组合的建议大多「已恢复」说明过度建议，不应自动化；大多「已固化」才具备翻转 automatic 的门禁资格。读取时自动完成一次懒评估。
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
@@ -434,6 +534,7 @@ export default function ControlCenterPage() {
                         <TableHead className="text-right">已恢复</TableHead>
                         <TableHead className="text-right">已固化</TableHead>
                         <TableHead className="text-right">恢复率</TableHead>
+                        <TableHead>门禁</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -454,64 +555,38 @@ export default function ControlCenterPage() {
                           <TableCell className="text-right font-mono text-xs">
                             {b.recovery_rate == null ? '—' : `${(b.recovery_rate * 100).toFixed(1)}%`}
                           </TableCell>
+                          <TableCell>
+                            {gateEligible(b) ? (
+                              <Badge variant="outline" className="text-success">
+                                可自动化
+                              </Badge>
+                            ) : (
+                              <span className="text-3xs text-muted-foreground">不宜自动化</span>
+                            )}
+                          </TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
                   </Table>
                 </Card>
               )}
-              <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
-                <span>模式分布：</span>
-                {Object.entries(advisory.data.mode_breakdown).map(([mode, count]) => (
-                  <Badge key={mode} variant={mode === 'automatic' ? 'default' : 'outline'}>
-                    {mode === 'automatic' ? '自动' : '建议'} × {formatNum(count)}
-                  </Badge>
-                ))}
-              </div>
             </>
           ) : null}
         </CardContent>
       </Card>
 
-      {/* ── Panel 3: ODP data-plane state ────────────────────────────────── */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <CardTitle>ODP 数据面状态</CardTitle>
-              <CardDescription>
-                共享数据平面（Redis 消费组 / 死信队列 / 存储心跳）的系统级健康，与单数据源无关。
-                任一环节不可用只降级自身区块，不影响其他区块。
-              </CardDescription>
-            </div>
-            {odp.data ? (
-              <span className="font-mono text-xs text-muted-foreground">
-                {formatRelative(odp.data.collected_at)}
-              </span>
-            ) : null}
-          </div>
-        </CardHeader>
-        <CardContent>
-          {odp.isLoading ? (
-            <LoadingState rows={3} />
-          ) : odp.isError ? (
-            <ErrorState message={(odp.error as Error)?.message} hint={BACKEND_HINT} />
-          ) : odp.data ? (
-            <OdpPanels state={odp.data} />
-          ) : null}
-        </CardContent>
-      </Card>
-
-      {/* ── Panel 4: Audit ledger ────────────────────────────────────────── */}
+      {/* ── Audit ledger (Command/Inspect) ──────────────────────────────── */}
       <AuditLedger />
 
-      {/* ── Kill-switch engage confirmation ──────────────────────────────── */}
+      {/* ── Kill-switch engage confirmation ─────────────────────────────── */}
       <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>确认熔断全部自动执行？</DialogTitle>
             <DialogDescription>
-              <span className="text-destructive font-medium">此操作会无条件短路 Control Cycle 在 automatic 模式下的全部执行</span>
+              <span className="text-destructive font-medium">
+                此操作会无条件短路 Control Cycle 在 automatic 模式下的全部执行
+              </span>
               ，下一次 tick 立即生效。运行期覆盖在进程重启后会被清除，恢复为配置默认值。
             </DialogDescription>
           </DialogHeader>
