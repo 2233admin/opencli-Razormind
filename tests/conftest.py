@@ -16,6 +16,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 # an empty env var wins over the .env file value in pydantic-settings.
 os.environ["API_AUTH_TOKEN"] = ""
 os.environ["AGENT_API_TOKEN"] = ""
+# Same leak for NOVNC_BASE_PORT (chrome-pool inventory tests assert its exact
+# value). It's int-typed, so — unlike the string vars above — it can't be
+# cleared to "": pydantic-settings raises on an empty string for an int
+# field. Pin it to the coded/documented default instead.
+os.environ["NOVNC_BASE_PORT"] = "6080"
 
 from backend.auth import crypto
 from backend.database import Base, get_db

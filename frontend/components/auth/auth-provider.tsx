@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 
-import { getCurrentIdentity } from '@/lib/api/endpoints'
+import { getCurrentIdentity, loginWithPassword, setupInitialAdmin } from '@/lib/api/endpoints'
 import { AUTH_REQUIRED_EVENT } from '@/lib/api/auth-events'
 import { setApiAuthToken } from '@/lib/api/auth-token'
 import { getOidcManager, isOidcConfigured, oidcReturnTo, sanitizeReturnTo } from '@/lib/auth/oidc'
@@ -25,6 +25,13 @@ type AuthContextValue = {
   signInWithOidc: (returnTo?: string, fleetToken?: string) => Promise<void>
   completeOidcSignIn: () => Promise<string>
   signInWithBootstrap: (identityToken: string, fleetToken?: string) => Promise<void>
+  signInWithPassword: (email: string, password: string, fleetToken?: string) => Promise<void>
+  completeSetup: (
+    email: string,
+    password: string,
+    displayName: string | undefined,
+    fleetToken?: string,
+  ) => Promise<void>
   enterDevelopmentMode: (fleetToken?: string) => void
   signOut: () => Promise<void>
 }
@@ -162,6 +169,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [acceptIdentityToken],
   )
 
+  const signInWithPassword = useCallback(
+    async (email: string, password: string, fleetToken?: string) => {
+      if (fleetToken !== undefined) setApiAuthToken(fleetToken)
+      const result = await loginWithPassword({ email, password })
+      if (!result) throw new Error('登录失败')
+      await acceptIdentityToken(result.token)
+      persistBootstrapIdentityToken(result.token)
+    },
+    [acceptIdentityToken],
+  )
+
+  const completeSetup = useCallback(
+    async (email: string, password: string, displayName: string | undefined, fleetToken?: string) => {
+      if (fleetToken !== undefined) setApiAuthToken(fleetToken)
+      const result = await setupInitialAdmin({ email, password, display_name: displayName })
+      if (!result) throw new Error('创建管理员账户失败')
+      await acceptIdentityToken(result.token)
+      persistBootstrapIdentityToken(result.token)
+    },
+    [acceptIdentityToken],
+  )
+
   const enterDevelopmentMode = useCallback(
     (fleetToken?: string) => {
       if (!developmentLoginEnabled) throw new Error('本地开发模式不可用')
@@ -195,17 +224,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       signInWithOidc,
       completeOidcSignIn,
       signInWithBootstrap,
+      signInWithPassword,
+      completeSetup,
       enterDevelopmentMode,
       signOut,
     }),
     [
       completeOidcSignIn,
+      completeSetup,
       developmentLoginEnabled,
       enterDevelopmentMode,
       identity,
       oidcEnabled,
       signInWithBootstrap,
       signInWithOidc,
+      signInWithPassword,
       signOut,
       status,
     ],

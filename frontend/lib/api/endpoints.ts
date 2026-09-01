@@ -92,6 +92,18 @@ export const resetWorkspaceSettings = () =>
 export const getCurrentIdentity = () =>
   apiClient.get<ApiResponse<AuthIdentity>>('/auth/me').then((r) => r.data.data)
 
+export const getSetupStatus = () =>
+  apiClient.get<ApiResponse<{ setup_required: boolean }>>('/auth/setup-status').then((r) => r.data.data)
+
+export const setupInitialAdmin = (body: { email: string; display_name?: string; password: string }) =>
+  apiClient.post<ApiResponse<{ token: string }>>('/auth/setup', body).then((r) => r.data.data)
+
+export const loginWithPassword = (body: { email: string; password: string }) =>
+  apiClient.post<ApiResponse<{ token: string }>>('/auth/login', body).then((r) => r.data.data)
+
+export const changePassword = (body: { current_password: string; new_password: string }) =>
+  apiClient.post<ApiResponse<null>>('/auth/change-password', body).then((r) => r.data)
+
 export const listMyWorkspaces = () =>
   apiClient.get<ApiResponse<WorkspaceSummary[]>>('/workspaces').then((r) => r.data.data)
 

@@ -1,6 +1,14 @@
 'use client'
 
-import { Droplets, Grid3X3, KeyRound, LoaderCircle, ShieldCheck, SquareTerminal } from 'lucide-react'
+import {
+  ChevronDown,
+  Droplets,
+  Grid3X3,
+  KeyRound,
+  LoaderCircle,
+  ShieldCheck,
+  SquareTerminal,
+} from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Suspense, useEffect, useState } from 'react'
@@ -9,6 +17,7 @@ import { toast } from 'sonner'
 import FaultyTerminal from '@/components/FaultyTerminal'
 import Dither from '@/components/Dither'
 import { useAuth } from '@/components/auth/auth-provider'
+import { getSetupStatus } from '@/lib/api/endpoints'
 import { PixelLiquidBg } from '@/components/unlumen-ui/pixel-liquid-bg'
 import { Button } from '@/components/ui/button'
 import {
@@ -21,7 +30,6 @@ import {
 } from '@/components/ui/card'
 import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
-import { Separator } from '@/components/ui/separator'
 import RevealText from '@/components/ui/smoothui/reveal-text'
 import { sanitizeReturnTo } from '@/lib/auth/oidc'
 
@@ -138,15 +146,42 @@ function LoginForm() {
     developmentLoginEnabled,
     signInWithOidc,
     signInWithBootstrap,
+    signInWithPassword,
+    completeSetup,
     enterDevelopmentMode,
   } = useAuth()
   const [identityToken, setIdentityToken] = useState('')
   const [fleetToken, setFleetToken] = useState('')
-  const [submitting, setSubmitting] = useState<'oidc' | 'bootstrap' | 'development' | null>(null)
+  const [submitting, setSubmitting] = useState<
+    'oidc' | 'bootstrap' | 'development' | 'password' | 'setup' | null
+  >(null)
   const [reduceMotion, setReduceMotion] = useState(true)
   const [backdrop, setBackdrop] = useState<LoginBackdrop>('liquid')
   const [headlineWord, setHeadlineWord] = useState(0)
   const returnTo = sanitizeReturnTo(searchParams.get('returnTo'))
+
+  // null = not yet resolved; defaults to the normal login form until the
+  // (near-instant, local) check resolves, and fails soft to the login form
+  // rather than blocking the page on a network hiccup.
+  const [setupRequired, setSetupRequired] = useState<boolean | null>(null)
+  const [email, setEmail] = useState('')
+  const [displayName, setDisplayName] = useState('')
+  const [password, setPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+
+  useEffect(() => {
+    let active = true
+    getSetupStatus()
+      .then((result) => {
+        if (active && result) setSetupRequired(result.setup_required)
+      })
+      .catch(() => {
+        if (active) setSetupRequired(false)
+      })
+    return () => {
+      active = false
+    }
+  }, [])
 
   useEffect(() => {
     const mediaQuery = window.matchMedia('(prefers-reduced-motion: reduce)')
@@ -194,6 +229,36 @@ function LoginForm() {
       router.replace(returnTo)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '身份验证失败')
+      setSubmitting(null)
+    }
+  }
+
+  async function handleSetupSubmit(event: React.FormEvent) {
+    event.preventDefault()
+    if (password !== confirmPassword) {
+      toast.error('两次输入的密码不一致')
+      return
+    }
+    setSubmitting('setup')
+    try {
+      await completeSetup(email, password, displayName.trim() || undefined, optionalFleetToken)
+      toast.success('管理员账户已创建')
+      router.replace(returnTo)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '创建管理员账户失败')
+      setSubmitting(null)
+    }
+  }
+
+  async function handlePasswordLogin(event: React.FormEvent) {
+    event.preventDefault()
+    setSubmitting('password')
+    try {
+      await signInWithPassword(email, password, optionalFleetToken)
+      toast.success('登录成功')
+      router.replace(returnTo)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '登录失败')
       setSubmitting(null)
     }
   }
@@ -329,7 +394,7 @@ function LoginForm() {
             <CardHeader>
               <CardTitle>登录控制台</CardTitle>
               <CardDescription>
-                使用组织账号登录；Bootstrap Admin 仅用于首次部署和紧急恢复。
+                使用组织账号登录，或使用本机管理员账户；Bootstrap Admin 仅用于紧急恢复。
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-5">
@@ -358,64 +423,185 @@ function LoginForm() {
                 </div>
               )}
 
-              <div className="flex items-center gap-3">
-                <Separator className="flex-1" />
-                <span className="text-xs text-muted-foreground">紧急管理员访问</span>
-                <Separator className="flex-1" />
-              </div>
+              {setupRequired ? (
+                <form id="local-setup" onSubmit={handleSetupSubmit}>
+                  <FieldGroup>
+                    <Field>
+                      <FieldLabel htmlFor="setup-email">管理员邮箱</FieldLabel>
+                      <Input
+                        id="setup-email"
+                        type="email"
+                        autoComplete="email"
+                        value={email}
+                        onChange={(event) => setEmail(event.target.value)}
+                        required
+                      />
+                    </Field>
+                    <Field>
+                      <FieldLabel htmlFor="setup-display-name">显示名称（可选）</FieldLabel>
+                      <Input
+                        id="setup-display-name"
+                        value={displayName}
+                        onChange={(event) => setDisplayName(event.target.value)}
+                      />
+                    </Field>
+                    <Field>
+                      <FieldLabel htmlFor="setup-password">设置密码</FieldLabel>
+                      <Input
+                        id="setup-password"
+                        type="password"
+                        autoComplete="new-password"
+                        value={password}
+                        onChange={(event) => setPassword(event.target.value)}
+                        minLength={8}
+                        required
+                      />
+                    </Field>
+                    <Field>
+                      <FieldLabel htmlFor="setup-confirm-password">确认密码</FieldLabel>
+                      <Input
+                        id="setup-confirm-password"
+                        type="password"
+                        autoComplete="new-password"
+                        value={confirmPassword}
+                        onChange={(event) => setConfirmPassword(event.target.value)}
+                        minLength={8}
+                        required
+                      />
+                      <FieldDescription>首次部署：创建这个实例的第一个管理员账户。</FieldDescription>
+                    </Field>
+                  </FieldGroup>
+                </form>
+              ) : (
+                <form id="local-login" onSubmit={handlePasswordLogin}>
+                  <FieldGroup>
+                    <Field>
+                      <FieldLabel htmlFor="login-email">邮箱</FieldLabel>
+                      <Input
+                        id="login-email"
+                        type="email"
+                        autoComplete="email"
+                        value={email}
+                        onChange={(event) => setEmail(event.target.value)}
+                        required
+                      />
+                    </Field>
+                    <Field>
+                      <FieldLabel htmlFor="login-password">密码</FieldLabel>
+                      <Input
+                        id="login-password"
+                        type="password"
+                        autoComplete="current-password"
+                        value={password}
+                        onChange={(event) => setPassword(event.target.value)}
+                        required
+                      />
+                    </Field>
+                  </FieldGroup>
+                </form>
+              )}
 
-              <form id="bootstrap-login" onSubmit={handleBootstrapLogin}>
-                <FieldGroup>
-                  <Field>
-                    <FieldLabel htmlFor="identity-token">管理员身份令牌</FieldLabel>
-                    <Input
-                      id="identity-token"
-                      type="password"
-                      placeholder="BOOTSTRAP_ADMIN_TOKEN"
-                      value={identityToken}
-                      onChange={(event) => setIdentityToken(event.target.value)}
-                      autoComplete="off"
-                    />
-                    <FieldDescription>验证成功后仅保存在当前标签页会话中。</FieldDescription>
-                  </Field>
-                  <Field>
-                    <FieldLabel htmlFor="fleet-token">Fleet API 令牌（可选）</FieldLabel>
-                    <Input
-                      id="fleet-token"
-                      type="password"
-                      placeholder="API_AUTH_TOKEN"
-                      value={fleetToken}
-                      onChange={(event) => setFleetToken(event.target.value)}
-                      autoComplete="off"
-                    />
-                    <FieldDescription>
-                      后端启用 Fleet Auth 时填写；留空沿用部署配置或浏览器中已有值。
-                    </FieldDescription>
-                  </Field>
-                </FieldGroup>
-              </form>
+              <details className="group rounded-lg border border-white/12 bg-black/20">
+                <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-3 text-sm font-medium text-white/70">
+                  紧急管理员访问
+                  <ChevronDown className="size-4 text-white/40 transition-transform group-open:rotate-180" />
+                </summary>
+                <form
+                  id="bootstrap-login"
+                  onSubmit={handleBootstrapLogin}
+                  className="border-t border-white/12 p-4"
+                >
+                  <FieldGroup>
+                    <Field>
+                      <FieldLabel htmlFor="identity-token">管理员身份令牌</FieldLabel>
+                      <Input
+                        id="identity-token"
+                        type="password"
+                        placeholder="BOOTSTRAP_ADMIN_TOKEN"
+                        value={identityToken}
+                        onChange={(event) => setIdentityToken(event.target.value)}
+                        autoComplete="off"
+                      />
+                      <FieldDescription>验证成功后仅保存在当前标签页会话中。</FieldDescription>
+                    </Field>
+                    <Field>
+                      <FieldLabel htmlFor="fleet-token">Fleet API 令牌（可选）</FieldLabel>
+                      <Input
+                        id="fleet-token"
+                        type="password"
+                        placeholder="API_AUTH_TOKEN"
+                        value={fleetToken}
+                        onChange={(event) => setFleetToken(event.target.value)}
+                        autoComplete="off"
+                      />
+                      <FieldDescription>
+                        后端启用 Fleet Auth 时填写；留空沿用部署配置或浏览器中已有值。
+                      </FieldDescription>
+                    </Field>
+                    <Button
+                      type="submit"
+                      variant="outline"
+                      size="sm"
+                      className={`w-full overflow-hidden transition-[height,border-radius,background-color] duration-300 ${submitting === 'bootstrap' ? 'h-16 rounded-2xl' : ''}`}
+                      data-triggered={submitting === 'bootstrap'}
+                      disabled={submitting !== null}
+                    >
+                      {submitting === 'bootstrap' ? (
+                        <span className="flex items-center gap-3 text-left">
+                          <LoaderCircle className="size-5 animate-spin" />
+                          <span className="grid">
+                            <span>正在验证管理员令牌</span>
+                            <span className="text-xs font-normal opacity-65">验证通过后建立本地会话</span>
+                          </span>
+                        </span>
+                      ) : (
+                        <><KeyRound />使用管理员令牌登录</>
+                      )}
+                    </Button>
+                  </FieldGroup>
+                </form>
+              </details>
             </CardContent>
             <CardFooter className="flex-col gap-2">
-              <Button
-                type="submit"
-                form="bootstrap-login"
-                variant={oidcEnabled ? 'outline' : 'default'}
-                className={`w-full overflow-hidden transition-[height,border-radius,background-color] duration-300 ${submitting === 'bootstrap' ? 'h-16 rounded-2xl' : 'h-10'}`}
-                data-triggered={submitting === 'bootstrap'}
-                disabled={submitting !== null}
-              >
-                {submitting === 'bootstrap' ? (
-                  <span className="flex items-center gap-3 text-left">
-                    <LoaderCircle className="size-5 animate-spin" />
-                    <span className="grid">
-                      <span>正在验证管理员令牌</span>
-                      <span className="text-xs font-normal opacity-65">验证通过后建立本地会话</span>
+              {setupRequired ? (
+                <Button
+                  type="submit"
+                  form="local-setup"
+                  className={`w-full overflow-hidden transition-[height,border-radius,background-color] duration-300 ${submitting === 'setup' ? 'h-16 rounded-2xl' : 'h-10'}`}
+                  data-triggered={submitting === 'setup'}
+                  disabled={submitting !== null}
+                >
+                  {submitting === 'setup' ? (
+                    <span className="flex items-center gap-3 text-left">
+                      <LoaderCircle className="size-5 animate-spin" />
+                      <span className="grid">
+                        <span>正在创建管理员账户</span>
+                        <span className="text-xs font-normal opacity-65">即将自动登录</span>
+                      </span>
                     </span>
-                  </span>
-                ) : (
-                  <><KeyRound />使用管理员令牌登录</>
-                )}
-              </Button>
+                  ) : (
+                    '创建管理员账户'
+                  )}
+                </Button>
+              ) : (
+                <Button
+                  type="submit"
+                  form="local-login"
+                  variant={oidcEnabled ? 'outline' : 'default'}
+                  className={`w-full overflow-hidden transition-[height,border-radius,background-color] duration-300 ${submitting === 'password' ? 'h-16 rounded-2xl' : 'h-10'}`}
+                  data-triggered={submitting === 'password'}
+                  disabled={submitting !== null}
+                >
+                  {submitting === 'password' ? (
+                    <span className="flex items-center gap-3 text-left">
+                      <LoaderCircle className="size-5 animate-spin" />
+                      <span>正在登录</span>
+                    </span>
+                  ) : (
+                    '登录'
+                  )}
+                </Button>
+              )}
               {developmentLoginEnabled ? (
                 <Button
                   type="button"

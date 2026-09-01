@@ -49,6 +49,22 @@ class WorkspaceMembership(TimestampMixin):
     )
 
 
+class LocalCredential(TimestampMixin):
+    """Password auth for a User, alongside (not instead of) OIDC.
+
+    Kept as its own table rather than a column on User so that OIDC-only
+    users never carry a password_hash, and so local password auth can be
+    added/rotated/dropped without touching the User row itself.
+    """
+
+    __tablename__ = "local_credentials"
+
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False
+    )
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+
+
 class Team(TimestampMixin):
     __tablename__ = "teams"
     __table_args__ = (UniqueConstraint("workspace_id", "slug"),)

@@ -1,17 +1,30 @@
-"""OIDC request identity verification and emergency bootstrap authentication."""
+"""OIDC, local-password, and emergency bootstrap request identity verification."""
 
 from __future__ import annotations
 
 import hmac
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
-from fastapi import HTTPException, Request, status
+from fastapi import Depends, HTTPException, Request, status
 from jose import JWTError, jwt
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.config import get_settings
+from backend.database import get_db
+from backend.models.identity import User
+
+# Local accounts (backend/api/v1/identity.py's /auth/setup and /auth/login)
+# are signed HS256 with this secret; OIDC tokens are always RS256 (enforced
+# below in OIDCVerifier.verify). The alg header alone discriminates which
+# verification path a bearer token needs — no separate token "type" claim
+# or extra network round-trip required to tell them apart.
+LOCAL_TOKEN_ALG = "HS256"
+LOCAL_TOKEN_TTL = timedelta(days=30)
 
 
 @dataclass(frozen=True)
@@ -20,6 +33,7 @@ class IdentitySettings:
     audience: str
     jwks_url: str = ""
     bootstrap_admin_token: str = ""
+    local_token_secret: str = ""
 
     @classmethod
     def from_env(cls) -> IdentitySettings:
@@ -34,6 +48,7 @@ class IdentitySettings:
             audience=settings.oidc_audience,
             jwks_url=settings.oidc_jwks_url,
             bootstrap_admin_token=settings.bootstrap_admin_token,
+            local_token_secret=settings.secret_key,
         )
 
 
@@ -120,6 +135,40 @@ class OIDCVerifier:
         return self._jwks
 
 
+def issue_local_token(user: User, *, secret_key: str) -> str:
+    """Mint a bearer token for a local (password-auth) User.
+
+    Held and resent by the frontend exactly like an OIDC id_token or the
+    bootstrap token (see frontend/lib/auth/session.ts) — this is not a
+    server-side session, there's nothing to look up on refresh besides the
+    token itself.
+    """
+    now = datetime.now(UTC)
+    claims = {"sub": user.subject, "iat": now, "exp": now + LOCAL_TOKEN_TTL}
+    return jwt.encode(claims, secret_key, algorithm=LOCAL_TOKEN_ALG)
+
+
+async def _verify_local_token(token: str, *, secret_key: str, db: AsyncSession) -> RequestIdentity:
+    try:
+        claims = jwt.decode(token, secret_key, algorithms=[LOCAL_TOKEN_ALG])
+    except JWTError as exc:
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED,
+            "Invalid bearer token",
+            headers={"WWW-Authenticate": "Bearer"},
+        ) from exc
+    subject = claims.get("sub")
+    user = await db.scalar(select(User).where(User.subject == subject)) if subject else None
+    if user is None or user.disabled:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Account disabled or not found")
+    return RequestIdentity(
+        subject=user.subject,
+        email=user.email,
+        name=user.display_name,
+        auth_method="local",
+    )
+
+
 def identity_dependency(
     settings: IdentitySettings | None = None,
     verifier: OIDCVerifier | None = None,
@@ -128,7 +177,10 @@ def identity_dependency(
     resolved = settings or IdentitySettings.from_env()
     oidc = verifier or OIDCVerifier(resolved)
 
-    async def get_request_identity(request: Request) -> RequestIdentity:
+    async def get_request_identity(
+        request: Request,
+        db: AsyncSession = Depends(get_db),
+    ) -> RequestIdentity:
         scheme, _, token = request.headers.get("authorization", "").partition(" ")
         if scheme.lower() != "bearer" or not token:
             raise HTTPException(
@@ -145,6 +197,16 @@ def identity_dependency(
                 is_platform_admin=True,
                 auth_method="bootstrap",
             )
+        try:
+            header = jwt.get_unverified_header(token)
+        except JWTError as exc:
+            raise HTTPException(
+                status.HTTP_401_UNAUTHORIZED,
+                "Invalid bearer token",
+                headers={"WWW-Authenticate": "Bearer"},
+            ) from exc
+        if header.get("alg") == LOCAL_TOKEN_ALG:
+            return await _verify_local_token(token, secret_key=resolved.local_token_secret, db=db)
         return await oidc.verify(token)
 
     return get_request_identity
