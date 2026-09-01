@@ -578,6 +578,15 @@ class SkillChannel(AbstractChannel):
         # Guardrail: writes (clicks/typing/submits) require explicit confirm
         # unless the source opts a trusted skill into unattended running.
         auto_confirm = bool(config.get("auto_confirm", False))
+        task_space = parameters.get("task_space")
+        if task_space is None:
+            task_space = config.get("task_space")
+        task_space_ttl = parameters.get("task_space_ttl_seconds")
+        if task_space_ttl is None:
+            task_space_ttl = config.get("task_space_ttl_seconds")
+        close_task_space_after = bool(
+            parameters.get("close_task_space", config.get("close_task_space", False))
+        )
 
         try:
             model_call = await _build_model_call(provider)
@@ -586,8 +595,7 @@ class SkillChannel(AbstractChannel):
 
         from backend.browser_pool import get_pool
         from backend.skills.loop import run_skill_loop  # lazy: breaks import cycle
-        from backend.skills.page import open_skill_page
-
+        from backend.skills.page import close_task_space, open_skill_page
         pool = get_pool()
         endpoint = parameters.get("chrome_endpoint") or None
 
@@ -599,7 +607,13 @@ class SkillChannel(AbstractChannel):
                     task[:80], mode, cdp_endpoint, model, auto_confirm, run_id,
                 )
 
-                skill_page = await open_skill_page(cdp_endpoint)
+                if task_space is None:
+                    skill_page = await open_skill_page(cdp_endpoint)
+                else:
+                    open_kwargs: dict[str, Any] = {"task_space": task_space}
+                    if task_space_ttl is not None:
+                        open_kwargs["task_space_ttl_seconds"] = task_space_ttl
+                    skill_page = await open_skill_page(cdp_endpoint, **open_kwargs)
                 try:
                     page = _PerceivingPage(skill_page)
                     # Drive the perceive → gate → act loop (issues 03/04). The loop
@@ -619,6 +633,8 @@ class SkillChannel(AbstractChannel):
                     )
                 finally:
                     await skill_page.aclose()
+                    if close_task_space_after and task_space is not None:
+                        await close_task_space(cdp_endpoint, task_space)
 
                 # Emit per-step events (best-effort; no-op when no run_id).
                 # AUDIT C24: one session + bulk insert + one commit for the
@@ -686,6 +702,8 @@ class SkillChannel(AbstractChannel):
                     "self_eval": ev,
                     AWAITING_CONFIRM: bool(result.awaiting_confirm),
                 }
+                if task_space is not None:
+                    metadata["task_space"] = str(task_space)
                 if result.awaiting_confirm and result.proposed_action is not None:
                     metadata[PROPOSED_ACTION] = result.proposed_action
                 return ChannelResult.ok(items, **metadata)
@@ -704,4 +722,16 @@ class SkillChannel(AbstractChannel):
                 "skill channel requires 'skill_md', or 'skill_id', or "
                 "('domain' + 'capability')"
             )
+        from backend.skills.page import normalize_task_space, normalize_task_space_ttl
+
+        if config.get("task_space") is not None:
+            try:
+                normalize_task_space(config["task_space"])
+            except ValueError as exc:
+                errors.append(str(exc))
+        if config.get("task_space_ttl_seconds") is not None:
+            try:
+                normalize_task_space_ttl(config["task_space_ttl_seconds"])
+            except ValueError as exc:
+                errors.append(str(exc))
         return errors

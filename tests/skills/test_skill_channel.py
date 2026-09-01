@@ -171,7 +171,10 @@ async def _seed_skill_source_task(sessionmaker, channel_config):
 def _patch_browser_and_model(monkeypatch, fake_page, script):
     """Stub the two true I/O boundaries: the CDP page + the LLM model_call."""
     # No real Chrome: open_skill_page returns the fake page (also covers aclose()).
-    async def fake_open(cdp_endpoint):
+    open_calls: list[dict] = []
+
+    async def fake_open(cdp_endpoint, **kwargs):
+        open_calls.append({"endpoint": cdp_endpoint, **kwargs})
         return fake_page
 
     monkeypatch.setattr("backend.skills.page.open_skill_page", fake_open)
@@ -203,6 +206,7 @@ def _patch_browser_and_model(monkeypatch, fake_page, script):
             return "fake"
 
     monkeypatch.setattr("backend.browser_pool.get_pool", lambda: _FakePool())
+    return open_calls
 
 
 # ── acceptance #2,#3,#5(i,ii): clean run — events + extracts stored ────────────
@@ -576,3 +580,68 @@ async def test_skill_bridge_invoke_maps_envelope(monkeypatch):
     bad = await skill_invoke({"capability": "nope", "params": {}, "inputs": {}})
     assert bad["ok"] is False
     assert "unknown capability" in (bad["error"] or "")
+
+
+async def test_skill_collect_passes_task_space_options(monkeypatch):
+    import backend.skills.page as page_module
+    from backend.channels.skill_channel import SkillChannel
+
+    fake_page = FakePage()
+    calls = _patch_browser_and_model(
+        monkeypatch,
+        fake_page,
+        [("done", {"status": "success", "note": "list page shown"})],
+    )
+    close_calls: list[tuple[str, object]] = []
+
+    async def fake_close(endpoint, task_space):
+        close_calls.append((endpoint, task_space))
+        return True
+
+    monkeypatch.setattr(page_module, "close_task_space", fake_close)
+    result = await SkillChannel().collect(
+        {
+            "skill_md": SKILL_MD,
+            "elements": ELEMENTS,
+            "task_space": "configured",
+            "task_space_ttl_seconds": 45,
+        },
+        {
+            "task_space": "runtime",
+            "task_space_ttl_seconds": 90,
+            "close_task_space": True,
+        },
+    )
+
+    assert result.success is True
+    assert calls == [
+        {
+            "endpoint": "http://fake-cdp:9222",
+            "task_space": "runtime",
+            "task_space_ttl_seconds": 90,
+        }
+    ]
+    assert close_calls == [("http://fake-cdp:9222", "runtime")]
+
+
+async def test_skill_config_validates_task_space_options():
+    from backend.channels.skill_channel import SkillChannel
+
+    channel = SkillChannel()
+    assert await channel.validate_config(
+        {
+            "skill_md": SKILL_MD,
+            "task_space": "  research  ",
+            "task_space_ttl_seconds": 30,
+        }
+    ) == []
+
+    errors = await channel.validate_config(
+        {
+            "skill_md": SKILL_MD,
+            "task_space": "",
+            "task_space_ttl_seconds": 0,
+        }
+    )
+    assert "task_space must be a non-empty string or positive integer" in errors
+    assert "task_space_ttl_seconds must be a positive number" in errors

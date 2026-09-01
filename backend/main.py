@@ -16,6 +16,7 @@ from backend.security.fleet_auth import (
     enforce_bind_guard,
     resolve_uvicorn_host,
 )
+from backend.skills.page import close_all_task_spaces
 
 
 def _configure_logging() -> None:
@@ -215,6 +216,7 @@ async def lifespan(app: FastAPI):
     if use_admin_scheduler:
         from backend.scheduler import stop_scheduler
         stop_scheduler()
+    await close_all_task_spaces()
     await mcp_lifespan.__aexit__(None, None, None)
 
 
