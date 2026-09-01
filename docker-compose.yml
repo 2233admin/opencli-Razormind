@@ -141,6 +141,25 @@ services:
       start_period: 60s
     restart: unless-stopped
 
+  # ── Optional External Analysis Runtime ──────────────────────────────────
+  # PostgreSQL/SQLite remain authoritative. This profile is started only for
+  # user-requested, disposable Analysis Snapshots and is never an API dependency.
+  questdb:
+    profiles: ["analysis-runtime"]
+    image: questdb/questdb:10.0.1
+    ports:
+      - "127.0.0.1:${QUESTDB_HTTP_PORT:-9000}:9000"
+      - "127.0.0.1:${QUESTDB_HEALTH_PORT:-9003}:9003"
+    volumes:
+      - questdb_data:/var/lib/questdb
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:9003"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 20s
+    restart: unless-stopped
+
   # ── Backend API ───────────────────────────────────────────────────────────
   api:
     <<: *backend-common
@@ -188,6 +207,10 @@ services:
       III_INGRESS_RECEIPT_SECRET: ${III_INGRESS_RECEIPT_SECRET:-}
       DIFY_GRAPHON_RUNTIME_URL: ${DIFY_GRAPHON_RUNTIME_URL:-http://dify-graphon-runtime:8095}
       KATS_RUNTIME_URL: ${KATS_RUNTIME_URL:-http://kats-runtime:8096}
+      QUESTDB_ANALYSIS_RUNTIME_ENABLED: ${QUESTDB_ANALYSIS_RUNTIME_ENABLED:-false}
+      QUESTDB_ANALYSIS_RUNTIME_URL: ${QUESTDB_ANALYSIS_RUNTIME_URL:-http://questdb:9000}
+      QUESTDB_ANALYSIS_RUNTIME_HEALTH_URL: ${QUESTDB_ANALYSIS_RUNTIME_HEALTH_URL:-http://questdb:9003}
+      QUESTDB_ANALYSIS_RUNTIME_TIMEOUT_SECONDS: ${QUESTDB_ANALYSIS_RUNTIME_TIMEOUT_SECONDS:-2}
       INVOKEAI_ENABLED: ${INVOKEAI_ENABLED:-false}
       INVOKEAI_BASE_URL: http://invokeai:9090
       INVOKEAI_API_TOKEN: ${INVOKEAI_API_TOKEN:-}
@@ -557,3 +580,4 @@ volumes:
   agent_profile_1:
   agent_profile:
   invokeai_data:
+  questdb_data:
