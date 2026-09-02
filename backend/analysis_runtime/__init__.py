@@ -6,10 +6,24 @@ from .questdb import (
     RuntimeCapabilityState,
     RuntimeCapabilityStatus,
 )
+from .questdb_snapshots import (
+    AcquisitionExecutionSnapshotRow,
+    QuestDBSnapshotOperationCode,
+    QuestDBSnapshotOperationError,
+    QuestDBSnapshotRuntime,
+    QuestDBSnapshotSummary,
+    WorkflowTraceSnapshotRow,
+)
 
 __all__ = [
     "QuestDBAnalysisRuntime",
+    "AcquisitionExecutionSnapshotRow",
+    "QuestDBSnapshotOperationCode",
+    "QuestDBSnapshotOperationError",
+    "QuestDBSnapshotRuntime",
+    "QuestDBSnapshotSummary",
     "RuntimeCapabilityReasonCode",
     "RuntimeCapabilityState",
     "RuntimeCapabilityStatus",
+    "WorkflowTraceSnapshotRow",
 ]

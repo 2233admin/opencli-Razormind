@@ -22,6 +22,7 @@ class WorkspacePermission(StrEnum):
     RUN_OPERATIONS_AGENTS = "operations_agents.run"
     ASSIGN_AGENT_PROFILES = "operations_agents.profiles.assign"
     APPROVE_ACTIONS = "actions.approve"
+    EXPORT_ANALYSIS = "analysis.export"
     MANAGE_HIGHEST_RISK_POLICY = "risk.highest.manage"
 
 
@@ -38,6 +39,7 @@ _ROLE_PERMISSIONS = {
             WorkspacePermission.RUN_OPERATIONS_AGENTS,
             WorkspacePermission.ASSIGN_AGENT_PROFILES,
             WorkspacePermission.APPROVE_ACTIONS,
+            WorkspacePermission.EXPORT_ANALYSIS,
         }
     ),
     WorkspaceRole.OPERATOR: frozenset(
@@ -46,6 +48,7 @@ _ROLE_PERMISSIONS = {
             WorkspacePermission.WORK_INBOX,
             WorkspacePermission.RUN_OPERATIONS_AGENTS,
             WorkspacePermission.APPROVE_ACTIONS,
+            WorkspacePermission.EXPORT_ANALYSIS,
         }
     ),
     WorkspaceRole.VIEWER: frozenset({WorkspacePermission.READ}),
