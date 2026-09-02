@@ -7,7 +7,7 @@ import { toast } from 'sonner'
 import AgentAvatar from '@/components/smoothui/agent-avatar'
 import SwitchboardCard from '@/components/smoothui/switchboard-card'
 import { useAutomations, useCreateAutomation, useGovernedWorkspaces, useInstallAutomationStarters, useOperationsAgentActivity, useOperationsAgentDraft, useOperationsAgents, useOperationsAgentVersion, useOperationsAgentVersions, usePatchAutomation, usePublishOperationsAgentVersion, useStartOperationsAgentRun, useUpdateOperationsAgentDraft } from '@/lib/api/hooks'
-import type { AgentRuntimeBindingV1, Automation, OperationsAgent, OperationsAgentMode } from '@/lib/api/types'
+import type { AgentRuntimeBindingV2, Automation, OperationsAgent, OperationsAgentMode } from '@/lib/api/types'
 import { cn } from '@/lib/utils'
 import { BACKEND_HINT, EmptyState, ErrorState, LoadingState } from '@/components/shell/data-states'
 import { Button } from '@/components/ui/button'
@@ -120,7 +120,7 @@ function ContractEditor({ workspaceId, agent }: { workspaceId: string; agent: Op
   const [outputSchema, setOutputSchema] = useState('')
   const [stateSchema, setStateSchema] = useState('')
   const [agentUrl, setAgentUrl] = useState('')
-  const [runtime, setRuntime] = useState<AgentRuntimeBindingV1['runtime']>('pi')
+  const [runtime, setRuntime] = useState<AgentRuntimeBindingV2['preferred_runtimes'][number]>('pi')
   const [workflow, setWorkflow] = useState('')
   const [dispatchTimeout, setDispatchTimeout] = useState(1800)
   const [runtimeConfig, setRuntimeConfig] = useState('')
@@ -152,8 +152,8 @@ function ContractEditor({ workspaceId, agent }: { workspaceId: string; agent: Op
     setInputSchema(JSON.stringify(contract?.input_schema ?? EMPTY_SCHEMA, null, 2))
     setOutputSchema(JSON.stringify(contract?.output_schema ?? EMPTY_SCHEMA, null, 2))
     setStateSchema(JSON.stringify(contract?.state_schema ?? EMPTY_SCHEMA, null, 2))
-    setAgentUrl(binding?.agent_url ?? '')
-    setRuntime(binding?.runtime ?? 'pi')
+    setAgentUrl(binding?.preferred_agent_urls?.[0] ?? '')
+    setRuntime(binding?.preferred_runtimes?.[0] ?? 'pi')
     setWorkflow(binding?.workflow ?? '')
     setDispatchTimeout(binding?.dispatch_timeout_seconds ?? 1800)
     setRuntimeConfig(JSON.stringify(binding?.config ?? { timeout_seconds: 1800 }, null, 2))
@@ -189,12 +189,9 @@ function ContractEditor({ workspaceId, agent }: { workspaceId: string; agent: Op
               evidence_requirements: parseIdentifierList(evidenceRequirements),
             },
             runtime_binding: {
-              ...(binding ?? {}),
-              schema_version: 'agent.runtime-binding.v1',
-              agent_url: agentUrl.trim(),
-              runtime,
+              schema_version: 'agent.runtime-binding.v2',
               workflow: workflow.trim(),
-              preferred_agent_urls: agentUrl ? [agentUrl.trim()] : [],
+              preferred_agent_urls: agentUrl.trim() ? [agentUrl.trim()] : [],
               preferred_runtimes: runtime ? [runtime] : [],
               model_binding: provider.trim() && model.trim() ? {
                 schema_version: 'agent.model-binding.v1',
@@ -258,7 +255,7 @@ function ContractEditor({ workspaceId, agent }: { workspaceId: string; agent: Op
             <summary className="cursor-pointer text-sm text-muted-foreground">Runtime Binding 高级配置</summary>
             <div className="mt-4 grid gap-4 sm:grid-cols-4">
               <label className="space-y-1.5 text-xs text-muted-foreground">Agent URL<Input type="url" value={agentUrl} onChange={(event) => setAgentUrl(event.target.value)} placeholder="https://agent.example.com" /></label>
-              <label className="space-y-1.5 text-xs text-muted-foreground">Runtime<select value={runtime} onChange={(event) => setRuntime(event.target.value as AgentRuntimeBindingV1['runtime'])} className="h-9 w-full rounded-lg border bg-background px-3 text-sm text-foreground"><option value="miniflow">MiniFlow</option><option value="pi">Pi</option><option value="codex">Codex</option></select></label>
+              <label className="space-y-1.5 text-xs text-muted-foreground">Runtime<select value={runtime} onChange={(event) => setRuntime(event.target.value as AgentRuntimeBindingV2['preferred_runtimes'][number])} className="h-9 w-full rounded-lg border bg-background px-3 text-sm text-foreground"><option value="miniflow">MiniFlow</option><option value="pi">Pi</option><option value="codex">Codex</option></select></label>
               <label className="space-y-1.5 text-xs text-muted-foreground">Workflow<Input value={workflow} onChange={(event) => setWorkflow(event.target.value)} placeholder="default" /></label>
               <label className="space-y-1.5 text-xs text-muted-foreground">深度执行超时（秒）<Input type="number" min={1} max={3600} value={dispatchTimeout} onChange={(event) => setDispatchTimeout(Number(event.target.value))} /><span className="block text-[11px] leading-4 text-muted-foreground">默认 30 分钟；本地 CLI 不暴露 5 小时额度，因此不伪造剩余额度。</span></label>
             </div>

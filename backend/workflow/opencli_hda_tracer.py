@@ -5109,7 +5109,7 @@ async def _execute_feishu_bitable_sink(
                 code=f"feishu_{exc.kind}",
                 message="Feishu Bitable delivery failed.",
                 details={**safe_details, "errorKind": exc.kind},
-                event_type="failed",
+                event_type="blocked" if exc.kind == "delivery_in_progress" else "failed",
             ) from exc
         delivery_refs.append(
             {

@@ -1325,15 +1325,19 @@ export interface AgentContractV1 {
   state_schema: Record<string, unknown>;
 }
 
-export interface AgentRuntimeBindingV1 {
-  schema_version: "agent.runtime-binding.v1";
-  agent_url: string;
-  runtime: "miniflow" | "pi" | "codex";
+export interface AgentRuntimeBindingV2 {
+  schema_version: "agent.runtime-binding.v2";
   workflow: string;
+  preferred_agent_urls: string[];
+  preferred_runtimes: Array<"miniflow" | "pi" | "codex">;
+  model_binding: {
+    schema_version: "agent.model-binding.v1";
+    provider: string;
+    model: string;
+    auth_profile: string | null;
+  } | null;
   config: Record<string, unknown>;
   dispatch_timeout_seconds: number;
-  execution_node_url?: string | null;
-  shared_filesystem_id?: string | null;
 }
 
 export interface OperationsAgentDraft {
@@ -1341,7 +1345,7 @@ export interface OperationsAgentDraft {
   instructions: string;
   model_configuration: Record<string, unknown> & {
     agent_contract?: AgentContractV1;
-    runtime_binding?: AgentRuntimeBindingV1;
+    runtime_binding?: AgentRuntimeBindingV2;
   };
   tool_configuration: Record<string, unknown>;
   updated_by_user_id: string;

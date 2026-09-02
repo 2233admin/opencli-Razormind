@@ -319,10 +319,14 @@ def test_resolve_agent_result_already_done_future_no_error():
 
 
 @pytest.mark.asyncio
-async def test_resolve_agent_event_callback_exception_does_not_propagate():
-    """A raising on_event must be swallowed (logged), not break the dispatcher."""
+async def test_resolve_agent_event_callback_exception_fails_pending_task():
     def bad_on_event(event):
         raise ValueError("boom")
 
+    fut = asyncio.get_running_loop().create_future()
+    mgr._pending_agent_tasks["req-1"] = fut
     mgr._agent_task_callbacks["req-1"] = (bad_on_event, "http://agent:1")
-    await mgr.resolve_agent_event("req-1", {"event": {"type": "text"}})  # must not raise
+    await mgr.resolve_agent_event("req-1", {"event": {"type": "text"}})
+
+    with pytest.raises(ValueError, match="boom"):
+        await fut

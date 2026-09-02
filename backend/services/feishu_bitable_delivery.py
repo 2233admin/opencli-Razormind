@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import httpx
@@ -13,6 +14,29 @@ from backend.database import commit_session, rollback_session
 from backend.models.delivery_connection import DeliveryAttempt
 
 FEISHU_API_HOST = "https://open.feishu.cn"
+_DELIVERY_ATTEMPT_LEASE = timedelta(minutes=5)
+
+
+def _pending_attempt_is_stale(attempt: DeliveryAttempt) -> bool:
+    updated_at = attempt.updated_at
+    if updated_at.tzinfo is None:
+        updated_at = updated_at.replace(tzinfo=timezone.utc)
+    return datetime.now(timezone.utc) - updated_at >= _DELIVERY_ATTEMPT_LEASE
+
+
+def _mark_attempt_pending(
+    attempt: DeliveryAttempt,
+    *,
+    workflow_run_id: str,
+    evidence_digest: str | None,
+    field_map: dict[str, str],
+) -> None:
+    attempt.workflow_run_id = workflow_run_id
+    attempt.evidence_digest = evidence_digest
+    attempt.field_map = field_map
+    attempt.status = "pending"
+    attempt.error_code = None
+    attempt.updated_at = datetime.now(timezone.utc)
 
 
 class FeishuDeliveryError(RuntimeError):
@@ -126,29 +150,26 @@ async def deliver_record_once(
         DeliveryAttempt.app_token == app_token,
         DeliveryAttempt.table_id == table_id,
         DeliveryAttempt.record_id == record_id,
-    )
+    ).with_for_update()
     existing = (await session.execute(query)).scalar_one_or_none()
     if existing and existing.status == "succeeded":
         if existing.evidence_digest != evidence_digest or existing.field_map != field_map:
             raise FeishuDeliveryError("idempotency_conflict")
         return existing
-    if existing and existing.status == "pending":
-        return existing
+    if existing and existing.status == "pending" and not _pending_attempt_is_stale(existing):
+        raise FeishuDeliveryError("delivery_in_progress")
     attempt = existing or DeliveryAttempt(
         connection_id=connection.id,
         app_token=app_token,
         table_id=table_id,
         record_id=record_id,
+    )
+    _mark_attempt_pending(
+        attempt,
         workflow_run_id=workflow_run_id,
         evidence_digest=evidence_digest,
         field_map=field_map,
-        status="pending",
     )
-    attempt.workflow_run_id = workflow_run_id
-    attempt.evidence_digest = evidence_digest
-    attempt.field_map = field_map
-    attempt.status = "pending"
-    attempt.error_code = None
     if existing is None:
         session.add(attempt)
     try:
@@ -157,9 +178,23 @@ async def deliver_record_once(
     except IntegrityError:
         await rollback_session(session)
         winner = (await session.execute(query)).scalar_one_or_none()
-        if winner is not None:
+        if winner is None:
+            raise
+        if winner.status == "succeeded":
+            if winner.evidence_digest != evidence_digest or winner.field_map != field_map:
+                raise FeishuDeliveryError("idempotency_conflict")
             return winner
-        raise
+        if winner.status == "pending" and not _pending_attempt_is_stale(winner):
+            raise FeishuDeliveryError("delivery_in_progress")
+        attempt = winner
+        _mark_attempt_pending(
+            attempt,
+            workflow_run_id=workflow_run_id,
+            evidence_digest=evidence_digest,
+            field_map=field_map,
+        )
+        await session.flush()
+        await commit_session(session)
     try:
         attempt.remote_record_id = await create_record(connection, app_token, table_id, fields)
         attempt.status = "succeeded"

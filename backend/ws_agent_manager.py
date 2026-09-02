@@ -258,9 +258,11 @@ async def resolve_agent_event(request_id: str, msg: dict[str, Any]) -> None:
     event = msg.get("event", {})
     try:
         await _invoke_on_event(on_event, event)
-    except Exception:
+    except Exception as exc:
         logger.exception("WS: on_event callback raised for request_id=%s", request_id)
-
+        fut = _pending_agent_tasks.get(request_id)
+        if fut is not None and not fut.done():
+            fut.set_exception(exc)
 
 def resolve_agent_result(request_id: str, msg: dict[str, Any]) -> None:
     """Called from the WS receive loop when an agent sends the terminal 'agent_result' frame."""

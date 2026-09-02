@@ -97,6 +97,39 @@ async def test_direct_http_runtime_endpoint_rejects_codex(monkeypatch):
     assert blocked.value.status_code == 403
 
 
+
+@pytest.mark.asyncio
+async def test_direct_http_runtime_endpoint_rejects_runtime_outside_installed_bundle(monkeypatch):
+    monkeypatch.setattr(agent_server, "_AGENT_API_TOKEN", "secret")
+    monkeypatch.setattr(agent_server, "_bundle_declared_runtimes", lambda: {"script-host"})
+    request = agent_runtime_dispatch.RuntimeInvokeRequest(
+        runtime="pi",
+        workflow="inspect",
+        instructions="inspect",
+    )
+
+    with pytest.raises(HTTPException) as blocked:
+        await agent_server.invoke_runtime_http(request, "Bearer secret")
+
+    assert blocked.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_direct_http_runtime_endpoint_rejects_process_overrides(monkeypatch):
+    monkeypatch.setattr(agent_server, "_AGENT_API_TOKEN", "secret")
+    monkeypatch.setattr(agent_server, "_bundle_declared_runtimes", lambda: {"script-host"})
+    request = agent_runtime_dispatch.RuntimeInvokeRequest(
+        runtime="script-host",
+        workflow="page.metadata",
+        instructions="inspect",
+        config={"pack": "page-basics", "binary": "python"},
+    )
+
+    with pytest.raises(HTTPException) as blocked:
+        await agent_server.invoke_runtime_http(request, "Bearer secret")
+
+    assert blocked.value.status_code == 400
+
 # ── _register_with_center attaches Authorization header ────────────────────
 
 
@@ -522,6 +555,33 @@ async def test_runtime_invoke_routes_script_host_without_generic_adapter(monkeyp
         )
         == expected
     )
+
+
+@pytest.mark.asyncio
+async def test_runtime_invoke_rejects_truncated_nonterminal_stream(monkeypatch):
+    class TruncatedAdapter:
+        def validate_config(self, config):
+            return []
+
+        async def invoke(self, task):
+            yield {"type": "started", "task_id": task.task_id}
+
+    request = agent_runtime_dispatch.RuntimeInvokeRequest(
+        runtime="pi",
+        workflow="inspect",
+        instructions="inspect",
+    )
+    monkeypatch.setattr(agent_runtime_dispatch, "get_runtime", lambda runtime: TruncatedAdapter())
+
+    with pytest.raises(HTTPException) as failed:
+        await agent_runtime_dispatch.invoke_runtime(
+            "request-1",
+            request,
+            cdp_endpoint="http://localhost:9222",
+        )
+
+    assert failed.value.status_code == 502
+    assert "terminal event" in str(failed.value.detail)
 
 
 @pytest.mark.asyncio

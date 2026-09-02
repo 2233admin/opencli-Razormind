@@ -124,21 +124,36 @@ _RUNTIME_BUNDLE_MANIFEST = os.environ.get(
 )
 
 
-def _available_agent_runtimes() -> list[str]:
-    runtimes = list(available_runtimes())
+def _bundle_declared_runtimes() -> set[str]:
     try:
         with open(_RUNTIME_BUNDLE_MANIFEST, encoding="utf-8") as manifest_file:
             manifest = json.load(manifest_file)
-        declared = {
-            capability.get("runtime")
-            for capability in manifest.get("capabilities", [])
-            if isinstance(capability, dict)
-        }
-        if "script-host" in declared and "script-host" not in runtimes:
-            runtimes.append("script-host")
     except (OSError, ValueError, TypeError):
-        pass
+        return set()
+    if not isinstance(manifest, dict):
+        return set()
+    capabilities = manifest.get("capabilities", [])
+    if not isinstance(capabilities, list):
+        return set()
+    return {
+        capability.get("runtime")
+        for capability in capabilities
+        if isinstance(capability, dict) and isinstance(capability.get("runtime"), str)
+    }
+
+
+def _available_agent_runtimes() -> list[str]:
+    runtimes = list(available_runtimes())
+    declared = _bundle_declared_runtimes()
+    if "script-host" in declared and "script-host" not in runtimes:
+        runtimes.append("script-host")
     return runtimes
+
+
+_EDGE_RUNTIME_CONFIG_KEYS = frozenset(
+    {"binary", "args", "env", "cwd", "project_root", "provider_dir", "usage_file"}
+)
+
 
 
 _AGENT_LABEL = os.environ.get("AGENT_LABEL", socket.gethostname())
@@ -278,6 +293,7 @@ async def _register_with_center(advertise_url: str) -> None:
         "label": _AGENT_LABEL,
         "agent_protocol": "http",
         "runtimes": _available_agent_runtimes(),
+        "runtime_capabilities": available_runtime_capabilities(),
         "profile_kind": _BROWSER_PROFILE_KIND,
     }
     proxies = _build_proxies()
@@ -665,6 +681,17 @@ async def invoke_runtime_http(
         raise HTTPException(
             status_code=403,
             detail="Codex runtime is only available through controller WS dispatch",
+        )
+    if req.runtime not in _bundle_declared_runtimes():
+        raise HTTPException(
+            status_code=403,
+            detail=f"runtime {req.runtime!r} is not declared by the installed bundle",
+        )
+    unsafe_keys = sorted(_EDGE_RUNTIME_CONFIG_KEYS.intersection(req.config))
+    if unsafe_keys:
+        raise HTTPException(
+            status_code=400,
+            detail="edge runtime config cannot override: " + ", ".join(unsafe_keys),
         )
     return await invoke_runtime(str(uuid.uuid4()), req, cdp_endpoint=_DEFAULT_CDP)
 

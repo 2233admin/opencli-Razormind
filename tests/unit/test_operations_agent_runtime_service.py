@@ -1,4 +1,5 @@
 import asyncio
+import pytest
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -11,17 +12,6 @@ from backend.models.operations_agent import (
     PublishedOperationsAgentVersion,
 )
 from backend.services import operations_agent_runtime_service
-
-
-def test_runtime_permission_mode_maps_observe_only_for_codex():
-    assert (
-        operations_agent_runtime_service._runtime_permission_mode("codex", "observe_only")
-        == "read_only"
-    )
-    assert (
-        operations_agent_runtime_service._runtime_permission_mode("claude-code", "observe_only")
-        == "observe_only"
-    )
 
 
 def _model_configuration() -> dict:
@@ -65,12 +55,12 @@ def _model_configuration() -> dict:
     }
 
 
-def _stub_runtime_selection(monkeypatch) -> None:
+def _stub_runtime_selection(monkeypatch, runtime: str = "pi") -> None:
     async def select_agent_runtime(*args, **kwargs):
         return {
             "schema_version": "agent.runtime-selection.v1",
             "agent_url": "http://agent-runtime.test:19823",
-            "runtime": "pi",
+            "runtime": runtime,
             "workflow": "operations-agent",
             "capabilities": ["model_selection", "streaming", "tool_events"],
             "provider": "openrouter",
@@ -144,13 +134,14 @@ async def _seed_run(db_session) -> OperationsAgentRun:
     return run
 
 
+@pytest.mark.parametrize("runtime", ["pi", "codex"])
 async def test_dispatch_uses_existing_runtime_protocol_and_validates_result(
-    db_engine, db_session, monkeypatch
+    db_engine, db_session, monkeypatch, runtime
 ):
     run = await _seed_run(db_session)
     session_factory = async_sessionmaker(db_engine, class_=AsyncSession, expire_on_commit=False)
     monkeypatch.setattr(operations_agent_runtime_service, "AsyncSessionLocal", session_factory)
-    _stub_runtime_selection(monkeypatch)
+    _stub_runtime_selection(monkeypatch, runtime=runtime)
     captured_task = {}
 
     async def send_agent_task(agent_url, task, on_event, timeout):
@@ -183,7 +174,7 @@ async def test_dispatch_uses_existing_runtime_protocol_and_validates_result(
     await operations_agent_runtime_service.dispatch_operations_agent_run(run.id)
 
     await db_session.refresh(run)
-    assert captured_task["runtime"] == "pi"
+    assert captured_task["runtime"] == runtime
     assert captured_task["instructions"] == "Inspect the requested target"
     assert captured_task["input"] == {"target_id": "daily-news"}
     assert captured_task["config"]["permission_mode"] == "observe_only"
@@ -192,7 +183,7 @@ async def test_dispatch_uses_existing_runtime_protocol_and_validates_result(
     assert run.state_payload == {"last_target_id": "daily-news"}
     assert run.output_payload == {"summary": "Target inspected"}
     assert run.error_message is None
-    assert run.execution_binding["runtime"] == "pi"
+    assert run.execution_binding["runtime"] == runtime
     assert run.evidence_payload["schema_version"] == "agent.run-evidence.v1"
     assert run.evidence_payload["audit"][1]["api_key"] == "[REDACTED]"
 

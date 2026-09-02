@@ -208,11 +208,16 @@ async def invoke_runtime(
     if config_errors:
         raise HTTPException(status_code=400, detail="; ".join(config_errors))
     terminal_event: dict | None = None
-    try:
-        async for event in adapter.invoke(task):
+    async for event in adapter.invoke(task):
+        if not isinstance(event, dict):
+            raise HTTPException(status_code=502, detail="runtime produced an invalid event")
+        if terminal_event is not None:
+            raise HTTPException(
+                status_code=502,
+                detail="runtime produced events after its terminal event",
+            )
+        if event.get("type") in {"done", "error"}:
             terminal_event = event
-    except RuntimeInvocationError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
     if terminal_event is None:
         raise HTTPException(
             status_code=502,
