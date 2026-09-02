@@ -34,13 +34,13 @@ test('plugin hub keeps provider management without hiding provider capabilities'
   for (const label of ['模型', '工具', '数据源', 'Agent 策略', '触发器', '扩展', '工具包']) {
     assert.match(providerCatalog, new RegExp(label))
   }
-  assert.match(plugins, /useWorkflowCapabilities\(true\)/)
+  assert.match(plugins, /useWorkflowCapabilities\(true,\s*workspaceId\)/)
   assert.match(plugins, /PLUGIN_PROVIDERS/)
   assert.match(plugins, /安装插件包/)
-  assert.match(plugins, /router\.push\('\/plugins\/opencli'\)/)
+  assert.match(plugins, /router\.push\([\s\S]*\/plugins\/opencli/)
   assert.match(plugins, /RssCatalogImportDialog/)
   assert.match(plugins, /DifyPackageImportDialog/)
-  assert.match(plugins, /useBackendPluginCatalog\(true\)/)
+  assert.match(plugins, /useBackendPluginCatalog\(workspaceId\)/)
   assert.match(plugins, /导入 OPML 订阅清单/)
   assert.match(providerCatalog, /category: 'datasource'/)
   assert.match(providerCatalog, /category: 'tool'/)

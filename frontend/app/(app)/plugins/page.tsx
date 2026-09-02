@@ -235,6 +235,42 @@ function PluginSubtypeTabs({
     </nav>
   )
 }
+function PluginPageTabs({
+  active,
+  onSelect,
+}: {
+  active: PluginPageTab
+  onSelect: (tab: PluginPageTab) => void
+}) {
+  const tabs: Array<[PluginPageTab, string]> = [
+    ['installed', '已安装'],
+    ['capabilities', '能力目录'],
+    ['marketplace', '探索市场'],
+  ]
+  return (
+    <nav aria-label="插件中心视图" className="no-scrollbar overflow-x-auto">
+      <div className="inline-flex min-w-max items-center gap-1 rounded-lg bg-muted p-1">
+        {tabs.map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            aria-current={active === key ? 'page' : undefined}
+            onClick={() => onSelect(key)}
+            className={cn(
+              'relative min-h-10 rounded-md px-4 text-sm font-medium transition-colors',
+              active === key
+                ? 'bg-background text-foreground shadow-sm'
+                : 'text-muted-foreground hover:text-foreground',
+            )}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+    </nav>
+  )
+}
+
 
 function ProviderCard({
   provider,
@@ -682,37 +718,40 @@ export default function PluginHubPage() {
       : '管理当前工作区已安装的 Provider。未安装、未启用或缺少运行绑定的能力会明确显示为受阻。'
 
   const topTabs = (
-    <div className="flex w-full flex-wrap items-center justify-between gap-3">
-      <PluginSubtypeTabs active={activeSubtype} onSelect={updateSubtype} />
-      <div className="flex flex-wrap items-center gap-2">
-        <select
-          aria-label="插件工作区"
-          className="min-h-10 rounded-md border bg-background px-3 text-sm"
-          value={workspaceId ?? ''}
-          onChange={(event) => {
-            const params = new URLSearchParams(searchParams.toString())
-            if (event.target.value) params.set('workspace', event.target.value)
-            else params.delete('workspace')
-            router.push(`/plugins?${params.toString()}`, { scroll: false })
-          }}
-          disabled={workspaces.isLoading || !workspaces.data?.length}
-        >
-          <option value="">选择工作区</option>
-          {workspaces.data?.map((workspace) => (
-            <option key={workspace.id} value={workspace.id}>{workspace.name}</option>
-          ))}
-        </select>
-        <Button
-          variant="outline"
-          size="sm"
-          className="min-h-10"
-          onClick={() => setDifyImportOpen(true)}
-          disabled={!workspaceId}
-        >
-          <Download aria-hidden="true" className="size-4" />
-          安装插件包
-        </Button>
+    <div className="flex w-full flex-col gap-3">
+      <div className="flex w-full flex-wrap items-center justify-between gap-3">
+        <PluginPageTabs active={activeTab} onSelect={(tab) => updateRoute({ tab })} />
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            aria-label="插件工作区"
+            className="min-h-10 rounded-md border bg-background px-3 text-sm"
+            value={workspaceId ?? ''}
+            onChange={(event) => {
+              const params = new URLSearchParams(searchParams.toString())
+              if (event.target.value) params.set('workspace', event.target.value)
+              else params.delete('workspace')
+              router.push(`/plugins?${params.toString()}`, { scroll: false })
+            }}
+            disabled={workspaces.isLoading || !workspaces.data?.length}
+          >
+            <option value="">选择工作区</option>
+            {workspaces.data?.map((workspace) => (
+              <option key={workspace.id} value={workspace.id}>{workspace.name}</option>
+            ))}
+          </select>
+          <Button
+            variant="outline"
+            size="sm"
+            className="min-h-10"
+            onClick={() => setDifyImportOpen(true)}
+            disabled={!workspaceId}
+          >
+            <Download aria-hidden="true" className="size-4" />
+            安装插件包
+          </Button>
+        </div>
       </div>
+      <PluginSubtypeTabs active={activeSubtype} onSelect={updateSubtype} />
     </div>
   )
   async function toggleInstallation(installation: BackendPluginInstallation) {
