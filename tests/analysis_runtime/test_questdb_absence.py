@@ -7,8 +7,6 @@ from pathlib import Path
 
 import pytest
 
-from tests.integration.test_studio_lifecycle_api import _create_studio_workflow
-
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 _STARTUP_CHECK = """
 import asyncio
@@ -16,6 +14,7 @@ import asyncio
 from httpx import ASGITransport, AsyncClient
 
 from backend.main import app
+from tests.integration.test_studio_lifecycle_api import _create_studio_workflow
 
 
 async def verify_startup() -> None:
@@ -28,9 +27,21 @@ async def verify_startup() -> None:
             assert response.status_code == 200, response.text
             assert response.json()["status"] == "ok"
 
+            created = await _create_studio_workflow(client)
+            validation = await client.post(
+                f"{created['base_url']}/draft/validation-runs",
+                json={},
+            )
+            assert validation.status_code == 201, validation.text
+            run = validation.json()["data"]
+            assert run["status"] == "completed"
+            assert run["valid"] is True
+            assert run["errors"] == []
+
 
 asyncio.run(verify_startup())
 print("QUESTDB_ABSENT_SAFE_STARTUP=PASS")
+print("QUESTDB_ABSENT_SAFE_WORKFLOW=PASS")
 """
 _RUNTIME_CONFIGURATIONS = [
     pytest.param(
@@ -81,25 +92,4 @@ def test_application_starts_without_a_reachable_questdb(
 
     assert result.returncode == 0, result.stderr
     assert "QUESTDB_ABSENT_SAFE_STARTUP=PASS" in result.stdout
-
-
-@pytest.mark.parametrize("runtime_environment", _RUNTIME_CONFIGURATIONS)
-async def test_existing_workflow_validation_completes_without_a_reachable_questdb(
-    client,
-    monkeypatch: pytest.MonkeyPatch,
-    runtime_environment: dict[str, str],
-) -> None:
-    for name, value in runtime_environment.items():
-        monkeypatch.setenv(name, value)
-
-    created = await _create_studio_workflow(client)
-    response = await client.post(
-        f"{created['base_url']}/draft/validation-runs",
-        json={},
-    )
-
-    assert response.status_code == 201, response.text
-    run = response.json()["data"]
-    assert run["status"] == "completed"
-    assert run["valid"] is True
-    assert run["errors"] == []
+    assert "QUESTDB_ABSENT_SAFE_WORKFLOW=PASS" in result.stdout
