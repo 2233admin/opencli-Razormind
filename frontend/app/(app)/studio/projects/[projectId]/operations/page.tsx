@@ -8,6 +8,7 @@ import { use, useDeferredValue, useEffect, useState, type ReactNode } from 'reac
 import { EmptyState, ErrorState, LoadingState } from '@/components/shell/data-states'
 import { PageContainer } from '@/components/shell/page-container'
 import { ProjectNavigation } from '@/components/studio/project-navigation'
+import { RunAnalysisSnapshotPanel } from '@/components/studio/run-analysis-snapshot-panel'
 import { Badge } from '@/components/ui/badge'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -190,6 +191,16 @@ export default function ProjectOperationsPage({
                   <TraceMetric label="用户" value={traceQuery.data?.user ?? 'operator'} />
                   <TraceMetric label="事件" value={String(traceQuery.data?.trace.projection.eventCount ?? selectedLog.event_count)} />
                 </div>
+
+                <RunAnalysisSnapshotPanel
+                  workspaceId={workspaceId}
+                  projectId={projectId}
+                  workflowId={selectedLog.workflow_id}
+                  runId={selectedLog.run_id}
+                  runStatus={selectedLog.status}
+                  runStartAt={selectedLog.started_at}
+                  runEndAt={selectedLog.updated_at}
+                />
 
                 <div>
                   <div className="mb-2 flex items-center gap-2 text-sm font-medium"><Braces className="size-4" />运行输入</div>

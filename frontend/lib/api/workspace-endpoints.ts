@@ -15,6 +15,11 @@ import type {
   ProjectAppType,
   ProjectBootstrapResult,
   ProjectRecordGraphPreview,
+  RunAnalysisSnapshotCapability,
+  RunAnalysisSnapshotPreview,
+  RunAnalysisSnapshotRangeRequest,
+  RunAnalysisSnapshotReceipt,
+  RunAnalysisSnapshotSummary,
   ProjectRuntimeLogPage,
   ProjectRuntimeSummary,
   ProjectRuntimeTrace,
@@ -193,6 +198,84 @@ export const getProjectRuntimeTrace = (
     .get<ApiResponse<ProjectRuntimeTrace>>(
       `/workspaces/${workspaceId}/projects/${projectId}/workflows/${workflowId}/runs/${runId}/trace`,
       { params },
+    )
+    .then((r) => r.data.data);
+
+export const getRunAnalysisSnapshotCapability = (
+  workspaceId: string,
+  projectId: string,
+  workflowId: string,
+  runId: string,
+) =>
+  apiClient
+    .get<ApiResponse<RunAnalysisSnapshotCapability>>(
+      `/workspaces/${workspaceId}/projects/${projectId}/workflows/${workflowId}/runs/${runId}/analysis-snapshots/capability`,
+    )
+    .then((r) => r.data.data);
+
+export const previewRunAnalysisSnapshot = (
+  workspaceId: string,
+  projectId: string,
+  workflowId: string,
+  runId: string,
+  data: RunAnalysisSnapshotRangeRequest,
+) =>
+  apiClient
+    .post<ApiResponse<RunAnalysisSnapshotPreview>>(
+      `/workspaces/${workspaceId}/projects/${projectId}/workflows/${workflowId}/runs/${runId}/analysis-snapshots/preview`,
+      data,
+    )
+    .then((r) => r.data.data);
+
+export const createRunAnalysisSnapshot = (
+  workspaceId: string,
+  projectId: string,
+  workflowId: string,
+  runId: string,
+  data: RunAnalysisSnapshotRangeRequest,
+) =>
+  apiClient
+    .post<ApiResponse<RunAnalysisSnapshotReceipt>>(
+      `/workspaces/${workspaceId}/projects/${projectId}/workflows/${workflowId}/runs/${runId}/analysis-snapshots`,
+      data,
+    )
+    .then((r) => r.data.data);
+
+export const listRunAnalysisSnapshots = (
+  workspaceId: string,
+  projectId: string,
+  workflowId: string,
+  runId: string,
+) =>
+  apiClient
+    .get<ApiResponse<RunAnalysisSnapshotReceipt[]>>(
+      `/workspaces/${workspaceId}/projects/${projectId}/workflows/${workflowId}/runs/${runId}/analysis-snapshots`,
+    )
+    .then((r) => r.data.data);
+
+export const getRunAnalysisSnapshot = (
+  workspaceId: string,
+  projectId: string,
+  workflowId: string,
+  runId: string,
+  snapshotId: string,
+) =>
+  apiClient
+    .get<ApiResponse<RunAnalysisSnapshotReceipt>>(
+      `/workspaces/${workspaceId}/projects/${projectId}/workflows/${workflowId}/runs/${runId}/analysis-snapshots/${snapshotId}`,
+    )
+    .then((r) => r.data.data);
+
+export const getRunAnalysisSnapshotSummary = (
+  workspaceId: string,
+  projectId: string,
+  workflowId: string,
+  runId: string,
+  snapshotId: string,
+) =>
+  apiClient
+    .get<ApiResponse<RunAnalysisSnapshotSummary>>(
+      `/workspaces/${workspaceId}/projects/${projectId}/workflows/${workflowId}/runs/${runId}/analysis-snapshots/${snapshotId}/summary`,
     )
     .then((r) => r.data.data);
 

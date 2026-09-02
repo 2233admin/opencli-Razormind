@@ -211,6 +211,207 @@ export function useProjectRuntimeTrace(
   });
 }
 
+export function useRunAnalysisSnapshotCapability(
+  workspaceId: string | null,
+  projectId: string | null,
+  workflowId: string | null,
+  runId: string | null,
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: [
+      "run-analysis-snapshot-capability",
+      workspaceId,
+      projectId,
+      workflowId,
+      runId,
+    ],
+    queryFn: () =>
+      api.getRunAnalysisSnapshotCapability(
+        workspaceId as string,
+        projectId as string,
+        workflowId as string,
+        runId as string,
+      ),
+    enabled:
+      enabled && !!workspaceId && !!projectId && !!workflowId && !!runId,
+    staleTime: 15_000,
+  });
+}
+
+export function usePreviewRunAnalysisSnapshot() {
+  return useMutation({
+    mutationFn: ({
+      workspaceId,
+      projectId,
+      workflowId,
+      runId,
+      data,
+    }: {
+      workspaceId: string;
+      projectId: string;
+      workflowId: string;
+      runId: string;
+      data: Parameters<typeof api.previewRunAnalysisSnapshot>[4];
+    }) =>
+      api.previewRunAnalysisSnapshot(
+        workspaceId,
+        projectId,
+        workflowId,
+        runId,
+        data,
+      ),
+  });
+}
+
+export function useCreateRunAnalysisSnapshot() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      workspaceId,
+      projectId,
+      workflowId,
+      runId,
+      data,
+    }: {
+      workspaceId: string;
+      projectId: string;
+      workflowId: string;
+      runId: string;
+      data: Parameters<typeof api.createRunAnalysisSnapshot>[4];
+    }) =>
+      api.createRunAnalysisSnapshot(
+        workspaceId,
+        projectId,
+        workflowId,
+        runId,
+        data,
+      ),
+    onSuccess: (receipt, { workspaceId, projectId, workflowId, runId }) => {
+      queryClient.setQueryData(
+        [
+          "run-analysis-snapshot-receipt",
+          workspaceId,
+          projectId,
+          workflowId,
+          runId,
+          receipt.snapshotId,
+        ],
+        receipt,
+      );
+      void queryClient.invalidateQueries({
+        queryKey: [
+          "run-analysis-snapshot-receipts",
+          workspaceId,
+          projectId,
+          workflowId,
+          runId,
+        ],
+      });
+    },
+    onError: (_error, { workspaceId, projectId, workflowId, runId }) =>
+      queryClient.invalidateQueries({
+        queryKey: [
+          "run-analysis-snapshot-receipts",
+          workspaceId,
+          projectId,
+          workflowId,
+          runId,
+        ],
+      }),
+  });
+}
+
+export function useRunAnalysisSnapshotReceipts(
+  workspaceId: string | null,
+  projectId: string | null,
+  workflowId: string | null,
+  runId: string | null,
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: [
+      "run-analysis-snapshot-receipts",
+      workspaceId,
+      projectId,
+      workflowId,
+      runId,
+    ],
+    queryFn: () =>
+      api.listRunAnalysisSnapshots(
+        workspaceId as string,
+        projectId as string,
+        workflowId as string,
+        runId as string,
+      ),
+    enabled:
+      enabled && !!workspaceId && !!projectId && !!workflowId && !!runId,
+  });
+}
+
+export function useRunAnalysisSnapshotReceipt(
+  workspaceId: string | null,
+  projectId: string | null,
+  workflowId: string | null,
+  runId: string | null,
+  snapshotId: string | null,
+) {
+  return useQuery({
+    queryKey: [
+      "run-analysis-snapshot-receipt",
+      workspaceId,
+      projectId,
+      workflowId,
+      runId,
+      snapshotId,
+    ],
+    queryFn: () =>
+      api.getRunAnalysisSnapshot(
+        workspaceId as string,
+        projectId as string,
+        workflowId as string,
+        runId as string,
+        snapshotId as string,
+      ),
+    enabled:
+      !!workspaceId &&
+      !!projectId &&
+      !!workflowId &&
+      !!runId &&
+      !!snapshotId,
+    refetchInterval: (query) =>
+      query.state.data?.status === "exporting" ? 1_000 : false,
+  });
+}
+
+export function useRunAnalysisSnapshotSummary(
+  workspaceId: string | null,
+  projectId: string | null,
+  workflowId: string | null,
+  runId: string | null,
+  snapshotId: string | null,
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: ["run-analysis-snapshot-summary", workspaceId, projectId, workflowId, runId, snapshotId],
+    queryFn: () =>
+      api.getRunAnalysisSnapshotSummary(
+        workspaceId as string,
+        projectId as string,
+        workflowId as string,
+        runId as string,
+        snapshotId as string,
+      ),
+    enabled:
+      enabled &&
+      !!workspaceId &&
+      !!projectId &&
+      !!workflowId &&
+      !!runId &&
+      !!snapshotId,
+  });
+}
+
 export function useProjectRecordGraph(
   workspaceId: string | null,
   projectId: string | null,
