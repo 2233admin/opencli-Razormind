@@ -1,5 +1,10 @@
 from backend.models.acquisition import AcquisitionExecution, AcquisitionExecutionStatus
 from backend.models.agent import AIAgent
+from backend.models.analysis_snapshot import (
+    AnalysisSnapshotFailureCode,
+    AnalysisSnapshotReceipt,
+    AnalysisSnapshotStatus,
+)
 from backend.models.automation import Automation
 from backend.models.base import TimestampMixin
 from backend.models.browser import (
@@ -117,6 +122,9 @@ __all__ = [
     "TimestampMixin",
     "AcquisitionExecution",
     "AcquisitionExecutionStatus",
+    "AnalysisSnapshotFailureCode",
+    "AnalysisSnapshotReceipt",
+    "AnalysisSnapshotStatus",
     "AIAgent",
     "Automation",
     "BrowserBinding",

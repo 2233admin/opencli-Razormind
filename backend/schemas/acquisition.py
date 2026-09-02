@@ -14,6 +14,15 @@ class CapabilityIdentity(BaseModel):
     version: str = Field(min_length=1, max_length=50)
 
 
+class AcquisitionRunCorrelation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    workspace_id: str = Field(min_length=1, max_length=36)
+    project_id: str = Field(min_length=1, max_length=36)
+    workflow_id: str = Field(min_length=1, max_length=36)
+    run_id: str = Field(min_length=1, max_length=36)
+
+
 class AcquisitionSubmission(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -25,6 +34,7 @@ class AcquisitionSubmission(BaseModel):
     environment: dict[str, Any] = Field(default_factory=dict)
     required_artifacts: list[Literal["trace"]] = Field(default_factory=list)
     geo_refs: dict[str, str] = Field(default_factory=dict)
+    workflow_run_correlation: AcquisitionRunCorrelation | None = None
 
 
 class CapabilityDescriptor(BaseModel):
@@ -55,9 +65,29 @@ class AcquisitionExecutionRead(UTCModel):
     finished_at: datetime | None
     created_at: datetime
     updated_at: datetime
+    workflow_run_correlation: AcquisitionRunCorrelation | None
 
     @classmethod
     def from_execution(cls, execution: AcquisitionExecution) -> "AcquisitionExecutionRead":
+        correlation_values = (
+            execution.workspace_id,
+            execution.project_id,
+            execution.workflow_id,
+            execution.run_id,
+        )
+        correlation = None
+        if all(value is not None for value in correlation_values):
+            workspace_id, project_id, workflow_id, run_id = correlation_values
+            assert workspace_id is not None
+            assert project_id is not None
+            assert workflow_id is not None
+            assert run_id is not None
+            correlation = AcquisitionRunCorrelation(
+                workspace_id=workspace_id,
+                project_id=project_id,
+                workflow_id=workflow_id,
+                run_id=run_id,
+            )
         return cls(
             execution_id=execution.id,
             request_id=execution.request_id,
@@ -73,4 +103,5 @@ class AcquisitionExecutionRead(UTCModel):
             finished_at=execution.finished_at,
             created_at=execution.created_at,
             updated_at=execution.updated_at,
+            workflow_run_correlation=correlation,
         )
