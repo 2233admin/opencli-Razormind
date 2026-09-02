@@ -41,10 +41,33 @@ Then start only the optional service:
 docker compose --profile analysis-runtime up -d questdb
 ```
 
+After changing any `QUESTDB_ANALYSIS_RUNTIME_*` value, recreate the API container so it
+receives the new environment and private-network attachment:
+
+```shell
+docker compose up -d --force-recreate api
+```
+
+A plain `docker compose restart api` reuses the container's old environment and is not
+sufficient after editing `.env`. For a native deployment, restart the API process instead.
+Workers do not read or use the QuestDB settings in this ticket and do not need to be
+recreated or restarted; that remains true unless a later ticket explicitly adds a worker
+integration.
+
+If `QUESTDB_HTTP_PORT` or `QUESTDB_HEALTH_PORT` changes after QuestDB has been created,
+recreate that optional service so Docker applies the new host publication:
+
+```shell
+docker compose --profile analysis-runtime up -d --force-recreate questdb
+```
+
 The image is pinned to `questdb/questdb:10.0.1`. Host ports `9000` (QWP/web/query) and
 `9003` (health) bind to `127.0.0.1` only. PostgreSQL wire `8812` and ILP `9009` are not
 published because the adapter and probe do not use them. The API, frontend, and workers have
-no `depends_on` relationship with QuestDB.
+no `depends_on` relationship with QuestDB. The container runs with a read-only root,
+dedicated internal network, dropped capabilities, and `DO_CHOWN=false`; the named data volume
+therefore must retain the image-provided `questdb` ownership instead of relying on runtime
+`CAP_CHOWN`.
 
 ## Capability Status
 
@@ -71,13 +94,15 @@ Run the protocol probe from the repository root:
 uv run python scripts/questdb/probe.py
 ```
 
-Every invocation generates a unique `opencli-questdb-probe-*` Compose project, selects
-ephemeral loopback ports, starts only `questdb`, and creates a project-scoped volume. It
-proves the pinned image, HTTP health, explicit schema, designated timestamp, deterministic
-WAL deduplication, a bounded time-window aggregate, table cleanup, and container/volume
-cleanup. Its `finally` path always runs `down --volumes --remove-orphans` against that unique
-project, including after a failed assertion or interruption. It never addresses a shared or
-developer Compose project.
+Every invocation generates a unique `opencli-questdb-probe-*` Compose project, publishes each
+container port against the dynamic host range `49152-65535`, and lets Docker select one
+available loopback port for each mapping during container creation. The probe discovers the
+mappings after startup, starts only `questdb`, and creates a project-scoped volume. It proves
+the pinned image, dedicated internal network, container hardening, HTTP health, explicit
+schema, designated timestamp, deterministic WAL deduplication, a bounded time-window
+aggregate, table cleanup, and container/volume cleanup. Its `finally` path always runs
+`down --volumes --remove-orphans` against that unique project, including after a failed
+assertion or interruption. It never addresses a shared or developer Compose project.
 
 A successful run ends with JSON containing:
 
@@ -91,10 +116,21 @@ A successful run ends with JSON containing:
     "replacement": 5.0,
     "status": "PASS"
   },
+  "docker_assigned_loopback_ports": "PASS",
   "explicit_schema": "PASS",
   "health": "PASS",
   "image": "questdb/questdb:10.0.1",
   "image_pin": "PASS",
+  "isolation": {
+    "capabilities_dropped": "PASS",
+    "entrypoint_chown_disabled": "PASS",
+    "internal_network": "PASS",
+    "minimal_startup_capabilities": "PASS",
+    "no_new_privileges": "PASS",
+    "pids_limit": "PASS",
+    "read_only_root": "PASS",
+    "writable_tmpfs": "PASS"
+  },
   "readiness": "PASS",
   "result": "PASS",
   "table_cleanup": "PASS"
@@ -110,10 +146,12 @@ docker compose --profile analysis-runtime stop questdb
 docker compose --profile analysis-runtime rm -f questdb
 ```
 
-Set `QUESTDB_ANALYSIS_RUNTIME_ENABLED=false` before restarting the API if the capability
-should report `disabled`. Do not use `docker compose down --volumes` on a shared OpenCLI
-project merely to remove QuestDB; that command can remove unrelated authoritative service
-volumes. The disposable probe handles its own isolated volume deletion.
+Set `QUESTDB_ANALYSIS_RUNTIME_ENABLED=false`, then recreate the API container as shown above
+if the capability should report `disabled`. A native API process must likewise be restarted
+to receive the change; workers remain unrelated and need no restart. Do not use
+`docker compose down --volumes` on a shared OpenCLI project merely to remove QuestDB; that
+command can remove unrelated authoritative service volumes. The disposable probe handles
+its own isolated volume deletion.
 
 ## Feasibility Verdict
 

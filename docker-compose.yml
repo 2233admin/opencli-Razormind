@@ -147,11 +147,26 @@ services:
   questdb:
     profiles: ["analysis-runtime"]
     image: questdb/questdb:10.0.1
+    environment:
+      DO_CHOWN: "false"
     ports:
       - "127.0.0.1:${QUESTDB_HTTP_PORT:-9000}:9000"
       - "127.0.0.1:${QUESTDB_HEALTH_PORT:-9003}:9003"
     volumes:
       - questdb_data:/var/lib/questdb
+    networks:
+      - questdb_runtime
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop:
+      - ALL
+    cap_add:
+      - SETGID
+      - SETUID
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 512
     healthcheck:
       test: ["CMD", "curl", "--fail", "--silent", "http://localhost:9003"]
       interval: 5s
@@ -225,6 +240,7 @@ services:
       - default
       - dify_runtime
       - kats_runtime
+      - questdb_runtime
       - invokeai-private
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -566,6 +582,8 @@ networks:
   dify_runtime:
     internal: true
   kats_runtime:
+    internal: true
+  questdb_runtime:
     internal: true
   # Dedicated outbound network: the Graphon sidecar can reach server-owned
   # sandbox/model endpoints without becoming reachable from sibling services.

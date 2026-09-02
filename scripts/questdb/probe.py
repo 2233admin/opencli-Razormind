@@ -6,7 +6,6 @@ from __future__ import annotations
 import json
 import os
 import shutil
-import socket
 import subprocess
 import sys
 import time
@@ -23,6 +22,9 @@ SQL_PATH = "/api/v1/sql/execute"
 PROJECT_PREFIX = "opencli-questdb-probe-"
 STARTUP_TIMEOUT_SECONDS = 120.0
 QUERY_TIMEOUT_SECONDS = 10.0
+EPHEMERAL_PORT_RANGE = "49152-65535"
+EPHEMERAL_PORT_MIN = 49152
+EPHEMERAL_PORT_MAX = 65535
 
 
 class ProbeError(RuntimeError):
@@ -31,12 +33,6 @@ class ProbeError(RuntimeError):
     def __init__(self, code: str) -> None:
         super().__init__(code)
         self.code = code
-
-
-def _available_loopback_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
-        listener.bind(("127.0.0.1", 0))
-        return int(listener.getsockname()[1])
 
 
 def _run(
@@ -109,6 +105,144 @@ def _wait_until_healthy(
                 raise ProbeError("container_unhealthy")
         time.sleep(1)
     raise ProbeError("container_health_timeout")
+
+
+def _published_loopback_port(
+    *,
+    repository_root: Path,
+    compose_file: Path,
+    project_name: str,
+    env: dict[str, str],
+    target_port: int,
+) -> int:
+    mapping = _run(
+        _compose_command(
+            compose_file,
+            project_name,
+            "port",
+            SERVICE,
+            str(target_port),
+        ),
+        cwd=repository_root,
+        env=env,
+        timeout=10,
+        failure_code="published_port_discovery_failed",
+    )
+    mappings = [line.strip() for line in mapping.splitlines() if line.strip()]
+    if len(mappings) != 1:
+        raise ProbeError("published_port_discovery_failed")
+    host, separator, port_text = mappings[0].rpartition(":")
+    try:
+        published_port = int(port_text)
+    except ValueError as exc:
+        raise ProbeError("published_port_discovery_failed") from exc
+    if separator != ":" or host.strip("[]") != "127.0.0.1":
+        raise ProbeError("published_port_not_loopback")
+    if not EPHEMERAL_PORT_MIN <= published_port <= EPHEMERAL_PORT_MAX:
+        raise ProbeError("published_port_discovery_failed")
+    return published_port
+
+
+def _normalized_capabilities(value: Any) -> set[str] | None:
+    if not isinstance(value, list):
+        return None
+    capabilities: set[str] = set()
+    for capability in value:
+        if not isinstance(capability, str):
+            return None
+        capabilities.add(capability.removeprefix("CAP_"))
+    return capabilities
+
+
+def _verify_container_isolation(
+    *,
+    repository_root: Path,
+    container_id: str,
+    project_name: str,
+    env: dict[str, str],
+) -> dict[str, str]:
+    raw_container = _run(
+        ["docker", "inspect", container_id],
+        cwd=repository_root,
+        env=env,
+        timeout=10,
+        failure_code="hardening_inspection_failed",
+    )
+    try:
+        container = json.loads(raw_container)[0]
+    except (IndexError, KeyError, TypeError, json.JSONDecodeError) as exc:
+        raise ProbeError("hardening_inspection_failed") from exc
+    if not isinstance(container, dict):
+        raise ProbeError("hardening_inspection_failed")
+    host_config = container.get("HostConfig")
+    container_config = container.get("Config")
+    network_settings = container.get("NetworkSettings")
+    networks = (
+        network_settings.get("Networks")
+        if isinstance(network_settings, dict)
+        else None
+    )
+    if (
+        not isinstance(host_config, dict)
+        or not isinstance(container_config, dict)
+        or not isinstance(networks, dict)
+    ):
+        raise ProbeError("hardening_inspection_failed")
+    network_names = list(networks)
+
+    if len(network_names) != 1:
+        raise ProbeError("network_isolation_failed")
+    raw_network = _run(
+        ["docker", "network", "inspect", network_names[0]],
+        cwd=repository_root,
+        env=env,
+        timeout=10,
+        failure_code="network_inspection_failed",
+    )
+    try:
+        network = json.loads(raw_network)[0]
+    except (IndexError, KeyError, TypeError, json.JSONDecodeError) as exc:
+        raise ProbeError("network_inspection_failed") from exc
+    if not isinstance(network, dict):
+        raise ProbeError("network_inspection_failed")
+    labels = network.get("Labels")
+    if not isinstance(labels, dict):
+        raise ProbeError("network_inspection_failed")
+    if (
+        labels.get("com.docker.compose.project") != project_name
+        or labels.get("com.docker.compose.network") != "questdb_runtime"
+        or network.get("Internal") is not True
+    ):
+        raise ProbeError("network_isolation_failed")
+
+    tmpfs = host_config.get("Tmpfs", {})
+    tmpfs_options = tmpfs.get("/tmp", "") if isinstance(tmpfs, dict) else ""
+    cap_drop = _normalized_capabilities(host_config.get("CapDrop"))
+    cap_add = _normalized_capabilities(host_config.get("CapAdd"))
+    container_environment = container_config.get("Env")
+    hardening_matches = (
+        host_config.get("ReadonlyRootfs") is True
+        and cap_drop == {"ALL"}
+        and cap_add == {"SETGID", "SETUID"}
+        and host_config.get("SecurityOpt") == ["no-new-privileges:true"]
+        and host_config.get("PidsLimit") == 512
+        and "size=64m" in tmpfs_options
+        and "mode=1777" in tmpfs_options
+        and isinstance(container_environment, list)
+        and "DO_CHOWN=false" in container_environment
+    )
+    if not hardening_matches:
+        raise ProbeError("container_hardening_failed")
+    return {
+        "capabilities_dropped": "PASS",
+        "entrypoint_chown_disabled": "PASS",
+        "internal_network": "PASS",
+        "minimal_startup_capabilities": "PASS",
+        "no_new_privileges": "PASS",
+        "pids_limit": "PASS",
+        "read_only_root": "PASS",
+        "writable_tmpfs": "PASS",
+    }
 
 
 def _execute_sql(client: httpx.Client, statement: str) -> dict[str, Any]:
@@ -337,11 +471,6 @@ def main() -> int:
         print(json.dumps(evidence, indent=2, sort_keys=True))
         return 1
 
-    query_port = _available_loopback_port()
-    health_port = _available_loopback_port()
-    while health_port == query_port:
-        health_port = _available_loopback_port()
-
     env = {
         **os.environ,
         "API_AUTH_TOKEN": "questdb-disposable-probe-api-token",
@@ -350,8 +479,8 @@ def main() -> int:
         "QUESTDB_ANALYSIS_RUNTIME_ENABLED": "true",
         "QUESTDB_ANALYSIS_RUNTIME_URL": "http://questdb:9000",
         "QUESTDB_ANALYSIS_RUNTIME_HEALTH_URL": "http://questdb:9003",
-        "QUESTDB_HTTP_PORT": str(query_port),
-        "QUESTDB_HEALTH_PORT": str(health_port),
+        "QUESTDB_HTTP_PORT": EPHEMERAL_PORT_RANGE,
+        "QUESTDB_HEALTH_PORT": EPHEMERAL_PORT_RANGE,
         "SECRET_KEY": "questdb-disposable-probe-secret-at-least-32-characters",
     }
 
@@ -386,6 +515,29 @@ def main() -> int:
         if actual_image != IMAGE:
             raise ProbeError("image_pin_mismatch")
         evidence["image_pin"] = "PASS"
+        evidence["isolation"] = _verify_container_isolation(
+            repository_root=repository_root,
+            container_id=container_id,
+            project_name=project_name,
+            env=env,
+        )
+        query_port = _published_loopback_port(
+            repository_root=repository_root,
+            compose_file=compose_file,
+            project_name=project_name,
+            env=env,
+            target_port=9000,
+        )
+        health_port = _published_loopback_port(
+            repository_root=repository_root,
+            compose_file=compose_file,
+            project_name=project_name,
+            env=env,
+            target_port=9003,
+        )
+        if query_port == health_port:
+            raise ProbeError("published_port_collision")
+        evidence["docker_assigned_loopback_ports"] = "PASS"
         evidence.update(_verify_protocol(query_port, health_port, table_name))
     except (ProbeError, KeyboardInterrupt) as exc:
         failure_code = exc.code if isinstance(exc, ProbeError) else "interrupted"
