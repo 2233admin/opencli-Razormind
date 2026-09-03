@@ -887,6 +887,7 @@ test('studio templates persist template-specific source, cadence, and delivery i
   const websiteWatch = studioGraphForTemplate('website-watch', '网站变化监控')
   const newsBrief = studioGraphForTemplate('news-brief', '每日资讯简报')
   const opencliLive = studioGraphForTemplate('opencli-live-pipeline', 'OpenCLI 实时管线')
+  const feishuDoubao = studioGraphForTemplate('feishu-douyin-doubao', '飞书豆包采集')
   const financialRss = studioGraphForTemplate('financial-rss-intelligence', '财经多源 RSS 情报')
 
   assert.notDeepEqual(websiteWatch.nodes, newsBrief.nodes)
@@ -913,6 +914,28 @@ test('studio templates persist template-specific source, cadence, and delivery i
     ],
   )
   assert.equal(opencliLive.agentPermissions.canSendNotifications, true)
+  const feishuSource = feishuDoubao.nodes.find((node) => node.id === 'feishu-keywords')
+  assert.equal(feishuSource?.params.number_field, '题号')
+  assert.equal(feishuSource?.params.status_field, '')
+  assert.equal(feishuSource?.params.eligible_status, '')
+  assert.equal(feishuSource?.params.max_rows, 2000)
+  const feishuResultSink = feishuDoubao.nodes.find((node) => node.id === 'records')
+  assert.equal(feishuDoubao.agentPermissions.canMutateExternalSites, false)
+  assert.equal(feishuDoubao.nodes.find((node) => node.id === 'doubao-research')?.params.executionMode, 'agent')
+  assert.equal(feishuDoubao.nodes.find((node) => node.id === 'doubao-research')?.params.agentRuntime, 'bbx')
+  assert.equal(feishuResultSink?.params.feishuWriteback?.enabled, false)
+  assert.equal(feishuResultSink?.params.feishuWriteback?.spreadsheetToken, '')
+  assert.equal(feishuResultSink?.params.feishuWriteback?.sheetId, '')
+  assert.equal(feishuResultSink?.params.feishuWriteback?.idempotencyColumn, '运行ID')
+  assert.deepEqual(
+    feishuResultSink?.params.feishuWriteback?.columns,
+    [
+      '序号', '题号', '阶段', '原问句', '完整回答', '关键词数', '关键词（全部）',
+      '参考资料数', '参考资料（全部）', '推荐追问数', '推荐追问（全部）', '商品链接（全部）',
+      '视频内容（全部）', '高吉星是否出现', '高吉星观察', '正式会话链接', '分享链接',
+      '连续截图', '完成时间', '证据状态', '运行ID',
+    ],
+  )
   const financialSourcePool = financialRss.nodes.find((node) => node.ui?.catalogId === 'intelligence.source.pool')
   assert.ok(financialSourcePool)
   assert.equal(financialRss.nodes.filter((node) => node.kind === 'source').length, 0)

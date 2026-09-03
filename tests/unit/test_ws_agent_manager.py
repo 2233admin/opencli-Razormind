@@ -24,6 +24,7 @@ def clear_state():
 
 # ── register / unregister / queries ───────────────────────────────────────────
 
+
 def test_register_and_is_connected():
     ws = MagicMock()
     mgr.register_connection("http://agent:19823", ws)
@@ -56,6 +57,7 @@ def test_is_connected_false_for_unknown():
 
 # ── dispatch_collect: not connected ───────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_dispatch_collect_raises_when_not_connected():
     with pytest.raises(RuntimeError, match="No active WS connection"):
@@ -63,6 +65,7 @@ async def test_dispatch_collect_raises_when_not_connected():
 
 
 # ── dispatch_collect: success ─────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_dispatch_collect_success():
@@ -75,9 +78,7 @@ async def test_dispatch_collect_success():
     async def fake_send_json(payload):
         # Simulate agent responding right away
         request_id = payload["request_id"]
-        asyncio.get_running_loop().call_soon(
-            mgr.resolve_response, request_id, result_payload
-        )
+        asyncio.get_running_loop().call_soon(mgr.resolve_response, request_id, result_payload)
 
     ws.send_json = AsyncMock(side_effect=fake_send_json)
 
@@ -96,6 +97,7 @@ async def test_dispatch_collect_success():
 
 # ── dispatch_collect: timeout ─────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_dispatch_collect_timeout():
     """dispatch_collect raises TimeoutError when agent does not respond."""
@@ -110,6 +112,7 @@ async def test_dispatch_collect_timeout():
 
 
 # ── dispatch_collect: pending cleaned up on timeout ──────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_dispatch_collect_pending_cleaned_up_on_timeout():
@@ -128,12 +131,14 @@ async def test_dispatch_collect_pending_cleaned_up_on_timeout():
 
 # ── resolve_response: unknown request_id ──────────────────────────────────────
 
+
 def test_resolve_response_unknown_request_id_no_error():
     """resolve_response with unknown request_id must not raise."""
     mgr.resolve_response("nonexistent-id", {"success": True, "items": []})
 
 
 # ── resolve_response: already-done future ─────────────────────────────────────
+
 
 def test_resolve_response_already_done_future_no_error():
     """resolve_response on a future that's already resolved must not raise."""
@@ -148,6 +153,7 @@ def test_resolve_response_already_done_future_no_error():
 
 # ── send_agent_task: not connected ──────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_send_agent_task_raises_when_not_connected():
     with pytest.raises(RuntimeError, match="No active WS connection"):
@@ -155,6 +161,7 @@ async def test_send_agent_task_raises_when_not_connected():
 
 
 # ── send_agent_task: happy path, N events then result (sync on_event) ──────
+
 
 @pytest.mark.asyncio
 async def test_send_agent_task_happy_path_sync_on_event_order_preserved():
@@ -201,6 +208,7 @@ async def test_send_agent_task_happy_path_sync_on_event_order_preserved():
 
 # ── send_agent_task: happy path with async on_event ─────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_send_agent_task_supports_async_on_event():
     ws = AsyncMock()
@@ -214,9 +222,12 @@ async def test_send_agent_task_supports_async_on_event():
     async def fake_send(payload):
         if payload["type"] == "agent_task":
             request_id = payload["request_id"]
-            await mgr.resolve_agent_event(request_id, {"event": {"type": "started", "task_id": request_id}})
+            await mgr.resolve_agent_event(
+                request_id, {"event": {"type": "started", "task_id": request_id}}
+            )
             mgr.resolve_agent_result(
-                request_id, {"result": {"type": "done", "task_id": request_id, "result": {"ok": True}}}
+                request_id,
+                {"result": {"type": "done", "task_id": request_id, "result": {"ok": True}}},
             )
 
     ws.send_json = AsyncMock(side_effect=fake_send)
@@ -230,7 +241,106 @@ async def test_send_agent_task_supports_async_on_event():
     assert received_events[0]["type"] == "started"
 
 
+@pytest.mark.asyncio
+async def test_ack_required_event_is_acknowledged_only_after_callback_persists():
+    ws = AsyncMock()
+    mgr.register_connection("http://agent:19823", ws)
+    persisted = asyncio.Event()
+    sent_frames = []
+
+    async def on_event(event):
+        assert event["evidence"]["kind"] == "doubao.capture.pre_cleanup"
+        await asyncio.sleep(0)
+        persisted.set()
+
+    async def fake_send(payload):
+        sent_frames.append(payload)
+        if payload["type"] == "agent_event_ack":
+            assert persisted.is_set()
+            return
+        if payload["type"] != "agent_task":
+            return
+        request_id = payload["request_id"]
+
+        async def drive_task():
+            await mgr.resolve_agent_event(
+                request_id,
+                {
+                    "event_id": "event-1",
+                    "ack_required": True,
+                    "event": {
+                        "type": "evidence",
+                        "evidence": {"kind": "doubao.capture.pre_cleanup"},
+                    },
+                },
+                source_ws=ws,
+            )
+            mgr.resolve_agent_result(
+                request_id,
+                {"result": {"type": "done", "task_id": request_id, "result": {}}},
+            )
+
+        asyncio.create_task(drive_task())
+
+    ws.send_json = AsyncMock(side_effect=fake_send)
+
+    result = await mgr.send_agent_task(
+        "http://agent:19823", {"runtime": "bbx"}, on_event, timeout=5.0
+    )
+
+    assert result["type"] == "done"
+    assert [frame["type"] for frame in sent_frames] == ["agent_task", "agent_event_ack"]
+    assert sent_frames[1] == {
+        "type": "agent_event_ack",
+        "request_id": sent_frames[0]["request_id"],
+        "event_id": "event-1",
+        "status": "persisted",
+    }
+
+
+@pytest.mark.asyncio
+async def test_ack_required_event_callback_failure_cancels_without_acknowledging():
+    ws = AsyncMock()
+    mgr.register_connection("http://agent:19823", ws)
+    sent_frames = []
+
+    def on_event(_event):
+        raise OSError("evidence spool unavailable")
+
+    async def fake_send(payload):
+        sent_frames.append(payload)
+        if payload["type"] != "agent_task":
+            return
+        request_id = payload["request_id"]
+
+        async def deliver_evidence():
+            await mgr.resolve_agent_event(
+                request_id,
+                {
+                    "event_id": "event-1",
+                    "ack_required": True,
+                    "event": {
+                        "type": "evidence",
+                        "evidence": {"kind": "doubao.capture.pre_cleanup"},
+                    },
+                },
+                source_ws=ws,
+            )
+
+        asyncio.create_task(deliver_evidence())
+
+    ws.send_json = AsyncMock(side_effect=fake_send)
+
+    with pytest.raises(OSError, match="spool unavailable"):
+        await mgr.send_agent_task(
+            "http://agent:19823", {"runtime": "bbx"}, on_event, timeout=5.0
+        )
+
+    assert [frame["type"] for frame in sent_frames] == ["agent_task", "cancel"]
+
+
 # ── send_agent_task: timeout ─────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_send_agent_task_timeout():
@@ -239,7 +349,9 @@ async def test_send_agent_task_timeout():
     mgr.register_connection("http://agent:19823", ws)
 
     with pytest.raises(TimeoutError, match="did not complete agent_task"):
-        await mgr.send_agent_task("http://agent:19823", {"runtime": "pi"}, lambda e: None, timeout=0.05)
+        await mgr.send_agent_task(
+            "http://agent:19823", {"runtime": "pi"}, lambda e: None, timeout=0.05
+        )
 
     sent_frames = [call.args[0] for call in ws.send_json.await_args_list]
     assert [frame["type"] for frame in sent_frames] == ["agent_task", "cancel"]
@@ -250,6 +362,7 @@ async def test_send_agent_task_timeout():
 
 
 # ── send_agent_task: disconnect fails pending fast ──────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_unregister_connection_fails_pending_agent_tasks_fast():
@@ -299,6 +412,7 @@ def test_unregister_connection_no_pending_agent_tasks_no_error():
 
 
 # ── resolve_agent_event / resolve_agent_result: unknown request_id ─────────
+
 
 @pytest.mark.asyncio
 async def test_resolve_agent_event_unknown_request_id_no_error():

@@ -657,7 +657,9 @@ async def agent_ws_endpoint(ws: WebSocket) -> None:
             if msg_type == "result":
                 ws_agent_manager.resolve_response(msg.get("request_id", ""), msg)
             elif msg_type == "agent_event":
-                await ws_agent_manager.resolve_agent_event(msg.get("request_id", ""), msg)
+                await ws_agent_manager.resolve_agent_event(
+                    msg.get("request_id", ""), msg, source_ws=ws
+                )
             elif msg_type == "agent_result":
                 ws_agent_manager.resolve_agent_result(msg.get("request_id", ""), msg)
             elif msg_type == "ping":

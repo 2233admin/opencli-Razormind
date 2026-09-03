@@ -9,6 +9,7 @@ import re
 import shutil
 from collections.abc import AsyncIterator
 from typing import Any
+from urllib.parse import unquote, urlsplit
 
 from backend.agent_runtimes.base import (
     AgentTask,
@@ -17,6 +18,7 @@ from backend.agent_runtimes.base import (
     RuntimeInvocationError,
     event_done,
     event_error,
+    event_evidence,
     event_started,
     event_tool_call,
     event_tool_result,
@@ -351,7 +353,12 @@ class BbxRuntimeAdapter(RuntimeAdapter):
         extracted: dict[str, Any] = {}
         value: dict[str, Any] = {}
         answer_tail = ""
-        previous_answer_tail = ""
+        stable_answer = ""
+        stable_observations = 0
+        required_stable_observations = max(
+            1, int(_nonnegative_number(task.config.get("stable_observations"), 2.0))
+        )
+        answer_complete = False
         while True:
             page_text_result = await self._doubao_call(
                 task,
@@ -380,13 +387,21 @@ class BbxRuntimeAdapter(RuntimeAdapter):
             value = extracted.get("value") if isinstance(extracted, dict) else {}
             value = value if isinstance(value, dict) else {}
             answer_tail = _answer_after_question(_page_text(page_text_result), question)
-            suggested_now = _string_list(value.get("suggested_keywords")) or (
-                _suggested_keywords_from_page_text(_page_text(page_text_result))
-            )
-            if _answer_ready(_string(value.get("answer")), answer_tail, question):
-                if suggested_now or answer_tail == previous_answer_tail:
+            candidate = _select_doubao_answer(value.get("answer"), answer_tail)
+            if value.get("answer_complete") is True and _answer_ready(
+                candidate, answer_tail, question
+            ):
+                if candidate == stable_answer:
+                    stable_observations += 1
+                else:
+                    stable_answer = candidate
+                    stable_observations = 1
+                if stable_observations >= required_stable_observations:
+                    answer_complete = True
                     break
-                previous_answer_tail = answer_tail
+            else:
+                stable_answer = ""
+                stable_observations = 0
             remaining = deadline - asyncio.get_running_loop().time()
             if remaining <= 0:
                 break
@@ -395,24 +410,45 @@ class BbxRuntimeAdapter(RuntimeAdapter):
         page_text = _page_text(page_text_result)
         value = extracted.get("value") if isinstance(extracted, dict) else None
         value = value if isinstance(value, dict) else {}
+        if answer_complete:
+            expanded = await self._doubao_call(
+                task,
+                "call",
+                tab_id,
+                {
+                    "method": "page.evaluate",
+                    "params": {
+                        "expression": _DOUBAO_EXPAND_SOURCES_EXPRESSION,
+                        "returnByValue": True,
+                    },
+                },
+            )
+            if _evaluate_bool(expanded) is True:
+                await asyncio.sleep(0.35)
+                extracted = await self._doubao_call(
+                    task,
+                    "call",
+                    tab_id,
+                    {
+                        "method": "page.evaluate",
+                        "params": {
+                            "expression": _DOUBAO_EXTRACTION_EXPRESSION,
+                            "returnByValue": True,
+                        },
+                    },
+                )
+                refreshed = extracted.get("value") if isinstance(extracted, dict) else {}
+                if isinstance(refreshed, dict):
+                    value = refreshed
         suggestion_deadline = asyncio.get_running_loop().time() + _nonnegative_number(
             task.config.get("suggested_wait_seconds"), 5.0
         )
         suggested_keywords = _string_list(value.get("suggested_keywords"))
         while not suggested_keywords:
-            suggested_keywords = _suggested_keywords_from_page_text(page_text)
             remaining = suggestion_deadline - asyncio.get_running_loop().time()
-            if suggested_keywords or remaining <= 0:
+            if remaining <= 0:
                 break
             await asyncio.sleep(min(1.0, remaining))
-            page_text_result = await self._doubao_call(
-                task,
-                "call",
-                tab_id,
-                {"method": "page.get_text", "params": {"textBudget": 100000}},
-            )
-            page_text = _page_text(page_text_result)
-            answer_tail = _answer_after_question(page_text, question)
             extracted = await self._doubao_call(
                 task,
                 "call",
@@ -427,6 +463,7 @@ class BbxRuntimeAdapter(RuntimeAdapter):
             )
             value = extracted.get("value") if isinstance(extracted, dict) else {}
             value = value if isinstance(value, dict) else {}
+            suggested_keywords = _string_list(value.get("suggested_keywords"))
         answer_tail = _answer_after_question(page_text, question)
         conversation_url = _string(state.get("url")) or _string(value.get("conversation_url")) or ""
         links = _links(value.get("links"))
@@ -435,19 +472,35 @@ class BbxRuntimeAdapter(RuntimeAdapter):
             share_data = {"url": conversation_url, "type": "conversation"}
         answer = _select_doubao_answer(value.get("answer"), answer_tail)
         answer = _remove_suggested_keyword_tail(answer, suggested_keywords)
-        if not _answer_ready(answer, answer_tail, question):
+        if not answer_complete or not _answer_ready(answer, answer_tail, question):
             response = {
                 "status": "blocked",
-                "error_type": "doubao_response_timeout",
-                "message": "Doubao did not show a final answer before the response timeout.",
+                "error_type": "doubao_response_incomplete",
+                "message": "Doubao did not expose a complete final answer before timeout.",
                 "answer": "",
+                "answer_complete": False,
                 "data": [],
                 "links": links,
                 "conversation_url": conversation_url,
                 "session_share_data": share_data or [],
                 "suggested_keywords": suggested_keywords,
+                "search_keywords": _string_list(value.get("search_keywords")),
+                "video_contents": _string_list(value.get("video_contents")),
                 "page_text": page_text,
+                "conversation_deleted": False,
             }
+            for event in _drain_bbx_events(task):
+                yield event
+            yield event_evidence(
+                task.task_id,
+                {
+                    "kind": "doubao.capture.pre_cleanup",
+                    "response": dict(response),
+                },
+            )
+            response["conversation_deleted"] = await self._delete_doubao_conversation(
+                task, tab_id, created_new, conversation_url
+            )
             await self._close_created_doubao_tab(task, tab_id, created_new)
             for event in _drain_bbx_events(task):
                 yield event
@@ -463,12 +516,30 @@ class BbxRuntimeAdapter(RuntimeAdapter):
         response = {
             "status": "completed",
             "answer": answer,
+            "answer_complete": True,
             "data": value.get("data") if isinstance(value.get("data"), list) else [],
             "links": links,
             "conversation_url": conversation_url,
             "session_share_data": share_data or [],
             "suggested_keywords": suggested_keywords,
+            "search_keywords": _string_list(value.get("search_keywords")),
+            "video_contents": _string_list(value.get("video_contents")),
+            "search_keyword_count": value.get("search_keyword_count"),
+            "reference_count": value.get("reference_count"),
+            "conversation_deleted": False,
         }
+        for event in _drain_bbx_events(task):
+            yield event
+        yield event_evidence(
+            task.task_id,
+            {
+                "kind": "doubao.capture.pre_cleanup",
+                "response": dict(response),
+            },
+        )
+        response["conversation_deleted"] = await self._delete_doubao_conversation(
+            task, tab_id, created_new, conversation_url
+        )
         await self._close_created_doubao_tab(task, tab_id, created_new)
         for event in _drain_bbx_events(task):
             yield event
@@ -517,6 +588,108 @@ class BbxRuntimeAdapter(RuntimeAdapter):
             # Cleanup must never turn an otherwise valid Doubao answer into a
             # failed collection item. The next run can still recover the tab.
             return
+
+    async def _delete_doubao_conversation(
+        self,
+        task: AgentTask,
+        tab_id: int | str,
+        created_new: bool,
+        conversation_url: str,
+    ) -> bool:
+        """Delete only the temporary conversation created for this source item."""
+        conversation_id = _doubao_conversation_id(conversation_url)
+        if not created_new or not conversation_id:
+            return False
+        try:
+            opened: dict[str, Any] = {}
+            open_deadline = asyncio.get_running_loop().time() + _nonnegative_number(
+                task.config.get("delete_menu_timeout_seconds"), 3.0
+            )
+            while True:
+                opened = await self._doubao_call(
+                    task,
+                    "call",
+                    tab_id,
+                    {
+                        "method": "page.evaluate",
+                        "params": {
+                            "expression": _DOUBAO_OPEN_DELETE_MENU_EXPRESSION,
+                            "returnByValue": True,
+                        },
+                    },
+                )
+                if _evaluate_bool(opened) is True:
+                    break
+                remaining = open_deadline - asyncio.get_running_loop().time()
+                if remaining <= 0:
+                    return False
+                await asyncio.sleep(min(0.2, remaining))
+            clicked = await self._doubao_call(
+                task,
+                "call",
+                tab_id,
+                {
+                    "method": "page.evaluate",
+                    "params": {
+                        "expression": _DOUBAO_CLICK_DELETE_MENU_EXPRESSION,
+                        "returnByValue": True,
+                    },
+                },
+            )
+            if _evaluate_bool(clicked) is not True:
+                return False
+            confirmed = await self._doubao_call(
+                task,
+                "call",
+                tab_id,
+                {
+                    "method": "page.evaluate",
+                    "params": {
+                        "expression": _DOUBAO_CONFIRM_DELETE_EXPRESSION,
+                        "returnByValue": True,
+                    },
+                },
+            )
+            if _evaluate_bool(confirmed) is not True:
+                return False
+            verification_expression = _doubao_verify_delete_expression(conversation_id)
+            verify_deadline = asyncio.get_running_loop().time() + _nonnegative_number(
+                task.config.get("delete_verify_timeout_seconds"), 5.0
+            )
+            required_observations = max(
+                1,
+                int(
+                    _nonnegative_number(
+                        task.config.get("delete_stable_observations"), 2.0
+                    )
+                ),
+            )
+            stable_observations = 0
+            while True:
+                verified = await self._doubao_call(
+                    task,
+                    "call",
+                    tab_id,
+                    {
+                        "method": "page.evaluate",
+                        "params": {
+                            "expression": verification_expression,
+                            "returnByValue": True,
+                        },
+                    },
+                )
+                if _evaluate_bool(verified) is True:
+                    stable_observations += 1
+                    if stable_observations >= required_observations:
+                        return True
+                else:
+                    stable_observations = 0
+                remaining = verify_deadline - asyncio.get_running_loop().time()
+                if remaining <= 0:
+                    return False
+                await asyncio.sleep(min(0.15, remaining))
+        except RuntimeInvocationError:
+            return False
 
     async def _wait_for_doubao_input_ref(
         self, task: AgentTask, tab_id: int | str
@@ -740,44 +913,171 @@ class BbxRuntimeAdapter(RuntimeAdapter):
 
 
 _DOUBAO_EXTRACTION_EXPRESSION = r'''(() => {
-  const text = (value) => String(value || '').replace(/\s+/g, ' ').trim();
-  const isNavigationLink = (node) => Boolean(
-    node.closest('nav, [class*="sidebar"], [class*="conversation-item"]')
-  );
-  const links = Array.from(document.querySelectorAll('a[href]'))
-    .filter((node) => !isNavigationLink(node))
-    .map((node) => ({url: node.href, title: text(node.innerText || node.textContent)}))
+  const compact = (value) => String(value || '').replace(/\s+/g, ' ').trim();
+  const answers = Array.from(document.querySelectorAll('.md-box-root'));
+  const answerNode = answers.length ? answers[answers.length - 1] : null;
+  let root = answerNode;
+  for (let depth = 0; root && depth < 10; depth += 1) {
+    const hasResultNodes = root.querySelector(
+      '.suggest-list-item-title, [data-plugin-identifier*="search_query_result_block"]'
+    );
+    if (hasResultNodes) break;
+    root = root.parentElement;
+  }
+  root = root || answerNode;
+  let actionRoot = answerNode;
+  for (let depth = 0; actionRoot && depth < 10; depth += 1) {
+    const hasFinalAction = actionRoot.querySelector(
+      'button[aria-label*="朗读"], button[aria-label*="复制"]'
+    );
+    const hasGeneratingAction = Array.from(
+      actionRoot.querySelectorAll('button, [role="button"]')
+    ).some((node) => /停止生成|停止回答|停止思考|生成中/.test(
+      compact(node.getAttribute('aria-label') || node.textContent)
+    ));
+    if (hasFinalAction || hasGeneratingAction) break;
+    actionRoot = actionRoot.parentElement;
+  }
+  actionRoot = actionRoot || root;
+  const suggested_keywords = root ? Array.from(root.querySelectorAll('.suggest-list-item-title'))
+    .map((node) => compact(node.innerText || node.textContent))
+    .filter((value, index, values) => value && values.indexOf(value) === index)
+    .slice(0, 20) : [];
+  const search_keywords = root ? Array.from(root.querySelectorAll(
+    '[data-plugin-identifier*="search_query_result_block"] [class*="query"], ' +
+    '[data-plugin-identifier*="search_query_result_block"] [class*="keyword"]'
+  )).map((node) => compact(node.innerText || node.textContent))
+    .filter((value, index, values) => value && values.indexOf(value) === index)
+    .slice(0, 50) : [];
+  const video_contents = root ? Array.from(root.querySelectorAll(
+    '[data-plugin-identifier*="video"], a[href*="douyin.com/video"], ' +
+    'a[href*="douyin.com/note"]'
+  )).map((node) => {
+    const container = node.closest('[data-plugin-identifier], article, li') || node;
+    return compact(container.innerText || container.textContent || node.getAttribute('aria-label'));
+  }).filter((value, index, values) => value && values.indexOf(value) === index)
+    .slice(0, 20) : [];
+  const links = root ? Array.from(root.querySelectorAll('a[href]'))
+    .map((node) => ({url: node.href, title: compact(node.innerText || node.textContent)}))
     .filter((item) => /^https?:/i.test(item.url) &&
-      !/^https:\/\/www\.doubao\.com\/chat(?:\/|$)/i.test(item.url));
-  const suggested_keywords = Array.from(
-    document.querySelectorAll(
-      'button, [role="button"], a, [class*="suggest-list-item"]'
-    )
-  )
-    .map((node) => ({
-      value: text(node.innerText || node.textContent),
-      className: String(node.className || '')
-    }))
-    .filter((item) => item.value && item.value.length <= 120 &&
-      (item.className.includes('suggest-list-item') ||
-        /推荐|继续问|猜你想问|相关问题|关键词/i.test(item.value)))
-    .map((item) => item.value)
-    .filter((value, index, values) => values.indexOf(value) === index)
-    .slice(-20);
-  const candidates = Array.from(document.querySelectorAll(
-    '[data-message-author-role="assistant"], [data-role="assistant"], [class*="assistant"]'
-  ))
-    .map((node) => String(node.innerText || node.textContent || '').trim())
-    .filter(Boolean);
+      !/^https:\/\/(?:www\.)?doubao\.com(?:\/|$)/i.test(item.url))
+    .filter((item, index, values) =>
+      values.findIndex((other) => other.url === item.url) === index
+    ) : [];
+  const rootText = compact(root?.innerText || root?.textContent);
+  const summary = rootText.match(/搜索\s*(\d+)\s*个关键词，参考\s*(\d+)\s*篇资料/);
+  const is_generating = Boolean(actionRoot && Array.from(
+    actionRoot.querySelectorAll('button, [role="button"]')
+  ).some((node) => /停止生成|停止回答|停止思考|生成中/.test(
+    compact(node.getAttribute('aria-label') || node.textContent)
+  )));
+  const has_final_actions = Boolean(actionRoot && actionRoot.querySelector(
+    'button[aria-label*="朗读"], button[aria-label*="复制"]'
+  ));
+  const answer = String(answerNode?.innerText || answerNode?.textContent || '').trim();
   return {
-    answer: candidates.length ? candidates[candidates.length - 1] : '',
+    answer,
+    answer_complete: Boolean(answer && !is_generating &&
+      (suggested_keywords.length || has_final_actions)),
+    is_generating,
     links,
     suggested_keywords,
-    session_share_data: links
-      .filter((item) => /分享|share/i.test(item.title))
-      .slice(-10)
+    search_keywords,
+    video_contents,
+    search_keyword_count: summary ? Number(summary[1]) : null,
+    reference_count: summary ? Number(summary[2]) : null,
+    conversation_url: location.href,
+    session_share_data: []
   };
 })()'''
+
+_DOUBAO_EXPAND_SOURCES_EXPRESSION = r'''(() => {
+  const blocks = Array.from(document.querySelectorAll(
+    '[data-plugin-identifier*="search_query_result_block"] [data-copy-ignore]'
+  ));
+  const trigger = blocks.length ? blocks[blocks.length - 1] : null;
+  if (!trigger) return false;
+  const text = String(trigger.textContent || '').replace(/\s+/g, ' ').trim();
+  if (!/搜索\s*\d+\s*个关键词，参考\s*\d+\s*篇资料/.test(text)) return false;
+  trigger.click();
+  return true;
+})()'''
+
+_DOUBAO_OPEN_DELETE_MENU_EXPRESSION = r'''(() => {
+  const match = location.pathname.match(/^\/chat\/([^/?#]+)/);
+  if (!match) return false;
+  const item = document.querySelector(`a#conversation_${match[1]}`) ||
+    document.querySelector('a[id^="conversation_"][class*="e2e-test-active"]');
+  const trigger = item?.querySelector('button[aria-haspopup="menu"]');
+  if (!trigger) return false;
+  let holder = trigger.parentElement;
+  while (holder && holder !== item &&
+      !String(holder.className || '').includes('group-hover/conversation-item')) {
+    holder = holder.parentElement;
+  }
+  if (!holder || holder === item) return false;
+  holder.style.display = 'flex';
+  holder.style.opacity = '1';
+  holder.style.visibility = 'visible';
+  const init = {bubbles: true, cancelable: true, composed: true, view: window,
+    clientX: 0, clientY: 0, button: 0, buttons: 1};
+  for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click']) {
+    trigger.dispatchEvent(new MouseEvent(type, init));
+  }
+  return trigger.getAttribute('aria-expanded') === 'true';
+})()'''
+
+_DOUBAO_CLICK_DELETE_MENU_EXPRESSION = r'''(() => {
+  const item = Array.from(document.querySelectorAll('[role="menuitem"]'))
+    .find((node) => String(node.textContent || '').trim() === '删除' &&
+      node.getBoundingClientRect().width > 0 && node.getBoundingClientRect().height > 0);
+  if (!item) return false;
+  item.click();
+  return true;
+})()'''
+
+_DOUBAO_CONFIRM_DELETE_EXPRESSION = r'''(() => {
+  const dialog = Array.from(document.querySelectorAll('[role="dialog"], [role="alertdialog"]'))
+    .find((node) => String(node.textContent || '').includes('确定删除对话'));
+  const button = dialog && Array.from(dialog.querySelectorAll('button'))
+    .find((node) => String(node.textContent || '').trim() === '删除');
+  if (!button) return false;
+  button.click();
+  return true;
+})()'''
+
+
+def _doubao_conversation_id(conversation_url: str) -> str | None:
+    try:
+        parsed = urlsplit(conversation_url)
+    except ValueError:
+        return None
+    if (parsed.hostname or "").casefold().rstrip(".") not in {
+        "doubao.com",
+        "www.doubao.com",
+    }:
+        return None
+    parts = [unquote(part) for part in parsed.path.split("/") if part]
+    return parts[1] if len(parts) == 2 and parts[0] == "chat" and parts[1] else None
+
+
+def _doubao_verify_delete_expression(conversation_id: str) -> str:
+    encoded_id = json.dumps(conversation_id, ensure_ascii=False)
+    return rf'''(() => {{
+  const conversationId = {encoded_id};
+  const dialog = Array.from(document.querySelectorAll('[role="dialog"], [role="alertdialog"]'))
+    .find((node) => String(node.textContent || '').includes('确定删除对话'));
+  if (dialog) return false;
+  if (document.getElementById(`conversation_${{conversationId}}`)) return false;
+  return !Array.from(document.querySelectorAll('a[href]')).some((node) => {{
+    try {{
+      return decodeURIComponent(new URL(node.getAttribute('href'), location.href).pathname)
+        .replace(/\/$/, '') === `/chat/${{conversationId}}`;
+    }} catch (_error) {{
+      return false;
+    }}
+  }});
+}})()'''
 
 
 def _question_from_task(task: AgentTask) -> str:
@@ -795,6 +1095,11 @@ def _tab_records(result: dict[str, Any]) -> list[dict[str, Any]]:
         if isinstance(value, list):
             return [item for item in value if isinstance(item, dict)]
     return []
+
+
+def _evaluate_bool(result: dict[str, Any]) -> bool | None:
+    value = result.get("value") if isinstance(result, dict) else None
+    return value if isinstance(value, bool) else None
 
 
 def _tab_from_result(result: dict[str, Any]) -> dict[str, Any] | None:
@@ -906,6 +1211,11 @@ def _has_answer_content(value: str) -> bool:
     if normalized in {"正在思考", "正在生成", "生成中", "思考中"}:
         return False
     if re.fullmatch(r"搜索\s*\d+\s*个关键词，参考\s*\d+\s*篇资料", normalized):
+        return False
+    if re.fullmatch(
+        r"(?:今天|昨天|前天|星期[一二三四五六日天]|周[一二三四五六日天])?\s*\d{1,2}:\d{2}",
+        normalized,
+    ):
         return False
     return len(normalized) > 5
 

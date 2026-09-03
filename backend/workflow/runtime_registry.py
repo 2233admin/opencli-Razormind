@@ -749,17 +749,21 @@ def _resolve_record_acceptance_gate(node: WorkflowProjectNode, *, node_id: str) 
 
 
 def _resolve_record_sink(node: WorkflowProjectNode, *, node_id: str) -> dict[str, Any]:
+    feishu_writeback = _read_dict(node.params.get("feishuWriteback"))
+    binding_input: dict[str, Any] = {
+        "target": _read_string(node.params.get("target")) or "records",
+        "writeMode": _read_string(node.params.get("writeMode")) or "append",
+        "preserveLineage": node.params.get("preserveLineage") is not False,
+    }
+    if feishu_writeback:
+        binding_input["feishuWriteback"] = feishu_writeback
     return {
         "binding": {
             "status": "bound",
             "binding_id": RECORD_SINK_BINDING_ID,
             "runtime": "workflow",
             "channel": "records",
-            "input": {
-                "target": _read_string(node.params.get("target")) or "records",
-                "writeMode": _read_string(node.params.get("writeMode")) or "append",
-                "preserveLineage": node.params.get("preserveLineage") is not False,
-            },
+            "input": binding_input,
         },
         "record_sink": {
             "node_id": node_id,

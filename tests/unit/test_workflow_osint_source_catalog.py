@@ -103,3 +103,18 @@ def test_osint_source_catalog_nodes_are_backend_authoritative_and_editable():
         assert node_catalog["adapter"]["id"] == adapter_id
         assert node_catalog["adapter"]["provider"] == provider
         assert set(required_params).issubset(parameter_names)
+
+
+def test_doubao_research_catalog_builds_with_trigger_input_contract():
+    capabilities = [
+        item
+        for item in build_workflow_capabilities().catalog
+        if item.id == "intelligence.source.doubao-research"
+    ]
+
+    assert len(capabilities) == 1
+    capability = capabilities[0]
+
+    assert capability.manifest["ports"]["inputs"] == [
+        {"name": "in", "type": "trigger"}
+    ]

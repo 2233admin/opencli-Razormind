@@ -378,6 +378,126 @@ async def test_handle_ws_agent_task_happy_path_events_then_result(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_handle_ws_agent_task_stops_before_cleanup_when_evidence_delivery_fails(
+    monkeypatch,
+):
+    class _PreCleanupAdapter(_StubAdapter):
+        def __init__(self) -> None:
+            super().__init__()
+            self.cleanup_started = False
+
+        async def invoke(self, task):
+            self.invoked = True
+            yield {"type": "started", "task_id": task.task_id}
+            yield {
+                "type": "evidence",
+                "task_id": task.task_id,
+                "evidence": {"kind": "doubao.capture.pre_cleanup"},
+            }
+            self.cleanup_started = True
+            yield {"type": "done", "task_id": task.task_id, "result": {}}
+
+    class _EvidenceFailingWs(_FakeWs):
+        async def send(self, raw: str) -> None:
+            payload = json.loads(raw)
+            if (
+                payload.get("type") == "agent_event"
+                and payload.get("event", {}).get("type") == "evidence"
+            ):
+                raise ConnectionError("control-plane connection lost")
+            self.sent.append(payload)
+
+    adapter = _PreCleanupAdapter()
+    monkeypatch.setattr(agent_server, "get_runtime", lambda _runtime: adapter)
+
+    ws = _EvidenceFailingWs()
+    await agent_server._handle_ws_agent_task(ws, _agent_task_msg())
+
+    assert adapter.cleanup_started is False
+    assert ws.sent[-1]["type"] == "agent_result"
+    assert ws.sent[-1]["result"]["type"] == "error"
+    assert ws.sent[-1]["result"]["error_type"] == "AgentEventDeliveryError"
+
+
+@pytest.mark.asyncio
+async def test_handle_ws_agent_task_waits_for_persisted_ack_before_cleanup(monkeypatch):
+    class _PreCleanupAdapter(_StubAdapter):
+        def __init__(self) -> None:
+            super().__init__()
+            self.cleanup_started = False
+
+        async def invoke(self, task):
+            yield {
+                "type": "evidence",
+                "task_id": task.task_id,
+                "evidence": {"kind": "doubao.capture.pre_cleanup"},
+            }
+            self.cleanup_started = True
+            yield {"type": "done", "task_id": task.task_id, "result": {}}
+
+    class _AcknowledgingWs(_FakeWs):
+        async def send(self, raw: str) -> None:
+            payload = json.loads(raw)
+            self.sent.append(payload)
+            if payload.get("ack_required") is True:
+                asyncio.get_running_loop().call_soon(
+                    agent_server._resolve_ws_agent_event_ack,
+                    {
+                        "type": "agent_event_ack",
+                        "request_id": payload["request_id"],
+                        "event_id": payload["event_id"],
+                        "status": "persisted",
+                    },
+                )
+
+    adapter = _PreCleanupAdapter()
+    monkeypatch.setattr(agent_server, "get_runtime", lambda _runtime: adapter)
+
+    ws = _AcknowledgingWs()
+    await agent_server._handle_ws_agent_task(ws, _agent_task_msg())
+
+    assert adapter.cleanup_started is True
+    assert ws.sent[0]["type"] == "agent_event"
+    assert ws.sent[0]["ack_required"] is True
+    assert ws.sent[0]["event_id"]
+    assert ws.sent[-1]["type"] == "agent_result"
+    assert ws.sent[-1]["result"]["type"] == "done"
+    assert agent_server._PENDING_AGENT_EVENT_ACKS == {}
+
+
+@pytest.mark.asyncio
+async def test_handle_ws_agent_task_stops_before_cleanup_when_persisted_ack_times_out(
+    monkeypatch,
+):
+    class _PreCleanupAdapter(_StubAdapter):
+        def __init__(self) -> None:
+            super().__init__()
+            self.cleanup_started = False
+
+        async def invoke(self, task):
+            yield {
+                "type": "evidence",
+                "task_id": task.task_id,
+                "evidence": {"kind": "doubao.capture.pre_cleanup"},
+            }
+            self.cleanup_started = True
+            yield {"type": "done", "task_id": task.task_id, "result": {}}
+
+    adapter = _PreCleanupAdapter()
+    monkeypatch.setattr(agent_server, "get_runtime", lambda _runtime: adapter)
+    monkeypatch.setattr(agent_server, "_AGENT_EVENT_ACK_TIMEOUT_SECONDS", 0.01)
+
+    ws = _FakeWs()
+    await agent_server._handle_ws_agent_task(ws, _agent_task_msg())
+
+    assert adapter.cleanup_started is False
+    assert ws.sent[0]["ack_required"] is True
+    assert ws.sent[-1]["type"] == "agent_result"
+    assert ws.sent[-1]["result"]["error_type"] == "AgentEventAcknowledgementTimeout"
+    assert agent_server._PENDING_AGENT_EVENT_ACKS == {}
+
+
+@pytest.mark.asyncio
 async def test_handle_ws_agent_task_unknown_runtime_sends_error_result(monkeypatch):
     def _raise_unknown(rt):
         raise ValueError(f"Unknown runtime type: {rt!r}. Available: []")

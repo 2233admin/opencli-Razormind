@@ -138,7 +138,10 @@ WORKFLOW_BLOCK_REASON_TAXONOMY: dict[str, WorkflowBlockReasonDefinition] = {
         code=FEISHU_WRITE_PERMISSION_REQUIRED,
         category="missing_permission",
         stable_fields=("code", "source", "details.bindingId", "details.requiredPermission"),
-        description="Feishu delivery is blocked because external-site mutation is disabled.",
+        description=(
+            "Feishu sheet synchronization or Bitable delivery is blocked because "
+            "external-site mutation is disabled."
+        ),
     ),
     MISSING_RUNTIME_BINDING: WorkflowBlockReasonDefinition(
         code=MISSING_RUNTIME_BINDING,

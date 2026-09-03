@@ -196,6 +196,42 @@ const NODE_INTERNALS: Record<string, NodeInternals> = {
       step("output", "Output with lineage", "validate", "Returns items[] with endpoint and source-group lineage.", "items[] contract", "ready"),
     ],
   },
+  "intelligence.source.doubao-research": {
+    title: "Doubao Research Internals",
+    summary: "Asks each upstream question in the persistent Doubao browser and captures enriched visible evidence.",
+    steps: [
+      step("question", "Question binding", "input", "Interpolates the upstream keyword into the question template.", "params.question", "ready", [
+        exposedParam("question", "Question", "source", "Source", "textarea", "{{keyword}}", { order: 1 }),
+        exposedParam("site_session", "Session", "source", "Source", "select", "persistent", {
+          options: [
+            { value: "persistent", label: "Persistent" },
+            { value: "ephemeral", label: "Ephemeral" },
+          ],
+          order: 2,
+        }),
+      ]),
+      step("runtime", "Local browser runtime", "dispatch", "Uses the connected BBX/Codex/Claude runtime without requiring a network model provider.", "Agent runtime", "ready", [
+        exposedParam("executionMode", "Execution Mode", "runtime", "Runtime", "select", "agent", {
+          options: [
+            { value: "agent", label: "Local Agent" },
+            { value: "channel", label: "Legacy Channel" },
+          ],
+          groupOrder: 2,
+          order: 1,
+        }),
+        exposedParam("agentRuntime", "Agent Runtime", "runtime", "Runtime", "select", "bbx", {
+          options: [
+            { value: "bbx", label: "BBX" },
+            { value: "codex", label: "Codex" },
+            { value: "claude-code", label: "Claude Code" },
+          ],
+          groupOrder: 2,
+          order: 2,
+        }),
+      ]),
+      step("evidence", "Enriched evidence", "extract", "Captures the full answer, search keywords and counts, references, follow-ups, product links, and video cards.", "gaojixing.capture-evidence.v1", "ready"),
+    ],
+  },
   "intelligence.source.opencli-slot": {
     title: "OpenCLI Source Slot Internals",
     summary: "A source slot keeps package-selected OpenCLI command params structured while delegating execution to the runtime resource resolver.",
@@ -389,6 +425,30 @@ const NODE_INTERNALS: Record<string, NodeInternals> = {
           min: 0,
           max: 1,
           step: 0.05,
+        }),
+      ]),
+    ],
+  },
+  "intelligence.sink.records": {
+    title: "Record Sink Internals",
+    summary: "Stores authoritative records first, then optionally projects verified rows to a configured Feishu sheet.",
+    steps: [
+      step("store", "Authoritative record store", "store", "Persists accepted records with lineage before any external projection.", "stored refs", "ready", [
+        exposedParam("target", "Target", "storage", "Storage", "text", "records", { readonly: true, order: 1 }),
+        exposedParam("writeMode", "Write Mode", "storage", "Storage", "select", "append", {
+          options: [
+            { value: "append", label: "Append" },
+            { value: "upsert", label: "Upsert" },
+          ],
+          order: 2,
+        }),
+        exposedParam("preserveLineage", "Preserve Lineage", "storage", "Storage", "boolean", true, { order: 3 }),
+      ]),
+      step("feishu", "Feishu sheet projection", "send", "Uses a guarded host bridge, stable row identity, and full-row readback verification.", "verified sheet rows", "ready", [
+        exposedParam("feishuWriteback", "Feishu Writeback (JSON)", "projection", "Projection", "json", { enabled: false }, {
+          description: "Configure enabled, target sheet, dynamic columns, and optional columnMapping.",
+          groupOrder: 2,
+          order: 1,
         }),
       ]),
     ],
@@ -755,6 +815,7 @@ export function getNodeInternals(node: WorkflowProjectNode | undefined): NodeInt
   if (node.kind === "agent" && node.capability === "tag") return NODE_INTERNALS["intelligence.agent.tag"]
   if (node.kind === "router" && node.capability === "route") return NODE_INTERNALS["intelligence.router.importance"]
   if (node.kind === "control" && node.capability === "accept") return NODE_INTERNALS["intelligence.control.record-acceptance"]
+  if (node.kind === "sink" && node.capability === "store") return NODE_INTERNALS["intelligence.sink.records"]
   if (node.kind === "inbox" && node.capability === "store" && node.params.queue === "opencli-hda-output") return NODE_INTERNALS["intelligence.output.collection-result"]
   if (node.kind === "inbox" && node.capability === "store") return NODE_INTERNALS["intelligence.output.inbox"]
   if (node.kind === "notify" && node.adapter?.startsWith("turbopush")) return NODE_INTERNALS["intelligence.output.turbopush-publish"]

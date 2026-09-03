@@ -112,6 +112,7 @@ export const ROUTE_LABELS: Record<string, string> = {
   '/system': '系统设置',
   '/skills': '技能',
   '/providers': '模型与连接',
+  '/nodes': '执行资源',
   '/workers': 'Worker',
   '/browsers': 'Chrome 池',
   '/control/actions': '控制与审计',

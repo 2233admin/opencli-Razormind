@@ -20,7 +20,6 @@ def test_citations_preserve_order_and_strip_punctuation():
     ]
 
 
-# merge marker
 def test_conversation_url_extracts_chat_id():
     status = (
         '[{"Status": "Connected", "Url": '
@@ -38,40 +37,6 @@ def test_conversation_url_ignores_root_chat():
 
 def test_conversation_url_tolerates_garbage():
     assert _conversation_url("not json at all") == ""
-# merge-base marker
-# incoming marker
-def test_structured_response_preserves_share_data_and_keywords():
-    response = _structured_response(
-        "```json\n"
-        '{"answer":"结论", "session_share_data":[{"url":"https://doubao.com/share/1"}], '
-        '"suggested_keywords":["DHA 食物"]}\n```'
-    )
-
-    assert response["answer"] == "结论"
-    assert response["session_share_data"] == [{"url": "https://doubao.com/share/1"}]
-    assert response["suggested_keywords"] == ["DHA 食物"]
-# end marker
-
-
-def test_structured_response_preserves_data_and_links():
-    response = _structured_response(
-        '{"answer":"结论", "data":{"items":["一","二"]}, '
-        '"links":[{"title":"来源","url":"https://example.com/source"}], '
-        '"session_share_data":[], "suggested_keywords":[]}'
-    )
-
-    assert response["data"] == {"items": ["一", "二"]}
-    assert response["links"] == [{"title": "来源", "url": "https://example.com/source"}]
-    assert response["response_data"]["data"] == {"items": ["一", "二"]}
-
-
-def test_structured_response_accepts_doubao_suggested_keys_alias():
-    response = _structured_response(
-        '{"answer":"结论", "session_share_data":"", '
-        '"suggested_keys":["深海鱼", "DHA 鸡蛋"], "citations":[]}'
-    )
-
-    assert response["suggested_keywords"] == ["深海鱼", "DHA 鸡蛋"]
 
 
 def test_structured_response_preserves_share_data_and_keywords():
@@ -239,6 +204,33 @@ async def test_collect_tolerates_status_failure(monkeypatch):
 
     assert result.success
     assert result.items[0]["conversation_url"] == ""
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status_outcome", ["empty", "exception"])
+async def test_collect_preserves_ask_conversation_url_when_status_has_none(
+    monkeypatch, status_outcome
+):
+    seeded_url = "https://www.doubao.com/chat/from-ask"
+
+    async def fake_run(command):
+        if command[2] == "ask":
+            return (
+                0,
+                '[{"Role":"assistant","Text":"回答"},'
+                f'{{"Role":"system","Text":"会话","Url":"{seeded_url}"}}]',
+                "",
+            )
+        if status_outcome == "exception":
+            raise RuntimeError("status unavailable")
+        return 0, '[{"Status":"Connected","Url":"https://www.doubao.com/chat"}]', ""
+
+    monkeypatch.setattr("backend.channels.doubao_research_channel._run_doubao_command", fake_run)
+
+    result = await DoubaoResearchChannel().collect({"question": "测试"}, {})
+
+    assert result.success
+    assert result.items[0]["conversation_url"] == seeded_url
 
 
 @pytest.mark.asyncio
@@ -427,3 +419,13 @@ async def test_collect_classifies_cdp_transient_as_connection_error(
 
     assert not result.success
     assert result.error_type == "ConnectionError"
+
+
+def test_structured_response_preserves_search_and_video_enrichment():
+    response = _structured_response(
+        '{"answer":"结论","search_keywords":["儿童补钙"],'
+        '"video_contents":["补钙科普视频"]}'
+    )
+
+    assert response["search_keywords"] == ["儿童补钙"]
+    assert response["video_contents"] == ["补钙科普视频"]

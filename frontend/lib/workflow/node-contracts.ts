@@ -380,6 +380,8 @@ const CONTRACTS: Record<string, NodeContract> = {
     [
       param("question", "params", "string", true, "", { description: "Research question; runtime may interpolate an upstream keyword." }),
       param("site_session", "params", "string", false, "ephemeral", { enum: ["ephemeral", "persistent"], description: "OpenCLI Doubao session policy." }),
+      param("executionMode", "params", "string", false, "channel", { enum: ["channel", "agent"], description: "Use the legacy channel or a connected local browser Agent." }),
+      param("agentRuntime", "params", "string", false, "bbx", { enum: ["bbx", "codex", "claude-code"], description: "Preferred local Agent runtime when executionMode is agent." }),
     ],
     ["Doubao session readiness must be verified before live execution", "answers must preserve upstream keyword lineage"],
   ),
@@ -618,6 +620,9 @@ const CONTRACTS: Record<string, NodeContract> = {
       }),
       param("preserveLineage", "params", "boolean", true, true, {
         description: "Stored records keep lineage and run trace pointers.",
+      }),
+      param("feishuWriteback", "params", "object", false, { enabled: false }, {
+        description: "Optional guarded Feishu Sheets projection, including dynamic columns and mappings.",
       }),
     ],
     [

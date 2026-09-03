@@ -152,6 +152,10 @@ function feishuDoubaoGraph(name: string) {
     ...feishu.params,
     table_id: 'tblS6dfkT1dE0SXd',
     keyword_field: '推荐追问',
+    number_field: '题号',
+    status_field: '',
+    eligible_status: '',
+    max_rows: 2000,
     source_group: 'feishu-recommended-followups',
   }
   const doubao = createWorkflowNodeFromCatalog(catalog('intelligence.source.doubao-research'), 'doubao-research', { x: 820, y: 260 })
@@ -159,12 +163,37 @@ function feishuDoubaoGraph(name: string) {
     ...doubao.params,
     question: '{{keyword}}',
     questionFrom: 'keyword',
+    executionMode: 'agent',
+    agentRuntime: 'bbx',
+    site_session: 'persistent',
   }
   const hygiene = createWorkflowNodeFromCatalog(catalog('package.processing.record-hygiene'), 'record-hygiene', { x: 1080, y: 260 })
   const records = createWorkflowNodeFromCatalog(catalog('intelligence.sink.records'), 'records', { x: 1380, y: 260 })
+  records.params = {
+    ...records.params,
+    feishuWriteback: {
+      enabled: false,
+      spreadsheetToken: '',
+      sheetId: '',
+      sheetName: '',
+      stage: '非品牌题',
+      sequenceColumn: '序号',
+      idempotencyColumn: '运行ID',
+      columns: [
+        '序号', '题号', '阶段', '原问句', '完整回答', '关键词数', '关键词（全部）',
+        '参考资料数', '参考资料（全部）', '推荐追问数', '推荐追问（全部）', '商品链接（全部）',
+        '视频内容（全部）', '高吉星是否出现', '高吉星观察', '正式会话链接', '分享链接',
+        '连续截图', '完成时间', '证据状态', '运行ID',
+      ],
+    },
+  }
   return parseWorkflowProject({
     ...PACKAGED_WORKFLOW_PROJECT, id: `draft-${Date.now()}`, name,
-    agentPermissions: { ...PACKAGED_WORKFLOW_PROJECT.agentPermissions, canFetchNetwork: true },
+    agentPermissions: {
+      ...PACKAGED_WORKFLOW_PROJECT.agentPermissions,
+      canFetchNetwork: true,
+      canMutateExternalSites: false,
+    },
     adapters: [
       { id: 'feishu-table-source', type: 'source', provider: 'feishu', mode: 'live', config: { channel: 'feishu_table', channelType: 'feishu_table' } },
       { id: 'doubao-research-source', type: 'source', provider: 'doubao', mode: 'live', config: { channel: 'doubao_research', channelType: 'doubao_research' } },
