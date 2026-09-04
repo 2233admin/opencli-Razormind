@@ -1,0 +1,14 @@
+{
+  "domain": "ecommerce",
+  "capability": "taobao-shop-catalog",
+  "param_schema": [
+    {"name": "shop_id", "required": true}
+  ],
+  "steps": [
+    {"op": "navigate", "url_template": "https://shop{shop_id}.taobao.com/category.htm?search=y&pageNo={page}"},
+    {"op": "wait", "wait_mode": "stable", "selector": "[id^=\"item_id_\"]"},
+    {"op": "eval_script", "script": "scripts/extract-catalog.py", "args": ["{shop_id}", "--page", "{page}"]}
+  ],
+  "pagination": {"mode": "url_page", "url_template": "https://shop{shop_id}.taobao.com/category.htm?search=y&pageNo={page}", "page_param": "pageNo", "stop_when": "result_count < 1"},
+  "success": {"min_count": 1, "required_field": "itemId"}
+}

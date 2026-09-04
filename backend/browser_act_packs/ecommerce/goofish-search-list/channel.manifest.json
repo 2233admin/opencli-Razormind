@@ -1,0 +1,14 @@
+{
+  "domain": "ecommerce",
+  "capability": "goofish-search-list",
+  "param_schema": [
+    {"name": "keyword", "required": true}
+  ],
+  "steps": [
+    {"op": "navigate", "url_template": "https://www.goofish.com/search?q={keyword}"},
+    {"op": "wait", "wait_mode": "stable"},
+    {"op": "eval_script", "script": "scripts/extract-search-items.py", "args": []}
+  ],
+  "pagination": {"mode": "none"},
+  "success": {"min_count": 1, "required_field": "item_id"}
+}
