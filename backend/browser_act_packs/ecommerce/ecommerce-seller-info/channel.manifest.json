@@ -1,0 +1,14 @@
+{
+  "domain": "ecommerce",
+  "capability": "ecommerce-seller-info",
+  "param_schema": [
+    {"name": "url", "required": true}
+  ],
+  "steps": [
+    {"op": "navigate", "url_template": "{url}"},
+    {"op": "wait", "wait_mode": "stable"},
+    {"op": "eval_script", "script": "scripts/extract-seller.py", "args": []}
+  ],
+  "pagination": {"mode": "none"},
+  "success": {"min_count": 1, "required_field": "name"}
+}
