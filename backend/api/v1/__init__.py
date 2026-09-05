@@ -14,6 +14,7 @@ from backend.api.v1 import (
     browser_spaces,
     browsers,
     chat,
+    connector_replies,
     consumer_grants,
     control,
     controlled_receiver_routes,
@@ -83,6 +84,7 @@ def create_v1_router(workflow_plugins: WorkflowPluginRegistry) -> APIRouter:
     v1_router.include_router(browsers.router)
     v1_router.include_router(browsers.runtime_router)
     v1_router.include_router(chat.router)
+    v1_router.include_router(connector_replies.router)
     v1_router.include_router(control.router)
     v1_router.include_router(browser_spaces.router)
     v1_router.include_router(consumer_grants.router)

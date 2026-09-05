@@ -115,7 +115,11 @@ async def revoke_connector_binding(
     )
 
 
-@router.post("/connectors/feishu/installations/{installation_public_id}/events")
+@router.post(
+    "/connectors/feishu/installations/{installation_public_id}/events",
+    openapi_extra={"security": []},
+    description="Feishu event endpoint authenticated by the strict provider signature verifier.",
+)
 async def receive_feishu_event(
     installation_public_id: str, request: Request, db: AsyncSession = Depends(get_db)
 ) -> Response:

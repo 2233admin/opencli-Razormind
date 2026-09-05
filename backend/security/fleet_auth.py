@@ -62,6 +62,7 @@ using the bearer header or query parameter described above.
 
 from __future__ import annotations
 
+import re
 import secrets
 import sys
 from collections.abc import Sequence
@@ -200,6 +201,17 @@ class FleetAuthMiddleware:
             await self.app(scope, receive, send)
             return
         path = scope.get("path", "")
+        # Only this callback has its own strict provider authentication boundary.
+        # Administration and every other method/path remain behind fleet auth.
+        if (
+            scope["type"] == "http"
+            and scope.get("method") == "POST"
+            and re.fullmatch(
+                r"/api/v1/connectors/feishu/installations/[A-Za-z0-9_-]{1,36}/events", path
+            )
+        ):
+            await self.app(scope, receive, send)
+            return
         if not path.startswith(PROTECTED_PREFIXES) or path in PUBLIC_PATHS:
             await self.app(scope, receive, send)
             return
