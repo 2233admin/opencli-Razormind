@@ -483,7 +483,7 @@ export async function startWorkflowRun(
 
 export async function startWorkspaceWorkflowRun(
   scope: WorkspaceWorkflowRunScope,
-  options: { authorization?: string | null } = {},
+  options: { authorization?: string | null; input?: WorkflowRunInput } = {},
 ): Promise<WorkflowRunProjection> {
   const response = await fetch(workspaceWorkflowRunEndpoint(scope), {
     method: "POST",
@@ -492,7 +492,7 @@ export async function startWorkspaceWorkflowRun(
       ...(options.authorization ? { Authorization: options.authorization } : {}),
     },
     body: JSON.stringify({
-      inputs: {},
+      inputs: options.input?.payload ?? {},
       user: "studio-run-trace",
     }),
   })
@@ -812,7 +812,7 @@ export async function fetchWorkspaceWorkflowEvidenceBatchProjection(
   if (options.sourceGroup) search.set("source_group", options.sourceGroup)
   for (const value of options.include ?? []) search.append("include", value)
   const suffix = search.size > 0 ? `?${search.toString()}` : ""
-  const response = await fetch(`${workspaceWorkflowEvidenceBatchEndpoint(scope, runId)}/projection${suffix}`, {
+  const response = await fetch(`${workspaceWorkflowRunEndpoint(scope, runId)}/projection${suffix}`, {
     headers: {
       ...(options.authorization ? { Authorization: options.authorization } : {}),
     },

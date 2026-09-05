@@ -2474,7 +2474,7 @@ test('Studio evidence workbench uses workspace-scoped batch routes', async () =>
     globalThis.fetch = originalFetch
   }
   const root = '/api/v1/workspaces/workspace/projects/project/workflows/workflow/runs/run/evidence-batches'
-  assert.deepEqual(requests, [root, `${root}/projection`, `${root}/batch`])
+  assert.deepEqual(requests, [root, `${root.replace(/\/evidence-batches$/, '')}/projection`, `${root}/batch`])
 })
 
 test('ResearchGraph adapter keeps stable identity and deterministic ordering', async () => {

@@ -366,6 +366,36 @@ class BbxRuntimeAdapter(RuntimeAdapter):
                 tab_id,
                 {"method": "page.get_text", "params": {"textBudget": 100000}},
             )
+            page_text = _page_text(page_text_result)
+            if _looks_like_doubao_human_verification(page_text):
+                response = {
+                    "status": "blocked",
+                    "error_type": "captcha_challenge",
+                    "message": (
+                        "Doubao requires human verification. Complete it in the visible "
+                        "browser tab, then retry the collection."
+                    ),
+                    "answer": "",
+                    "data": [],
+                    "links": [],
+                    "conversation_url": "",
+                    "session_share_data": [],
+                    "suggested_keywords": [],
+                    "page_text": page_text,
+                    "conversation_deleted": False,
+                    "manual_action_required": True,
+                }
+                for event in _drain_bbx_events(task):
+                    yield event
+                yield event_done(
+                    task.task_id,
+                    result={
+                        "text": json.dumps(response, ensure_ascii=False),
+                        "tab_id": tab_id,
+                        "browser_transport": "bbx",
+                    },
+                )
+                return
             state = await self._doubao_call(
                 task,
                 "call",
@@ -386,6 +416,35 @@ class BbxRuntimeAdapter(RuntimeAdapter):
             )
             value = extracted.get("value") if isinstance(extracted, dict) else {}
             value = value if isinstance(value, dict) else {}
+            if value.get("human_verification") is True:
+                response = {
+                    "status": "blocked",
+                    "error_type": "captcha_challenge",
+                    "message": (
+                        "Doubao requires human verification. Complete it in the visible "
+                        "browser tab, then retry the collection."
+                    ),
+                    "answer": "",
+                    "data": [],
+                    "links": [],
+                    "conversation_url": "",
+                    "session_share_data": [],
+                    "suggested_keywords": [],
+                    "page_text": page_text,
+                    "conversation_deleted": False,
+                    "manual_action_required": True,
+                }
+                for event in _drain_bbx_events(task):
+                    yield event
+                yield event_done(
+                    task.task_id,
+                    result={
+                        "text": json.dumps(response, ensure_ascii=False),
+                        "tab_id": tab_id,
+                        "browser_transport": "bbx",
+                    },
+                )
+                return
             answer_tail = _answer_after_question(_page_text(page_text_result), question)
             candidate = _select_doubao_answer(value.get("answer"), answer_tail)
             if value.get("answer_complete") is True and _answer_ready(
@@ -964,6 +1023,15 @@ _DOUBAO_EXTRACTION_EXPRESSION = r'''(() => {
     .filter((item, index, values) =>
       values.findIndex((other) => other.url === item.url) === index
     ) : [];
+  const visibleText = compact(document.body?.innerText || document.body?.textContent);
+  const dialogText = Array.from(document.querySelectorAll(
+    '[role="dialog"], [role="alertdialog"]'
+  ))
+    .map((node) => compact(node.innerText || node.textContent))
+    .join(' ');
+  const human_verification = /人机验证|安全验证|请完成验证|选择所有符合上文描述的图片|拖拽到这里/i
+    .test(`${visibleText} ${dialogText}`) ||
+    (/图片/.test(dialogText) && /提交/.test(dialogText));
   const rootText = compact(root?.innerText || root?.textContent);
   const summary = rootText.match(/搜索\s*(\d+)\s*个关键词，参考\s*(\d+)\s*篇资料/);
   const is_generating = Boolean(actionRoot && Array.from(
@@ -980,6 +1048,7 @@ _DOUBAO_EXTRACTION_EXPRESSION = r'''(() => {
     answer_complete: Boolean(answer && !is_generating &&
       (suggested_keywords.length || has_final_actions)),
     is_generating,
+    human_verification,
     links,
     suggested_keywords,
     search_keywords,
@@ -1396,3 +1465,18 @@ def _read_optional_string(value: object) -> str | None:
 
 
 __all__ = ["BbxRuntimeAdapter"]
+
+
+def _looks_like_doubao_human_verification(page_text: str) -> bool:
+    """Recognize Doubao's image challenge without treating normal chat as blocked."""
+    normalized = " ".join(page_text.split())
+    return any(
+        marker in normalized
+        for marker in (
+            "人机验证",
+            "安全验证",
+            "请完成验证",
+            "选择所有符合上文描述的图片",
+            "拖拽到这里",
+        )
+    )

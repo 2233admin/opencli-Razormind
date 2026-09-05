@@ -6,6 +6,7 @@ import pytest
 
 from backend.agent_runtimes.base import AgentTask
 from backend.agent_runtimes.bbx_adapter import (
+    _looks_like_doubao_human_verification,
     _DOUBAO_CLICK_DELETE_MENU_EXPRESSION,
     _DOUBAO_CONFIRM_DELETE_EXPRESSION,
     _DOUBAO_EXTRACTION_EXPRESSION,
@@ -414,3 +415,55 @@ def test_suggested_keywords_are_read_from_the_visible_tail_before_footer():
     assert _suggested_keywords_from_page_text(
         "问题 q\n答案最后一句是问句吗？\n对话\n豆包 快速"
     ) == []
+
+
+def test_doubao_image_challenge_is_detected_without_misclassifying_chat():
+    assert _looks_like_doubao_human_verification(
+        "选择所有符合上文描述的图片，并拖拽到这里\n提交"
+    ) is True
+    assert _looks_like_doubao_human_verification("豆包\n有什么我能帮你的吗？") is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("structured", [False, True])
+async def test_doubao_workflow_keeps_human_verification_tab_visible(monkeypatch, structured):
+    calls: list[list[str]] = []
+
+    async def fake_run(self, args, config):
+        calls.append(args)
+        if args == ["call", "tabs.create", '{"url":"https://www.doubao.com/chat"}']:
+            return {"ok": True, "tabId": 9}
+        if args[0:3] == ["call", "--tab", "9"]:
+            method = args[3]
+            if method == "dom.query":
+                params = json.loads(args[4])
+                if params["selector"] == "#flow-end-msg-send":
+                    return {"nodes": [{"elementRef": "el_send", "tag": "button"}]}
+                return {"nodes": [{"elementRef": "el_input", "tag": "textarea"}]}
+            if method in {"input.fill", "input.click"}:
+                return {"ok": True}
+            if method == "page.get_state":
+                return {"url": "https://www.doubao.com/chat/789", "title": "豆包"}
+            if method == "page.get_text":
+                if structured:
+                    return {"text": "Doubao challenge"}
+                return {"text": "选择所有符合上文描述的图片，并拖拽到这里\n提交"}
+            if method == "page.evaluate" and structured:
+                return {"value": {"human_verification": True}}
+        raise AssertionError(f"unexpected BBX call: {args}")
+
+    monkeypatch.setattr(BbxRuntimeAdapter, "_run_cli", fake_run)
+    events = await _collect(
+        BbxRuntimeAdapter(),
+        AgentTask(
+            task_id="bbx-doubao-captcha",
+            workflow="workflow.gaojixing.doubao.browser",
+            input={"question": "q"},
+            config={"settle_seconds": 0},
+        ),
+    )
+
+    assert not any(args[3] == "tabs.close" for args in calls if len(args) > 3)
+    response = json.loads(events[-1]["result"]["text"])
+    assert response["error_type"] == "captcha_challenge"
+    assert response["manual_action_required"] is True

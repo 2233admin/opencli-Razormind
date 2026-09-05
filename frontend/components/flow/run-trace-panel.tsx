@@ -190,11 +190,11 @@ export function RunTracePanel({
     runMonitorAbortRef.current?.abort()
     const controller = new AbortController()
     runMonitorAbortRef.current = controller
-    const scope = runFileInput ? workflowRunScope : undefined
+    const monitorScope = scope ?? (runFileInput ? workflowRunScope : undefined)
     try {
       const finalSnapshot = await monitorWorkflowRun(started.runId, {
         authorization,
-        scope,
+        scope: monitorScope,
         signal: controller.signal,
         onSnapshot: (snapshot) => {
           for (const event of snapshot.newEvents) applyWorkflowNodeRunEvent(event)
@@ -218,7 +218,7 @@ export function RunTracePanel({
       })
       await Promise.all([
         loadEvidenceBatchResults(finalSnapshot.projection.runId, authorization),
-        loadResearchLedger(finalSnapshot.projection.runId, authorization),
+        ...(!scope ? [loadResearchLedger(finalSnapshot.projection.runId, authorization)] : []),
       ])
     } catch (error) {
       if (controller.signal.aborted) return
@@ -249,7 +249,9 @@ export function RunTracePanel({
       }
       const token = getApiAuthToken()
       const authorization = token ? `Bearer ${token}` : null
-      const started = await startWorkflowRun(workflowProject, {
+      const started = scope && !runFileInput
+        ? await startWorkspaceWorkflowRun(scope, { authorization, input })
+        : await startWorkflowRun(workflowProject, {
         authorization,
         sourceOutputs,
         input,
