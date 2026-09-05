@@ -160,3 +160,29 @@ async def test_revoked_or_disabled_local_identity_cannot_authorize_reply(seeded)
         )
         await db.commit()
         assert disabled.stable_error_code == "principal_not_bound"
+
+
+@pytest.mark.asyncio
+async def test_inactive_installation_receipt_is_stable_across_replay(seeded):
+    factory, installation_id = seeded
+    async with factory() as db:
+        installation = await db.get(ConnectorInstallation, installation_id)
+        installation.status = "disabled"
+        await db.commit()
+    async with factory() as db:
+        first = await persist_verified_message(
+            db, installation_id, _message("reply", message_id="inactive-replay")
+        )
+        await db.commit()
+        first_id = first.id
+    async with factory() as db:
+        installation = await db.get(ConnectorInstallation, installation_id)
+        installation.status = "active"
+        replay = await persist_verified_message(
+            db, installation_id, _message("reply", message_id="inactive-replay")
+        )
+        await db.commit()
+        assert replay.id == first_id
+        assert replay.status == "rejected"
+        assert replay.stable_error_code == "installation_disabled"
+        assert await db.scalar(select(func.count()).select_from(ConnectorInboundReceipt)) == 1

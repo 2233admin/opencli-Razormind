@@ -82,6 +82,21 @@ async def get_connector_installation_health(
     )
 
 
+@router.get(
+    "/workspaces/{workspace_id}/connector-installations/{installation_public_id}/my-binding",
+    response_model=ApiResponse[ConnectorBindingRead | None],
+)
+async def get_my_connector_binding(
+    workspace_id: str,
+    installation_public_id: str,
+    identity: RequestIdentity = Depends(get_request_identity),
+    db: AsyncSession = Depends(get_db),
+):
+    return ApiResponse.ok(
+        await installations.get_my_binding(db, workspace_id, installation_public_id, identity)
+    )
+
+
 @router.post(
     "/workspaces/{workspace_id}/connector-installations/{installation_public_id}/binding-challenges",
     response_model=ApiResponse[ConnectorBindingChallengeRead],
@@ -146,8 +161,6 @@ async def receive_feishu_event(
         select(ConnectorInstallation).where(
             ConnectorInstallation.public_id == installation_public_id,
             ConnectorInstallation.provider == "feishu",
-            ConnectorInstallation.status == "active",
-            ConnectorInstallation.revoked_at.is_(None),
         )
     )
     if installation is None:
@@ -161,7 +174,7 @@ async def receive_feishu_event(
         installation=installation,
         session_factory=session_factory,
         uri=str(request.url.path),
-        headers={key.lower(): value for key, value in request.headers.items()},
+        headers=list(request.scope.get("headers", [])),
         body=body,
     )
     return Response(content=result.content, status_code=result.status_code, headers=result.headers)

@@ -159,8 +159,59 @@ async def test_binding_revoke_rechecks_self_or_configuration_permission(database
 
 
 @pytest.mark.asyncio
+async def test_my_binding_returns_only_current_users_safe_binding(database):
+    admin, _ = await _member(database)
+    viewer, viewer_id = await _member(database, subject="viewer", role=WorkspaceRole.VIEWER)
+    other, other_id = await _member(database, subject="other", role=WorkspaceRole.VIEWER)
+    async with database() as db:
+        installation_read = await service.create_installation(db, "ws-1", admin, _create())
+        installation = await db.scalar(
+            select(ConnectorInstallation).where(
+                ConnectorInstallation.public_id == installation_read.installation_public_id
+            )
+        )
+        db.add_all(
+            [
+                ConnectorPrincipalBinding(
+                    public_id="viewer-binding",
+                    installation_id=installation.id,
+                    workspace_id="ws-1",
+                    user_id=viewer_id,
+                    tenant_key=installation.tenant_key,
+                    open_id="ou-viewer",
+                    p2p_chat_id="oc-viewer",
+                    active=True,
+                    revision=1,
+                ),
+                ConnectorPrincipalBinding(
+                    public_id="other-binding",
+                    installation_id=installation.id,
+                    workspace_id="ws-1",
+                    user_id=other_id,
+                    tenant_key=installation.tenant_key,
+                    open_id="ou-other",
+                    p2p_chat_id="oc-other",
+                    active=True,
+                    revision=1,
+                ),
+            ]
+        )
+        await db.commit()
+    async with database() as db:
+        own = await service.get_my_binding(
+            db, "ws-1", installation_read.installation_public_id, viewer
+        )
+        assert own is not None and own.binding_public_id == "viewer-binding"
+        assert "open_id" not in own.model_dump() and "p2p_chat_id" not in own.model_dump()
+        missing = await service.get_my_binding(
+            db, "ws-1", installation_read.installation_public_id, admin
+        )
+        assert missing is None
+
+
+@pytest.mark.asyncio
 async def test_typed_http_contract_uses_public_ids_and_never_returns_secrets(database):
-    identity, _ = await _member(database)
+    identity, owner_id = await _member(database)
     app = FastAPI()
     app.include_router(router, prefix="/api/v1")
 
@@ -185,6 +236,33 @@ async def test_typed_http_contract_uses_public_ids_and_never_returns_secrets(dat
         assert (
             listed.json()["data"][0]["installation_public_id"] == payload["installation_public_id"]
         )
+        async with database() as db:
+            installation = await db.scalar(
+                select(ConnectorInstallation).where(
+                    ConnectorInstallation.public_id == payload["installation_public_id"]
+                )
+            )
+            db.add(
+                ConnectorPrincipalBinding(
+                    public_id="owner-binding",
+                    installation_id=installation.id,
+                    workspace_id="ws-1",
+                    user_id=owner_id,
+                    tenant_key=installation.tenant_key,
+                    open_id="ou-owner-secret",
+                    p2p_chat_id="oc-owner-secret",
+                    active=True,
+                    revision=1,
+                )
+            )
+            await db.commit()
+        my_binding = await client.get(
+            f"/api/v1/workspaces/ws-1/connector-installations/{payload['installation_public_id']}/my-binding"
+        )
+        assert my_binding.status_code == 200
+        binding_payload = my_binding.json()["data"]
+        assert binding_payload["binding_public_id"] == "owner-binding"
+        assert "open_id" not in binding_payload and "p2p_chat_id" not in binding_payload
 
 
 @pytest.mark.asyncio

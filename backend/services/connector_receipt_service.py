@@ -120,11 +120,7 @@ async def persist_verified_message(
         .where(ConnectorInstallation.id == installation_id)
         .with_for_update()
     )
-    if (
-        installation is None
-        or installation.status != "active"
-        or installation.revoked_at is not None
-    ):
+    if installation is None:
         raise ReceiptRejectedError("installation_not_active")
     if message.app_id != installation.app_id or message.tenant_key != installation.tenant_key:
         raise ReceiptRejectedError("installation_identity_mismatch")
@@ -151,7 +147,14 @@ async def persist_verified_message(
     binding = None
     error_code = None
     receipt_status = "rejected"
-    if intent == "binding":
+    installation_error = (
+        "installation_revoked"
+        if installation.revoked_at is not None
+        else ("installation_disabled" if installation.status != "active" else None)
+    )
+    if installation_error is not None:
+        error_code = installation_error
+    elif intent == "binding":
         code = message.safe_content_text.removeprefix(prefix)
         challenge = await _eligible_user_for_challenge(
             db, hashlib.sha256(code.encode()).hexdigest(), installation
@@ -246,5 +249,5 @@ async def persist_verified_message(
         # back and resolves the winning row in a fresh retry session.
         raise ReceiptConflictError("concurrent_receipt_insert") from exc
     installation.last_ready_at = now
-    installation.last_error_code = None
+    installation.last_error_code = installation_error
     return receipt

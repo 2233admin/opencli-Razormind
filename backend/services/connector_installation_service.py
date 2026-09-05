@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import secrets
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException, status
@@ -32,6 +33,46 @@ from backend.security.workspace_rbac import (
     get_workspace_access,
     require_permission,
 )
+
+
+class ConnectorCredentialUnavailableError(RuntimeError):
+    """Stored connector verification material cannot be used safely."""
+
+
+@dataclass(frozen=True)
+class ConnectorInstallationCredentials:
+    app_secret: str
+    encrypt_key: str
+    verification_token: str
+
+
+def read_installation_credentials(
+    row: ConnectorInstallation,
+) -> ConnectorInstallationCredentials:
+    """Decrypt all required credentials as one fail-closed boundary."""
+
+    if not all(
+        (row._app_secret_encrypted, row._encrypt_key_encrypted, row._verification_token_encrypted)
+    ):
+        raise ConnectorCredentialUnavailableError("credential_unavailable")
+    try:
+        credentials = ConnectorInstallationCredentials(
+            app_secret=row.app_secret,
+            encrypt_key=row.encrypt_key,
+            verification_token=row.verification_token,
+        )
+    except (CredentialCryptoError, UnicodeError) as exc:
+        raise ConnectorCredentialUnavailableError("credential_unavailable") from exc
+    if not all(
+        value.strip()
+        for value in (
+            credentials.app_secret,
+            credentials.encrypt_key,
+            credentials.verification_token,
+        )
+    ):
+        raise ConnectorCredentialUnavailableError("credential_unavailable")
+    return credentials
 
 
 def read_installation(row: ConnectorInstallation) -> ConnectorInstallationRead:
@@ -146,14 +187,11 @@ async def installation_health(
     access = await get_workspace_access(db, workspace_id, identity)
     require_permission(access, WorkspacePermission.READ)
     row = await _installation(db, workspace_id, public_id)
-    credentials_ready = all(
-        (row._app_secret_encrypted, row._encrypt_key_encrypted, row._verification_token_encrypted)
-    )
-    if credentials_ready:
-        try:
-            credentials_ready = all((row.app_secret, row.encrypt_key, row.verification_token))
-        except CredentialCryptoError:
-            credentials_ready = False
+    try:
+        read_installation_credentials(row)
+        credentials_ready = True
+    except ConnectorCredentialUnavailableError:
+        credentials_ready = False
     callback_ready = row.status == "active" and credentials_ready
     return ConnectorInstallationHealth(
         installation_public_id=row.public_id,
@@ -162,6 +200,34 @@ async def installation_health(
         binding_ready=callback_ready,
         last_ready_at=row.last_ready_at,
         last_error_code=(row.last_error_code if credentials_ready else "credential_unavailable"),
+    )
+
+
+async def get_my_binding(
+    db: AsyncSession,
+    workspace_id: str,
+    installation_public_id: str,
+    identity: RequestIdentity,
+) -> ConnectorBindingRead | None:
+    access = await get_workspace_access(db, workspace_id, identity)
+    require_permission(access, WorkspacePermission.READ)
+    installation = await _installation(db, workspace_id, installation_public_id)
+    row = await db.scalar(
+        select(ConnectorPrincipalBinding).where(
+            ConnectorPrincipalBinding.installation_id == installation.id,
+            ConnectorPrincipalBinding.workspace_id == workspace_id,
+            ConnectorPrincipalBinding.user_id == access.user_id,
+        )
+    )
+    if row is None:
+        return None
+    return ConnectorBindingRead(
+        binding_public_id=row.public_id,
+        installation_public_id=installation.public_id,
+        user_id=row.user_id,
+        active=row.active,
+        revoked_at=row.revoked_at,
+        updated_at=row.updated_at,
     )
 
 
