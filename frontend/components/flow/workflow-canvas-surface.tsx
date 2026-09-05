@@ -134,7 +134,7 @@ type WorkflowCanvasSurfaceProps = {
   primitiveMenuGroups: PrimitiveMenuGroup[]
   projectSettingsOpen: boolean
   runTraceOpen: boolean
-  runRequestId: number
+  runRequestId?: number
   scissorTrail: CanvasPoint[]
   setNodeManagementOpen: (open: boolean) => void
   settings: CanvasSettings

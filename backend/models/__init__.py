@@ -27,6 +27,7 @@ from backend.models.browser import (
     BrowserRuntimeBundle,
     BrowserRuntimeDeployment,
 )
+from backend.models.browser_account import BrowserAccount
 from backend.models.browser_space import (
     BrowserSpace,
     BrowserSpaceEvent,
@@ -167,6 +168,7 @@ __all__ = [
     "AgentConversationTurn",
     "AgentConversationTurnStatus",
     "Automation",
+    "BrowserAccount",
     "BrowserBinding",
     "BrowserCapabilityInvocation",
     "BrowserInstance",

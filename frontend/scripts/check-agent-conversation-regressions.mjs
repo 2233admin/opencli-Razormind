@@ -10,7 +10,7 @@ const apiPromise = read('lib/api/agent-conversations.ts')
 test('Dock reload recovery uses the selected Workspace session pointer and replays turns', async () => {
   const source = await sourcePromise
   const api = await apiPromise
-  assert.match(source, /listAgentConversations\(workspaceId\)/)
+  assert.match(source, /listAgentConversations\(workspaceId, 20, hasScopedResultContext/)
   assert.match(source, /getAgentConversation\(sessionId\)/)
   assert.match(source, /opencli:agent-session:\$\{workspaceId\}/)
   assert.match(source, /restoreConversation\(detail\)/)
@@ -43,4 +43,18 @@ test('Dock restores proposal turns and preserves Agent Control confirmation', as
   assert.match(source, /setProposal\(restored\.proposal\)/)
   assert.match(source, /apiClient\.post\('\/chat\/confirm', \{ proposal \}\)/)
   assert.match(source, /待确认操作/)
+})
+
+test('Dock bridges only a trusted, scoped Studio workspace into durable sessions', async () => {
+  const source = await sourcePromise
+  const api = await apiPromise
+  assert.match(source, /useAuth\(\)/)
+  assert.match(source, /isTrustedStudioContext/)
+  assert.match(source, /identity\?\.auth_method === 'local'/)
+  assert.match(source, /identity\?\.auth_method === 'bootstrap'/)
+  assert.match(source, /identity\?\.is_platform_admin/)
+  assert.match(source, /detail\.context_binding\.studio_workspace_id === workspaceId/)
+  assert.match(source, /detail\.workspace_id === workspaceId && !detail\.context_binding\.studio_workspace_id/)
+  assert.match(api, /readonly studio_workspace_id\?: string \| null/)
+  assert.match(api, /AgentConversationRequestContext/)
 })

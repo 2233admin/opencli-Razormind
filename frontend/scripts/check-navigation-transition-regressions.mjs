@@ -4,16 +4,16 @@ import { test } from 'node:test'
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8')
 
-test('Next View Transition integration is enabled and stays locally opt-in', async () => {
-  const [config, localTransition, shell, routeTransition] = await Promise.all([
+test('persistent chrome cannot start native root snapshots alongside SSGOI', async () => {
+  const [config, themeToggle, shell, routeTransition] = await Promise.all([
     read('next.config.mjs'),
-    read('components/motion/local-view-transition.tsx'),
+    read('components/shell/theme-toggle.tsx'),
     read('components/shell/app-shell.tsx'),
     read('components/motion/app-route-transition.tsx'),
   ])
 
   assert.doesNotMatch(config, /viewTransition/)
-  assert.match(localTransition, /<ViewTransition name=\{name\}>/)
+  assert.doesNotMatch(themeToggle, /ViewTransition|startTransition/)
   assert.doesNotMatch(shell, /<ViewTransition\b/)
   assert.doesNotMatch(routeTransition, /<ViewTransition\b/)
 })
@@ -151,19 +151,35 @@ test('studio keeps Agent conversation global while management has its own entry'
   assert.match(agentDock, /仅在后端能解析出唯一授权范围时允许确认写操作/)
   assert.match(agentDock, /\/chat\/confirm/)
   assert.match(agentDock, /queryClient\.invalidateQueries/)
-  assert.match(transition, /'\/operations-agents'/)
+  assert.match(transition, /on: '\/\*\*'/)
 })
 
-test('SSGOI boundary is pathname-keyed, interruptible, and reduced-motion safe', async () => {
+test('SSGOI boundary is pathname-keyed and every app path shares one history-driven rule', async () => {
   const transition = await read('components/motion/app-route-transition.tsx')
 
   assert.match(transition, /const pathname = usePathname\(\)/)
   assert.match(transition, /key=\{transitionKey\}/)
   assert.match(transition, /data-ssgoi-transition=\{transitionKey\}/)
-  assert.match(transition, /const transitionKey = pathname === '\/inbox' \? '\/inbox' : pathname/)
+  assert.match(transition, /const transitionKey = pathname\s/)
   assert.match(transition, /className="[^"]*h-full[^"]*min-h-full[^"]*"/)
-  assert.match(transition, /ordered: APP_ROUTES, transition: axis\(\{ type: 'x', variant: 'snappy' \}\)/)
-  assert.match(transition, /prefersReducedMotion \? STATIC_CONFIG : MOTION_CONFIG/)
+  assert.match(transition, /on: '\/\*\*'/)
+  assert.match(transition, /transition: createRouteTransition\(/)
+  assert.doesNotMatch(transition, /ordered:|\baxis\(/)
+  assert.doesNotMatch(transition, /\bdrill\(/)
+  assert.match(transition, /<Ssgoi config=\{config\}>/)
+  assert.match(transition, /const \[config\] = useState<SsgoiConfig>/)
+  assert.doesNotMatch(transition, /STATIC_CONFIG|useReducedMotion/)
+})
+
+test('navigation indicators do not introduce separate layout springs or ripple clocks', async () => {
+  const [sidebar, tabs] = await Promise.all([
+    read('components/shell/app-sidebar.tsx'),
+    read('components/shell/route-tabs.tsx'),
+  ])
+
+  for (const component of [sidebar, tabs]) {
+    assert.doesNotMatch(component, /layoutId|stiffness|damping|<Ripple/)
+  }
 })
 
 test('route-level loading, pixel indicators, and recovery boundaries remain available', async () => {
@@ -181,6 +197,12 @@ test('route-level loading, pixel indicators, and recovery boundaries remain avai
   assert.match(matrix, /export const loader:/)
   assert.match(dataStates, /frames=\{loader\}/)
   assert.match(dataStates, /size=\{5\}/)
+  assert.match(dataStates, /animate-none/)
+  assert.match(matrix, /React\.useId\(\)\.replaceAll\(":", ""\)/)
+  assert.match(matrix, /id=\{pixelOnId\}/)
+  assert.match(matrix, /id=\{pixelOffId\}/)
+  assert.match(matrix, /id=\{glowId\}/)
+  assert.doesNotMatch(matrix, /id="matrix-(?:pixel|glow)/)
   assert.match(authGate, /frames=\{loader\}/)
   assert.match(workflowSession, /ariaLabel="正在加载工作流"/)
 })

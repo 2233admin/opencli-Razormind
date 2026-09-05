@@ -84,6 +84,11 @@ export function useWorkflowKeyboardShortcuts({
         setPaletteOpen((open) => !open)
         return
       }
+      if (mod && key === "s") {
+        event.preventDefault()
+        save()
+        return
+      }
       if (isEditableTarget(event.target)) return
 
       if (!mod && (event.key === "Tab" || key === "b")) {
@@ -92,11 +97,7 @@ export function useWorkflowKeyboardShortcuts({
         return
       }
 
-      if (mod && key === "s") {
-        event.preventDefault()
-        save()
-        showToast("已保存到本地")
-      } else if (mod && key === "z" && !event.shiftKey) {
+      if (mod && key === "z" && !event.shiftKey) {
         event.preventDefault()
         undo()
       } else if (mod && (key === "y" || (key === "z" && event.shiftKey))) {

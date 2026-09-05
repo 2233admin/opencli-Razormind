@@ -128,9 +128,26 @@ focus ring 统一 `#4f9bff`（primary-400, 已在 `:focus-visible` 全局定义�
 - 物理反馈 token: `--motion-duration-press` 70ms、`--motion-duration-response` 180ms、`--motion-duration-spatial` 320ms，以及 `--motion-ease-force-in/spatial/settle`。
 - Button / Card / Switch / Toggle / Tabs / Slider 必须消费上述共享 token；页面内不得另建平行动效曲线。
 - SSGOI 只控制 `AppShell` 内的 routed content；Sidebar、Header、Command Palette 必须保持边界外并持续挂载。
-- Next/React View Transition 只用于 SSGOI 边界外的显式局部共享元素；同一 DOM 不得被两套系统共同控制。可用 `NEXT_PUBLIC_ENABLE_VIEW_TRANSITIONS=false` 构建级关闭。
+- 同一 DOM 不得被两套系统共同控制。持久 AppShell（包括主题按钮）不得挂载 React ViewTransition：局部边界也可能在路由更新时触发原生 root 快照，与 SSGOI 整页动画叠加。
 - App Router 的 `loading.tsx` / `error.tsx` 是体验基础层的一部分，导航等待期间 Shell 保持可交互，错误态必须提供恢复动作。
 - Reduced Motion 下所有 transition/animation 收敛为 0.01ms、单次执行，并关闭平滑滚动。
+
+### 6.2 页面与操作连续性（2026-09-05）
+
+- 页面过渡按 pathname 识别，所有应用路由只使用一条 SSGOI 规则；页面进入使用 8px 位移与淡入，退出原位淡出。时长与曲线读取 §6.1 的 spatial token（320ms），不使用库预设的隐式弹簧时长。
+- 点击导航按前进方向进入，浏览器后退按反方向进入；方向不取决于侧栏顺序。筛选和 query 页签原位更新，不重挂整页；加载态变为内容时不再次入场。
+- 侧栏与页签的选中反馈使用共享 response token（180ms）做颜色变化，标记保持在目标项内，不跨导航分组滑动。Reduced Motion 下页面静态切换，控件遵循全局减弱动态规则。
+- 一个共享加载区只有一个持续动画主体；骨架静态展示，SVG 渐变和滤镜使用实例唯一 ID。
+- 面包屑显示真实页面并链接上级；项目标签只在工作区、项目与工作流一致时保留运行上下文。
+- 保存、验证、发布状态在正常布局中可见，不覆盖画布；打开运行输入面板不自动提交任务。
+
+### 6.3 SmoothUI 操作反馈（2026-09-05）
+
+- SmoothUI 按源码组件接入 `components/smoothui/`，保留来源与 MIT 许可；继续使用应用的 Base UI 按钮、颜色与动效 token，不导入另一套品牌 token。
+- 异步按钮只在真实 Promise 完成后显示成功。失败保留可重试状态；查询 refetch 还必须检查结果中的错误标志，不能把 resolve 直接视为成功。
+- 状态切换只影响按钮内容，反馈读取 response token。按钮宽度、焦点和名称保持明确，复制状态保留被复制对象名称；运行中改变 Reduced Motion 立即生效。
+- API/MCP 页面保留 `ButtonCopy` 复制组件；复制地址等图标入口使用完整的可访问名称，复制失败保留重试反馈，不把凭证或秘密写入界面。
+- **任务与通知采用 Linear + SmoothUI**：保持 Linear 双栏信息架构、紧凑工具栏与普通计数；SmoothUI 用于现有局部审批与反馈。组件库接入应服从该页面结构与信息密度。
 
 ## 7. 皮肤（skins）
 

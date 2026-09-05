@@ -26,6 +26,27 @@ from uuid import uuid4
 logger = logging.getLogger(__name__)
 
 
+async def _account_reservations(pool) -> set[str]:
+    if not getattr(pool, "enforce_account_reservations", False):
+        return set()
+    from sqlalchemy import select
+
+    from backend.database import AsyncSessionLocal
+    from backend.models.browser import BrowserInstance
+    from backend.models.browser_account import BrowserAccount
+
+    # Read durable ownership on each allocation, including in Celery workers.
+    # A failed lookup must fail closed instead of handing out a login Profile.
+    async with AsyncSessionLocal() as db:
+        return set(
+            await db.scalars(
+                select(BrowserInstance.endpoint).outerjoin(
+                    BrowserAccount, BrowserAccount.browser_instance_id == BrowserInstance.id
+                ).where(BrowserAccount.id.is_not(None) | BrowserInstance.login_reserved.is_(True))
+            )
+        )
+
+
 class NoCleanProfileError(RuntimeError):
     """No explicitly anonymous browser profile is available for acquisition."""
 
@@ -95,6 +116,8 @@ class LocalBrowserPool:
         *,
         required_profile_kind: str | None = None,
     ) -> AsyncIterator[str]:
+        if endpoint in await _account_reservations(self):
+            raise NoReadyBrowserSlotError()
         if required_profile_kind and (
             endpoint is None
             or endpoint not in self._slots
@@ -123,6 +146,8 @@ class LocalBrowserPool:
         profile_lock = self._profile_locks.setdefault(self.get_profile_name(ep), asyncio.Lock())
         await profile_lock.acquire()
         try:
+            if ep in await _account_reservations(self):
+                raise NoReadyBrowserSlotError()
             yield ep
         finally:
             profile_lock.release()
@@ -157,7 +182,10 @@ class LocalBrowserPool:
 
     async def _acquire_any(self) -> str:
         """Wait for whichever READY endpoint slot becomes free first."""
-        ready_slots = {ep: slot for ep, slot in self._slots.items() if self.is_ready(ep)}
+        reserved = await _account_reservations(self)
+        ready_slots = {
+            ep: slot for ep, slot in self._slots.items() if self.is_ready(ep) and ep not in reserved
+        }
         if not ready_slots:
             raise NoReadyBrowserSlotError()
         tasks: dict[asyncio.Task[str], str] = {
@@ -406,10 +434,11 @@ class RedisBrowserPool:
             raise NoCleanProfileError()
         if endpoint is not None and not self.is_ready(endpoint):
             raise NoReadyBrowserSlotError()
+        reserved = await _account_reservations(self)
         candidates = [
             candidate
             for candidate in ([endpoint] if endpoint else list(self._endpoints))
-            if candidate is not None and self.is_ready(candidate)
+            if candidate is not None and self.is_ready(candidate) and candidate not in reserved
         ]
         if not candidates:
             raise NoReadyBrowserSlotError()
@@ -463,6 +492,8 @@ class RedisBrowserPool:
         renewal_task = asyncio.create_task(renew())
 
         try:
+            if ep in await _account_reservations(self):
+                raise NoReadyBrowserSlotError()
             yield ep
         finally:
             stop_renewal.set()
@@ -552,6 +583,7 @@ def init_pool(
         _pool = RedisBrowserPool(endpoints, redis_url)
     else:
         _pool = LocalBrowserPool(endpoints)
+    _pool.enforce_account_reservations = True
     return _pool
 
 

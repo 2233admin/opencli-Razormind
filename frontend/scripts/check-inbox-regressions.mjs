@@ -7,6 +7,7 @@ const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8')
 test('inbox combines existing operational signals with server-backed human approvals', async () => {
   const page = await read('app/(app)/inbox/page.tsx')
   const approvalDetail = await read('components/inbox/queue-detail.tsx')
+  const conversationThread = await read('components/inbox/inbox-conversation-thread.tsx')
   const hooks = await read('lib/api/hooks.ts')
   const endpoints = await read('lib/api/endpoints.ts')
 
@@ -23,6 +24,15 @@ test('inbox combines existing operational signals with server-backed human appro
   )
   assert.match(page, /useOperationsInbox\(workspaceId, 'open'/)
   assert.match(approvalDetail, /ApprovalQueueDetail/)
+  assert.match(page, /type: 'change_proposal', status: 'open'/)
+  assert.match(page, /proposalToQueueItem/)
+  assert.match(approvalDetail, /ProposalQueueDetail/)
+  assert.match(approvalDetail, /请在原 Agent 会话中确认或调整此提案/)
+  assert.doesNotMatch(approvalDetail, /decideOperationsApproval[\s\S]*ProposalQueueDetail/)
+  assert.match(approvalDetail, /InboxConversationThread/)
+  assert.match(conversationThread, /send\.mutateAsync/)
+  assert.match(conversationThread, /context,/)
+  assert.match(conversationThread, /InboxConversationUnavailable/)
 })
 
 test('inbox uses a Linear-style queue while preserving destinations for underlying records', async () => {
@@ -50,6 +60,7 @@ test('inbox uses a Linear-style queue while preserving destinations for underlyi
   assert.match(page, /href: '\/inbox\?tab=notifications'/)
   assert.match(page, /href: '\/inbox\?tab=controls'/)
   assert.match(detail, /href=\{`\/sources\/\$\{item\.sourceId\}`\}/)
+  assert.match(page, /项目动态/)
 })
 
 test('inbox preserves queue state and progressively loads hundreds-scale signal sets', async () => {

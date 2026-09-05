@@ -241,7 +241,7 @@ test('plugin center is workspace-scoped, registry-backed, and never executes plu
 
   assert.match(catalog, /pluginPath\(workspaceId\)/)
   assert.match(catalog, /\/api\/v1\/workspaces\/\$\{encodeURIComponent\(workspaceId\)\}\/plugins/)
-  assert.match(catalog, /Authorization/)
+  assert.match(catalog, /getApiAuthHeaders\(\)/)
   assert.match(catalog, /updatePluginInstallation/)
   assert.match(page, /PluginSubtypeTabs/)
   assert.match(page, /TemplateCatalog workspaceId=\{workspaceId\}/)

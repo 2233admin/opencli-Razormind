@@ -2,11 +2,12 @@
 
 import Link from 'next/link'
 import { Bot, LogOut, Search, Settings } from 'lucide-react'
-import { usePathname, useRouter } from 'next/navigation'
-import { Fragment } from 'react'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
+import { Fragment, Suspense } from 'react'
 
 import { useAuth } from '@/components/auth/auth-provider'
 import { ROUTE_LABELS } from '@/lib/navigation'
+import { navigationBreadcrumbs } from '@/lib/navigation-breadcrumbs'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import {
@@ -31,12 +32,29 @@ import { Separator } from '@/components/ui/separator'
 import { SidebarTrigger } from '@/components/ui/sidebar'
 import { ThemeToggle } from '@/components/shell/theme-toggle'
 
-function resolveLabels(pathname: string): string[] {
-  if (pathname.startsWith('/studio/projects/')) return ['项目', '项目概览']
-  if (pathname.startsWith('/studio/workflow')) return ['项目', '工作流编排']
-  if (ROUTE_LABELS[pathname]) return [ROUTE_LABELS[pathname]]
-  const match = Object.keys(ROUTE_LABELS).find((href) => pathname.startsWith(`${href}/`))
-  return match ? [ROUTE_LABELS[match]] : []
+function HeaderBreadcrumbs() {
+  const pathname = usePathname()
+  const params = useSearchParams()
+  const crumbs = navigationBreadcrumbs(pathname, new URLSearchParams(params.toString()), ROUTE_LABELS)
+
+  return (
+    <Breadcrumb className="min-w-0 flex-1 overflow-hidden">
+      <BreadcrumbList className="flex-nowrap overflow-x-auto whitespace-nowrap">
+        {crumbs.map((crumb, index) => (
+          <Fragment key={`${crumb.label}-${index}`}>
+            {index > 0 ? <BreadcrumbSeparator /> : null}
+            <BreadcrumbItem className="shrink-0">
+              {crumb.href ? (
+                <BreadcrumbLink render={<Link href={crumb.href} />}>{crumb.label}</BreadcrumbLink>
+              ) : (
+                <BreadcrumbPage>{crumb.label}</BreadcrumbPage>
+              )}
+            </BreadcrumbItem>
+          </Fragment>
+        ))}
+      </BreadcrumbList>
+    </Breadcrumb>
+  )
 }
 export function AppHeader({
   onOpenAgent,
@@ -45,10 +63,8 @@ export function AppHeader({
   onOpenAgent?: () => void
   onOpenCommand?: () => void
 }) {
-  const pathname = usePathname()
   const router = useRouter()
   const { identity, signOut } = useAuth()
-  const labels = resolveLabels(pathname)
   const displayName =
     identity?.name || identity?.username || identity?.email || identity?.subject || 'User'
   const accountLabel =
@@ -70,21 +86,9 @@ export function AppHeader({
     <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-2 border-b bg-background/95 px-3 backdrop-blur supports-[backdrop-filter]:bg-background/80">
       <SidebarTrigger />
       <Separator orientation="vertical" className="mr-1 h-5" />
-      <Breadcrumb>
-        <BreadcrumbList>
-          <BreadcrumbItem>
-            <BreadcrumbLink render={<Link href="/dashboard" />}>主页</BreadcrumbLink>
-          </BreadcrumbItem>
-          {labels.map((label) => (
-            <Fragment key={label}>
-              <BreadcrumbSeparator />
-              <BreadcrumbItem>
-                <BreadcrumbPage>{label}</BreadcrumbPage>
-              </BreadcrumbItem>
-            </Fragment>
-          ))}
-        </BreadcrumbList>
-      </Breadcrumb>
+      <Suspense fallback={<span className="flex-1 text-sm text-muted-foreground">概览</span>}>
+        <HeaderBreadcrumbs />
+      </Suspense>
 
       <div className="ml-auto flex items-center gap-1.5">
         <Button

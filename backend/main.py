@@ -57,6 +57,7 @@ def _read_chrome_endpoints() -> list[str]:
     import os
 
     candidates = [
+        *([os.environ["ENV_FILE_PATH"]] if os.environ.get("ENV_FILE_PATH") else []),
         "/app/.env",
         os.path.join(os.path.dirname(__file__), "..", ".env"),
     ]

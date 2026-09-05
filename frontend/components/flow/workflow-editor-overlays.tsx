@@ -95,7 +95,7 @@ export function WorkflowFloatingPanels({
   onProfileChange: (profile: WorkflowProfile) => void
   projectSettingsOpen: boolean
   runTraceOpen: boolean
-  runRequestId: number
+  runRequestId?: number
   settingsOpen: boolean
   workflowProfile: WorkflowProfile
   runPanelExtensions?: readonly RunPanelExtension[]

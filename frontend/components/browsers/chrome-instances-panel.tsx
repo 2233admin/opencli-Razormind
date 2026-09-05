@@ -17,7 +17,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 const MODE_LABEL: Record<string, string> = { bridge: "Bridge", cdp: "CDP" };
 const PROFILE_KIND_LABEL: Record<string, string> = {
   anonymous: "匿名",
-  authenticated: "已登录",
+  authenticated: "持久化登录环境",
 };
 
 /**
@@ -97,7 +97,7 @@ export function ChromeInstancesPanel() {
                 <TableHead>地址</TableHead>
                 <TableHead>模式</TableHead>
                 <TableHead>Agent 路由</TableHead>
-                <TableHead>登录态</TableHead>
+                <TableHead>Profile 类型</TableHead>
                 <TableHead>运行时</TableHead>
                 <TableHead>可用</TableHead>
                 <TableHead>容器状态</TableHead>

@@ -16,7 +16,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from backend.api.v1 import chat
-from backend.control.agent_control import agent_control_service
+from backend.control.agent_control import agent_control_service  # noqa: F401
 from backend.llm.base import LlmAdapterError
 from backend.llm.resolver import ResolverError
 from backend.models.agent_conversation import (
@@ -25,14 +25,22 @@ from backend.models.agent_conversation import (
     AgentConversationTurn,
     AgentConversationTurnStatus,
 )
+from backend.models.identity import Workspace as GovernedWorkspace
 from backend.models.source_binding import Source, SourceBinding
-from backend.models.workflow import Project, Workflow
+from backend.models.studio import StudioProject, StudioWorkflow
+from backend.models.workflow import Project as GovernedProject
+from backend.models.workflow import Workflow as GovernedWorkflow
 from backend.models.workflow_run import WorkflowRun
 from backend.security.identity import RequestIdentity
 from backend.security.workspace_rbac import (
     WorkspacePermission,
-    get_workspace_access,
     require_permission,
+)
+from backend.services.studio_agent_session_access import (
+    AgentSessionWorkspaceScope,
+    resolve_agent_session_workspace,
+    resolve_stored_agent_session_workspace,
+    session_matches_studio_context,
 )
 
 MAX_USER_CONTENT = 20_000
@@ -40,6 +48,7 @@ MAX_HISTORY_TURNS = 20
 MAX_HISTORY_CHARS = 32_000
 MAX_ERROR_MESSAGE = 4_000
 _ALLOWED_CONTEXT_KEYS = frozenset({"project_id", "workflow_id", "run_id", "source_id", "surface"})
+_STORED_CONTEXT_KEYS = _ALLOWED_CONTEXT_KEYS | {"studio_workspace_id"}
 _SECRET_PATTERN = re.compile(
     r"(?ix)(?:"
     r"(?:api[_ -]?key|access[_ -]?token|authorization|password|secret|credential|"
@@ -54,13 +63,22 @@ class AgentConversationError(ValueError):
     """Stable client-facing validation failure before a turn is written."""
 
 
-async def resolve_workspace(
-    db: AsyncSession, identity: RequestIdentity, workspace_id: str | None
-) -> str:
-    """Use Agent Control's existing Workspace resolution and auth boundary."""
+async def _resolve_workspace_scope(
+    db: AsyncSession,
+    identity: RequestIdentity,
+    workspace_id: str | None,
+    *,
+    context: dict[str, Any] | None,
+) -> AgentSessionWorkspaceScope:
+    """Keep the legacy ambiguous-membership response stable at this API edge."""
 
     try:
-        return await agent_control_service.resolve_workspace_id(db, identity, workspace_id)
+        return await resolve_agent_session_workspace(
+            db,
+            identity,
+            workspace_id,
+            context=context,
+        )
     except HTTPException as exc:
         if exc.status_code == status.HTTP_400_BAD_REQUEST:
             raise HTTPException(
@@ -74,13 +92,17 @@ async def validate_context_binding(
     db: AsyncSession,
     workspace_id: str,
     context: dict[str, Any] | None,
+    *,
+    studio_workspace_id: str | None = None,
+    allow_stored_studio_workspace: bool = False,
 ) -> dict[str, str]:
     """Validate object ownership and return an immutable, bounded snapshot."""
 
     context = context or {}
     if not isinstance(context, dict):
         raise AgentConversationError("context must be an object")
-    unknown = set(context) - _ALLOWED_CONTEXT_KEYS
+    allowed_keys = _STORED_CONTEXT_KEYS if allow_stored_studio_workspace else _ALLOWED_CONTEXT_KEYS
+    unknown = set(context) - allowed_keys
     if unknown:
         raise AgentConversationError("context contains unsupported fields")
 
@@ -98,22 +120,68 @@ async def validate_context_binding(
     workflow_id = normalized.get("workflow_id")
     run_id = normalized.get("run_id")
     source_id = normalized.get("source_id")
+    stored_studio_workspace_id = context.get("studio_workspace_id")
+    if allow_stored_studio_workspace and stored_studio_workspace_id is not None:
+        if not isinstance(stored_studio_workspace_id, str) or not stored_studio_workspace_id:
+            raise AgentConversationError("context.studio_workspace_id must be a non-empty string")
+        if studio_workspace_id is not None and stored_studio_workspace_id != studio_workspace_id:
+            raise AgentConversationError("Studio Workspace context cannot change")
+        studio_workspace_id = stored_studio_workspace_id
+    if studio_workspace_id is not None and not (project_id or workflow_id or run_id):
+        raise AgentConversationError(
+            "Studio Agent sessions require project, workflow, or run context"
+        )
 
-    project: Project | None = None
+    studio_workspace_mapped = studio_workspace_id is not None
+    if project_id or workflow_id or run_id:
+        studio_workspace_mapped = studio_workspace_mapped or (
+            await db.scalar(
+                select(GovernedWorkspace.id).where(
+                    GovernedWorkspace.id == workspace_id,
+                    GovernedWorkspace.active.is_(True),
+                )
+            )
+            is not None
+        )
+
+    project: GovernedProject | StudioProject | None = None
+    studio_scope_id = studio_workspace_id or workspace_id
     if project_id:
         project = await db.scalar(
-            select(Project).where(Project.id == project_id, Project.workspace_id == workspace_id)
+            select(GovernedProject).where(
+                GovernedProject.id == project_id,
+                GovernedProject.workspace_id == workspace_id,
+            )
         )
+        if project is None and studio_workspace_mapped:
+            project = await db.scalar(
+                select(StudioProject).where(
+                    StudioProject.id == project_id,
+                    StudioProject.workspace_id == studio_scope_id,
+                )
+            )
         if project is None:
             raise AgentConversationError("project is not owned by the Workspace")
 
-    workflow: Workflow | None = None
+    workflow: GovernedWorkflow | StudioWorkflow | None = None
     if workflow_id:
         workflow = await db.scalar(
-            select(Workflow)
-            .join(Project, Project.id == Workflow.project_id)
-            .where(Workflow.id == workflow_id, Project.workspace_id == workspace_id)
+            select(GovernedWorkflow)
+            .join(GovernedProject, GovernedProject.id == GovernedWorkflow.project_id)
+            .where(
+                GovernedWorkflow.id == workflow_id,
+                GovernedProject.workspace_id == workspace_id,
+            )
         )
+        if workflow is None and studio_workspace_mapped:
+            workflow = await db.scalar(
+                select(StudioWorkflow)
+                .join(StudioProject, StudioProject.id == StudioWorkflow.project_id)
+                .where(
+                    StudioWorkflow.id == workflow_id,
+                    StudioProject.workspace_id == studio_scope_id,
+                )
+            )
         if workflow is None:
             raise AgentConversationError("workflow is not owned by the Workspace")
         if project_id and workflow.project_id != project_id:
@@ -127,18 +195,34 @@ async def validate_context_binding(
             raise AgentConversationError("run does not belong to workflow")
         if workflow is None:
             workflow = await db.scalar(
-                select(Workflow)
-                .join(Project, Project.id == Workflow.project_id)
-                .where(Workflow.id == run.workflow_id, Project.workspace_id == workspace_id)
+                select(GovernedWorkflow)
+                .join(GovernedProject, GovernedProject.id == GovernedWorkflow.project_id)
+                .where(
+                    GovernedWorkflow.id == run.workflow_id,
+                    GovernedProject.workspace_id == workspace_id,
+                )
             )
+            if workflow is None and studio_workspace_mapped:
+                workflow = await db.scalar(
+                    select(StudioWorkflow)
+                    .join(StudioProject, StudioProject.id == StudioWorkflow.project_id)
+                    .where(
+                        StudioWorkflow.id == run.workflow_id,
+                        StudioProject.workspace_id == studio_scope_id,
+                    )
+                )
             if workflow is None:
                 raise AgentConversationError("run is not owned by the Workspace")
         if project is None:
-            project = await db.get(Project, workflow.project_id)
-        if project is None or project.workspace_id != workspace_id:
+            project = await db.get(GovernedProject, workflow.project_id)
+            if project is None and studio_workspace_mapped:
+                project = await db.get(StudioProject, workflow.project_id)
+        if project is None or project.workspace_id != studio_scope_id:
             raise AgentConversationError("run is not owned by the Workspace")
 
     if source_id:
+        if studio_workspace_id is not None:
+            raise AgentConversationError("source is not available in a Studio Agent session")
         source = await db.scalar(
             select(Source).where(Source.id == source_id, Source.workspace_id == workspace_id)
         )
@@ -148,12 +232,17 @@ async def validate_context_binding(
             source = await db.scalar(
                 select(Source)
                 .join(SourceBinding, SourceBinding.source_id == Source.id)
-                .join(Project, Project.id == SourceBinding.project_id)
-                .where(Source.id == source_id, Project.workspace_id == workspace_id)
+                .join(GovernedProject, GovernedProject.id == SourceBinding.project_id)
+                .where(
+                    Source.id == source_id,
+                    GovernedProject.workspace_id == workspace_id,
+                )
             )
         if source is None:
             raise AgentConversationError("source is not owned by the Workspace")
 
+    if studio_workspace_id is not None:
+        normalized["studio_workspace_id"] = studio_workspace_id
     return dict(normalized)
 
 
@@ -190,6 +279,24 @@ def _redact_json(value: Any, *, key: str = "") -> Any:
     if isinstance(value, str):
         return _redact_error(value)
     return value
+
+
+def _ensure_studio_context_continuity(
+    previous: dict[str, Any] | None,
+    next_binding: dict[str, str],
+) -> None:
+    """A Studio session may refine its context, but never switch its target."""
+
+    for key in ("project_id", "workflow_id", "run_id"):
+        previous_value = (previous or {}).get(key)
+        next_value = next_binding.get(key)
+        if previous_value is not None and previous_value != next_value:
+            raise AgentConversationError("Studio Agent session context cannot switch projects")
+
+
+def _is_studio_session(conversation: AgentConversation) -> bool:
+    binding = conversation.context_binding
+    return isinstance(binding, dict) and bool(binding.get("studio_workspace_id"))
 
 
 def _assistant_history(response: dict[str, Any] | None) -> str:
@@ -251,20 +358,24 @@ async def create_conversation(
     title: str | None,
     context: dict[str, Any] | None,
 ) -> AgentConversation:
-    workspace_id = await resolve_workspace(db, identity, workspace_id)
-    access = await get_workspace_access(db, workspace_id, identity)
-    require_permission(access, WorkspacePermission.READ)
+    scope = await _resolve_workspace_scope(db, identity, workspace_id, context=context)
+    require_permission(scope.access, WorkspacePermission.READ)
     title_value = title.strip() if title else None
     try:
-        binding = await validate_context_binding(db, workspace_id, context)
+        binding = await validate_context_binding(
+            db,
+            scope.workspace_id,
+            context,
+            studio_workspace_id=scope.studio_workspace_id,
+        )
         if title_value:
             _reject_unsafe_content(title_value)
     except AgentConversationError as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
     conversation = AgentConversation(
-        workspace_id=workspace_id,
+        workspace_id=scope.workspace_id,
         title=title_value,
-        created_by_user_id=access.user_id,
+        created_by_user_id=scope.access.user_id,
         context_binding=binding,
         status=AgentConversationStatus.ACTIVE.value,
     )
@@ -280,17 +391,35 @@ async def list_conversations(
     *,
     workspace_id: str | None,
     limit: int,
+    context: dict[str, Any] | None = None,
 ) -> list[AgentConversation]:
-    workspace_id = await resolve_workspace(db, identity, workspace_id)
-    access = await get_workspace_access(db, workspace_id, identity)
-    require_permission(access, WorkspacePermission.READ)
+    scope = await _resolve_workspace_scope(db, identity, workspace_id, context=context)
+    require_permission(scope.access, WorkspacePermission.READ)
     rows = await db.scalars(
         select(AgentConversation)
-        .where(AgentConversation.workspace_id == workspace_id)
+        .where(AgentConversation.workspace_id == scope.workspace_id)
         .order_by(AgentConversation.updated_at.desc())
-        .limit(limit)
+        .limit(50 if scope.is_studio_bridge else limit)
     )
-    return list(rows)
+    conversations = list(rows)
+    if not scope.is_studio_bridge:
+        # Studio sessions share governed storage for the FK/RBAC boundary, but
+        # their project context must never leak into ordinary workspace lists.
+        return [
+            conversation
+            for conversation in conversations
+            if not _is_studio_session(conversation)
+        ]
+    assert scope.studio_workspace_id is not None
+    return [
+        row
+        for row in conversations
+        if session_matches_studio_context(
+            row.context_binding,
+            studio_workspace_id=scope.studio_workspace_id,
+            context=context or {},
+        )
+    ][:limit]
 
 
 async def get_conversation(
@@ -308,8 +437,23 @@ async def get_conversation(
     conversation = await db.scalar(statement)
     if conversation is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Agent conversation not found")
-    access = await get_workspace_access(db, conversation.workspace_id, identity)
-    require_permission(access, WorkspacePermission.READ)
+    scope = await resolve_stored_agent_session_workspace(
+        db,
+        identity,
+        workspace_id=conversation.workspace_id,
+        context_binding=conversation.context_binding,
+    )
+    require_permission(scope.access, WorkspacePermission.READ)
+    try:
+        await validate_context_binding(
+            db,
+            scope.workspace_id,
+            conversation.context_binding,
+            studio_workspace_id=scope.studio_workspace_id,
+            allow_stored_studio_workspace=True,
+        )
+    except AgentConversationError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
     turns = await db.scalars(
         select(AgentConversationTurn)
         .where(
@@ -415,8 +559,13 @@ async def send_message(
     )
     if conversation is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Agent conversation not found")
-    access = await get_workspace_access(db, conversation.workspace_id, identity)
-    require_permission(access, WorkspacePermission.READ)
+    scope = await resolve_stored_agent_session_workspace(
+        db,
+        identity,
+        workspace_id=conversation.workspace_id,
+        context_binding=conversation.context_binding,
+    )
+    require_permission(scope.access, WorkspacePermission.READ)
     existing = await db.scalar(
         select(AgentConversationTurn).where(
             AgentConversationTurn.conversation_id == conversation_id,
@@ -435,9 +584,13 @@ async def send_message(
     try:
         binding = await validate_context_binding(
             db,
-            conversation.workspace_id,
+            scope.workspace_id,
             context if context is not None else conversation.context_binding,
+            studio_workspace_id=scope.studio_workspace_id,
+            allow_stored_studio_workspace=context is None,
         )
+        if scope.is_studio_bridge:
+            _ensure_studio_context_continuity(conversation.context_binding, binding)
     except AgentConversationError as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
     history_rows = list(
@@ -475,7 +628,17 @@ async def send_message(
     model_db = await _model_session(db)
     try:
         runner = chat_runner or chat.run_chat_request
-        result = await runner(model_db, body, identity, tool_trace=trace)
+        result = await runner(
+            model_db,
+            body,
+            identity,
+            tool_trace=trace,
+            proposal_provenance=chat.ProposalProvenance(
+                conversation_id=conversation.id,
+                turn_id=turn.id,
+                context=binding,
+            ),
+        )
         reply = result.data if isinstance(result, chat.ApiResponse) else result
         if not isinstance(reply, chat.ChatReply):
             raise RuntimeError("chat runner returned an invalid reply")

@@ -4,12 +4,17 @@ import type { ApiResponse } from './types'
 export type AgentConversationStatus = 'active' | 'closed'
 export type AgentConversationTurnStatus = 'running' | 'completed' | 'proposal' | 'failed'
 
-export type AgentConversationContext = {
+export type AgentConversationRequestContext = {
   project_id?: string | null
   workflow_id?: string | null
   run_id?: string | null
   source_id?: string | null
   surface?: string | null
+}
+
+export type AgentConversationContext = AgentConversationRequestContext & {
+  /** Server-stamped marker for a durable session opened from Studio. */
+  readonly studio_workspace_id?: string | null
 }
 
 export type AgentConversationProposal = {
@@ -64,13 +69,19 @@ export type AgentConversationDetail = AgentConversation & {
 export type CreateAgentConversationInput = {
   workspace_id?: string | null
   title?: string | null
-  context: AgentConversationContext
+  context: AgentConversationRequestContext
 }
 
 export type SendAgentConversationMessageInput = {
   request_id: string
   content: string
-  context: AgentConversationContext
+  context: AgentConversationRequestContext
+}
+
+export type AgentConversationListFilters = {
+  project_id?: string | null
+  workflow_id?: string | null
+  run_id?: string | null
 }
 
 export type AgentConversationMessageResult = {
@@ -78,10 +89,20 @@ export type AgentConversationMessageResult = {
   turn: AgentConversationTurn
 }
 
-export const listAgentConversations = (workspaceId: string, limit = 20) =>
+export const listAgentConversations = (
+  workspaceId: string,
+  limit = 20,
+  filters?: AgentConversationListFilters,
+) =>
   apiClient
     .get<ApiResponse<AgentConversation[]>>('/chat/sessions', {
-      params: { workspace_id: workspaceId, limit },
+      params: {
+        workspace_id: workspaceId,
+        limit,
+        ...(filters?.project_id ? { project_id: filters.project_id } : {}),
+        ...(filters?.workflow_id ? { workflow_id: filters.workflow_id } : {}),
+        ...(filters?.run_id ? { run_id: filters.run_id } : {}),
+      },
     })
     .then((response) => response.data.data)
 

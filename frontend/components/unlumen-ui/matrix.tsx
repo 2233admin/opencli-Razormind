@@ -457,6 +457,10 @@ export const Matrix = React.forwardRef<HTMLDivElement, MatrixProps>(
     },
     ref,
   ) => {
+    const definitionId = React.useId().replaceAll(":", "");
+    const pixelOnId = `matrix-pixel-on-${definitionId}`;
+    const pixelOffId = `matrix-pixel-off-${definitionId}`;
+    const glowId = `matrix-glow-${definitionId}`;
     const { frameIndex } = useAnimation(frames, {
       fps,
       autoplay: autoplay && !pattern,
@@ -531,7 +535,7 @@ export const Matrix = React.forwardRef<HTMLDivElement, MatrixProps>(
           style={{ overflow: "visible" }}
         >
           <defs>
-            <radialGradient id="matrix-pixel-on" cx="50%" cy="50%" r="50%">
+            <radialGradient id={pixelOnId} cx="50%" cy="50%" r="50%">
               <stop offset="0%" stopColor="var(--matrix-on)" stopOpacity="1" />
               <stop
                 offset="70%"
@@ -545,7 +549,7 @@ export const Matrix = React.forwardRef<HTMLDivElement, MatrixProps>(
               />
             </radialGradient>
 
-            <radialGradient id="matrix-pixel-off" cx="50%" cy="50%" r="50%">
+            <radialGradient id={pixelOffId} cx="50%" cy="50%" r="50%">
               <stop
                 offset="0%"
                 stopColor="var(--muted-foreground)"
@@ -559,7 +563,7 @@ export const Matrix = React.forwardRef<HTMLDivElement, MatrixProps>(
             </radialGradient>
 
             <filter
-              id="matrix-glow"
+              id={glowId}
               x="-50%"
               y="-50%"
               width="200%"
@@ -577,9 +581,6 @@ export const Matrix = React.forwardRef<HTMLDivElement, MatrixProps>(
                 transform-origin: center;
                 transform-box: fill-box;
               }
-              .matrix-pixel-active {
-                filter: url(#matrix-glow);
-              }
             `}
           </style>
 
@@ -592,8 +593,8 @@ export const Matrix = React.forwardRef<HTMLDivElement, MatrixProps>(
               const isActive = opacity > 0.5;
               const isOn = opacity > 0.05;
               const fill = isOn
-                ? "url(#matrix-pixel-on)"
-                : "url(#matrix-pixel-off)";
+                ? `url(#${pixelOnId})`
+                : `url(#${pixelOffId})`;
 
               const scale = isActive ? 1.1 : 1;
               const radius = (size / 2) * 0.9;
@@ -603,7 +604,6 @@ export const Matrix = React.forwardRef<HTMLDivElement, MatrixProps>(
                   key={`${rowIndex}-${colIndex}`}
                   className={cn(
                     "matrix-pixel",
-                    isActive && "matrix-pixel-active",
                     !isOn && "opacity-20 dark:opacity-[0.1]",
                   )}
                   cx={pos.x + size / 2}
@@ -611,6 +611,7 @@ export const Matrix = React.forwardRef<HTMLDivElement, MatrixProps>(
                   r={radius}
                   fill={fill}
                   opacity={isOn ? opacity : 0.1}
+                  filter={isActive ? `url(#${glowId})` : undefined}
                   style={{
                     transform: `scale(${scale})`,
                   }}

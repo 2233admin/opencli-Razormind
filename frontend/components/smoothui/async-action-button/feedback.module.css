@@ -1,0 +1,92 @@
+.content {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+}
+
+.iconOnlyContent {
+  min-width: 1rem;
+}
+
+.labelGrid {
+  display: grid;
+  place-items: center;
+  min-width: 0;
+}
+
+.labelGrid > * {
+  grid-area: 1 / 1;
+}
+
+.labelMeasure {
+  visibility: hidden;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.currentLabel {
+  white-space: nowrap;
+}
+
+.iconSlot {
+  position: relative;
+  display: inline-grid;
+  width: 1rem;
+  height: 1rem;
+  flex: none;
+  place-items: center;
+}
+
+.iconState {
+  display: inline-flex;
+  grid-area: 1 / 1;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transform: translateY(0.15rem) scale(0.82);
+  transition:
+    opacity var(--motion-duration-response) var(--motion-ease-spatial),
+    transform var(--motion-duration-response) var(--motion-ease-spatial);
+}
+
+.iconStateActive {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
+.spinner {
+  animation: none;
+}
+
+.iconStateActive .spinner {
+  animation: spin 700ms linear infinite;
+}
+
+.liveRegion {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .iconState {
+    transition-duration: 0.01ms;
+  }
+
+  .iconStateActive .spinner {
+    animation: none;
+  }
+}

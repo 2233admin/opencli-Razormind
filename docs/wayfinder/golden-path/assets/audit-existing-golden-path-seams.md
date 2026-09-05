@@ -1,5 +1,7 @@
 # Golden-path seam audit
 
+> Historical investigation. The original findings below describe the code at the time of that investigation. In particular, the statements that Project, Workflow Draft, and Workflow Version persistence do not exist are superseded by the current Studio implementation. For the 2026-09-05 source baseline and remaining gaps, read the [current product contract findings](../../../usage/product-contract-findings.md). This note preserves the original investigation rather than rewriting its historical conclusions.
+
 ## Resolution
 
 Keep the existing workflow authoring/compiler/runtime-event seam and the outbound Worker connection seam. Build the golden path by adding a persistent Project and published Workflow backbone around them, then adapt the working legacy collection pipeline behind Workflow Nodes. Do not attempt a broad rewrite of collectors, the canvas, or remote browser transport.

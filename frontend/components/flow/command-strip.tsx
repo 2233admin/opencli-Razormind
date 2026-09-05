@@ -120,6 +120,7 @@ export function CommandStrip({
   onChangeWorkbenchMode,
   importInputRef,
   documentState,
+  onSaveWorkflow,
 }: {
   onOpenPalette: () => void
   onExported?: (msg: string) => void
@@ -138,6 +139,7 @@ export function CommandStrip({
   onChangeWorkbenchMode?: (mode: WorkflowWorkbenchMode | null) => void
   importInputRef?: RefObject<HTMLInputElement | null>
   documentState?: "loading" | "saving" | "saved" | "error" | "conflict"
+  onSaveWorkflow: () => void
 }) {
   const localFileInputRef = useRef<HTMLInputElement>(null)
   const fileInputRef = importInputRef ?? localFileInputRef
@@ -158,7 +160,6 @@ export function CommandStrip({
   const selectedEdgeCount = useFlowStore((s) => s.edges.reduce((count, edge) => count + (edge.selected ? 1 : 0), 0))
   const autoLayout = useFlowStore((s) => s.autoLayout)
   const selectConnectedComponent = useFlowStore((s) => s.selectConnectedComponent)
-  const save = useFlowStore((s) => s.save)
   const load = useFlowStore((s) => s.load)
   const reset = useFlowStore((s) => s.reset)
   const importFlow = useFlowStore((s) => s.importFlow)
@@ -396,11 +397,10 @@ export function CommandStrip({
         <Button
           variant="outline"
           size="sm"
-          className="hidden min-h-11 gap-1.5 rounded-lg md:flex"
-          onClick={() => {
-            save()
-            onExported?.("工作流已保存到本地")
-          }}
+          className="min-h-11 gap-1.5 rounded-lg"
+          onClick={onSaveWorkflow}
+          disabled={documentState === "loading" || documentState === "saving" || documentState === "conflict"}
+          aria-label="保存工作流"
         >
           <Save className="size-3.5" />
           保存

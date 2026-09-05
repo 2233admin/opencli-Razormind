@@ -7,16 +7,9 @@
  * Usage: node scripts/test-workflow-lifecycle-strip.mjs
  */
 import assert from 'node:assert/strict'
+import { test } from 'node:test'
 
 import { deriveWorkflowLifecycleView } from '../components/studio/workflow-lifecycle-strip.logic.ts'
-
-let passed = 0
-
-function test(name, fn) {
-  fn()
-  passed += 1
-  console.log(`ok - ${name}`)
-}
 
 test('draft exposes only workflow authoring stages', () => {
   const view = deriveWorkflowLifecycleView('draft')
@@ -74,10 +67,8 @@ test('render contract carries authoring revision and published version separatel
   assert.match(source, /revision: number \| null/)
   assert.match(source, /publishedVersion\?: number \| null/)
   assert.match(source, /aria-label="工作流生命周期"/)
-  assert.match(session, /lifecyclePanelOpen/)
-  assert.match(session, /data-testid="workflow-lifecycle-toggle"/)
-  assert.match(session, /收起状态/)
+  assert.match(session, /data-testid="workflow-lifecycle-panel"/)
+  assert.match(session, /aria-label="保存、验证与发布"/)
+  assert.doesNotMatch(session, /lifecyclePanelOpen|workflow-lifecycle-toggle/)
   assert.doesNotMatch(logic, /activate|激活|待后端接入/)
 })
-
-console.log(`\n${passed} passed`)

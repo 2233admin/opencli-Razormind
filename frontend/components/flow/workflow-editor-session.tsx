@@ -4,7 +4,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { AlertTriangle, ArrowLeft, CheckCircle2, ChevronDown, ChevronUp, Loader2, Plus, RefreshCw, Rocket, Workflow } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, CheckCircle2, Loader2, Plus, RefreshCw, Rocket, Workflow } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
@@ -12,7 +12,7 @@ import { ErrorBoundary } from '@/components/error-boundary'
 import { WorkflowLifecycleStrip } from '@/components/studio/workflow-lifecycle-strip'
 import { loader, Matrix } from '@/components/unlumen-ui/matrix'
 import { getProjectWorkflowDraft, publishProjectWorkflow, updateProjectWorkflowDraft, validateProjectWorkflowDraft } from '@/lib/api/endpoints'
-import { useCreateProjectWorkflow, useWorkspaceProjects } from '@/lib/api/hooks'
+import { useCreateProjectWorkflow, useProjectWorkflows, useWorkspaceProjects } from '@/lib/api/hooks'
 import type { WorkflowAssetSummary } from '@/lib/api/types'
 import { useFlowStore } from '@/lib/flow/store'
 import { resolveYjsUrl, useSettingsStore } from '@/lib/flow/settings-store'
@@ -49,6 +49,7 @@ export function WorkflowEditorSession({ forceStandalone = false }: WorkflowEdito
   const projectId = forceStandalone ? null : params.get('project')
   const requestedWorkflowId = forceStandalone ? null : params.get('workflow')
   const workspaceProjects = useWorkspaceProjects(workspaceId)
+  const projectWorkflows = useProjectWorkflows(workspaceId, projectId)
   const project = workspaceProjects.data?.find((item) => item.id === projectId)
   const resolvedWorkflowId = requestedWorkflowId ?? project?.primary_workflow_id
   const primaryWorkflowPending = !requestedWorkflowId && workspaceProjects.isLoading
@@ -68,7 +69,6 @@ export function WorkflowEditorSession({ forceStandalone = false }: WorkflowEdito
   const [releaseBlocker, setReleaseBlocker] = useState<string | null>(null)
   const [publishedVersion, setPublishedVersion] = useState<number | null>(null)
   const [validationScope, setValidationScope] = useState<{ active: number; parked: number } | null>(null)
-  const [lifecyclePanelOpen, setLifecyclePanelOpen] = useState(false)
   const loaded = useRef(false)
   const revision = useRef<number | null>(null)
   const saveSession = useRef(0)
@@ -84,6 +84,7 @@ export function WorkflowEditorSession({ forceStandalone = false }: WorkflowEdito
   const standalone = forceStandalone
   const missingProjectContext = !standalone && (!workspaceId || !projectId)
   const projectHref = workspaceId && projectId ? `/studio/projects/${projectId}?workspace=${workspaceId}` : '/studio'
+  const currentPublishedVersion = publishedVersion ?? projectWorkflows.data?.find((item) => item.id === workflowId)?.current_published_version ?? null
 
   useEffect(() => {
     return () => {
@@ -145,7 +146,8 @@ export function WorkflowEditorSession({ forceStandalone = false }: WorkflowEdito
             }
           }
           if (saveSession.current === activeQueue.session && saveQueue.current === activeQueue) {
-            setDocumentState('saved')
+            const currentFingerprint = workflowDraftFingerprint(useFlowStore.getState().workflowProject)
+            setDocumentState(currentFingerprint === lastSavedFingerprint.current ? 'saved' : 'saving')
           }
         })().finally(() => {
           activeQueue.promise = null
@@ -155,6 +157,23 @@ export function WorkflowEditorSession({ forceStandalone = false }: WorkflowEdito
     },
     [projectId, workflowId, workspaceId, yjsEnabled],
   )
+  const saveCurrentDraft = useCallback(async () => {
+    const session = saveSession.current
+    const graph = useFlowStore.getState().workflowProject
+    const fingerprint = workflowDraftFingerprint(graph)
+    try {
+      await saveDraft(graph)
+      if (
+        saveSession.current === session
+        && fingerprint === lastSavedFingerprint.current
+        && fingerprint === workflowDraftFingerprint(useFlowStore.getState().workflowProject)
+      ) toast.success('草稿已保存到项目')
+    } catch (reason) {
+      if (saveSession.current === session) {
+        toast.error(reason instanceof Error ? `保存失败：${reason.message}` : '保存失败，请重试')
+      }
+    }
+  }, [saveDraft])
   useEffect(() => {
     if (!workspaceId || !projectId) return
     saveSession.current += 1
@@ -164,6 +183,7 @@ export function WorkflowEditorSession({ forceStandalone = false }: WorkflowEdito
     loaded.current = false
     revision.current = null
     setSavedRevision(null)
+    setPublishedVersion(null)
     saveQueue.current = null
     lastSavedFingerprint.current = null
     saveBlocked.current = false
@@ -223,7 +243,9 @@ export function WorkflowEditorSession({ forceStandalone = false }: WorkflowEdito
   }, [importWorkflowProject, primaryWorkflowPending, project, projectId, requestedWorkflowId, resolvedWorkflowId, workspaceId, workspaceProjects.error, workspaceProjects.isError])
 
   useEffect(() => {
-    if (!loaded.current || !workspaceId || !projectId || !workflowId || yjsConnected) return
+    if (!loaded.current || !workspaceId || !projectId || !workflowId || yjsConnected || saveBlocked.current) return
+    if (workflowDraftFingerprint(workflowProject) === lastSavedFingerprint.current) return
+    setDocumentState('saving')
     const timer = window.setTimeout(() => {
       saveDraft(workflowProject).catch((reason: Error) => toast.error(`自动保存失败：${reason.message}`))
     }, 800)
@@ -231,7 +253,7 @@ export function WorkflowEditorSession({ forceStandalone = false }: WorkflowEdito
   }, [projectId, saveDraft, workflowId, workflowProject, workspaceId, yjsConnected])
 
   useEffect(() => {
-    if (!loaded.current || !workspaceId || !projectId || !workflowId || !yjsConnected) return
+    if (!loaded.current || !workspaceId || !projectId || !workflowId || !yjsConnected || saveBlocked.current) return
     const fingerprint = workflowDraftFingerprint(workflowProject)
     if (lastSavedFingerprint.current === fingerprint) return
     const expectedRevision = revision.current ?? 0
@@ -300,7 +322,6 @@ export function WorkflowEditorSession({ forceStandalone = false }: WorkflowEdito
       setReleaseState('idle')
       setValidationRunId(null)
       setReleaseBlocker(null)
-      setPublishedVersion(null)
       setValidationScope(null)
     }
   }, [workflowProject])
@@ -383,6 +404,7 @@ export function WorkflowEditorSession({ forceStandalone = false }: WorkflowEdito
         || workflowDraftFingerprint(useFlowStore.getState().workflowProject) !== publishFingerprint
       ) return
       setPublishedVersion(version.version)
+      void queryClient.invalidateQueries({ queryKey: ['project-workflows', workspaceId, projectId] })
       setReleaseBlocker(null)
       setReleaseState('published')
       toast.success(`Workflow Version ${version.version} 已发布`)
@@ -427,162 +449,153 @@ export function WorkflowEditorSession({ forceStandalone = false }: WorkflowEdito
   }
 
   return (
-    <div className="relative h-full w-full overflow-hidden">
-      {standalone ? (
-        <ErrorBoundary label="WorkflowEditor">
-          <WorkflowEditor workspaceId={workspaceId} />
-        </ErrorBoundary>
-      ) : missingProjectContext ? (
-        <div className="grid h-full place-items-center px-4">
-          <div className="flex max-w-lg flex-col items-center gap-4 text-center">
-            <div className="grid size-11 place-items-center rounded-md border bg-muted/30 text-destructive">
-              <AlertTriangle className="size-5" aria-hidden />
+    <div className="relative flex h-full min-h-0 w-full flex-col overflow-hidden">
+      {workspaceId && projectId && workflowId && loadState === 'ready' ? (
+        <section className="shrink-0 space-y-2 border-b bg-background px-3 py-2" aria-label="保存、验证与发布" data-testid="workflow-lifecycle-panel">
+          <WorkflowLifecycleStrip state={documentState === 'error' || documentState === 'conflict' || capabilityError ? 'blocked' : releaseState === 'idle' ? 'draft' : releaseState} revision={savedRevision} publishedVersion={currentPublishedVersion} blockerText={documentState === 'conflict' ? '草稿已在其他位置更新，请重新加载。' : documentState === 'error' ? '草稿保存失败。' : capabilityError ? '运行能力目录不可用，暂时无法验证。' : (releaseBlocker ?? undefined)} />
+          {validationScope ? (
+            <div className="flex items-center justify-between gap-2 px-1.5 text-2xs text-muted-foreground" role="status" data-testid="workflow-validation-scope-summary">
+              <span>{`活动节点 ${validationScope.active} · 未接入节点 ${validationScope.parked}`}</span>
+              <span className="text-3xs opacity-70">未接入节点仅提示，不会阻止发布</span>
             </div>
-            <div className="space-y-1.5">
-              <h2 className="text-base font-semibold">无法打开工作流</h2>
-              <p className="text-sm leading-6 text-muted-foreground" role="alert">当前地址缺少工作区或项目参数，请从 Studio 重新选择项目。</p>
+          ) : null}
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <div className="mr-auto flex items-center gap-1.5 px-1.5 text-xs text-muted-foreground" role="status">
+              {documentState === 'loading' || documentState === 'saving' ? <Loader2 className="size-3.5 animate-spin" /> : null}
+              {documentState === 'saved' ? <CheckCircle2 className="size-3.5 text-success" /> : null}
+              {documentState === 'error' || documentState === 'conflict' ? <AlertTriangle className="size-3.5 text-warning" /> : null}
+              {
+                {
+                  loading: '加载中',
+                  saving: '保存中',
+                  saved: `已保存 · 草稿修订 ${savedRevision ?? '—'}`,
+                  error: '保存失败',
+                  conflict: '保存冲突',
+                }[documentState]
+              }
             </div>
-            <Button className="min-h-11" variant="outline" nativeButton={false} render={<Link href="/studio" />}>
-              <ArrowLeft className="size-4" />
-              返回 Studio
-            </Button>
-          </div>
-        </div>
-      ) : loadState === 'loading' ? (
-        <div className="grid h-full place-items-center bg-muted/10" aria-busy="true">
-          <div className="flex flex-col items-center gap-4 text-sm text-muted-foreground" role="status">
-            <Matrix
-              rows={7}
-              cols={7}
-              frames={loader}
-              fps={10}
-              size={5}
-              gap={2}
-              palette={{
-                on: 'var(--color-primary)',
-                off: 'var(--color-muted-foreground)',
-              }}
-              ariaLabel="正在加载工作流"
-            />
-            <span>正在加载工作流…</span>
-          </div>
-        </div>
-      ) : loadState === 'empty' ? (
-        <div className="grid h-full place-items-center px-4">
-          <div className="flex max-w-lg flex-col items-center gap-4 text-center">
-            <div className="grid size-11 place-items-center rounded-md border bg-muted/30 text-muted-foreground">
-              <Workflow className="size-5" aria-hidden />
-            </div>
-            <div className="space-y-1.5">
-              <h2 className="text-base font-semibold">项目还没有工作流</h2>
-              <p className="text-sm leading-6 text-muted-foreground">项目“{project?.name}”尚未设置主工作流。创建后会直接打开第一份 Workflow Draft。</p>
-              {creationError ? <p className="text-sm leading-6 text-destructive" role="alert">创建失败：{creationError}</p> : null}
-            </div>
-            <div className="flex flex-wrap items-center justify-center gap-2">
-              <Button className="min-h-11" onClick={() => void createBlankWorkflow()} disabled={createWorkflow.isPending}>
-                {createWorkflow.isPending ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}
-                创建工作流
-              </Button>
-              <Button className="min-h-11" variant="outline" nativeButton={false} render={<Link href={projectHref} />}>
-                <ArrowLeft className="size-4" />
-                返回项目
-              </Button>
-            </div>
-          </div>
-        </div>
-      ) : loadState === 'error' ? (
-        <div className="grid h-full place-items-center px-4">
-          <div className="flex max-w-lg flex-col items-center gap-4 text-center">
-            <div className="grid size-11 place-items-center rounded-md border bg-destructive/10 text-destructive">
-              <AlertTriangle className="size-5" aria-hidden />
-            </div>
-            <div className="space-y-1.5">
-              <h2 className="text-base font-semibold">工作流加载失败</h2>
-              <p className="break-words text-sm leading-6 text-destructive" role="alert">{loadError ?? '工作流加载失败'}</p>
-            </div>
-            <div className="flex flex-wrap items-center justify-center gap-2">
-              <Button className="min-h-11" variant="outline" onClick={() => window.location.reload()}>
-                <RefreshCw className="size-4" />
+            {documentState === 'conflict' ? (
+              <Button className="min-h-11 sm:min-h-9" size="sm" variant="outline" onClick={() => window.location.reload()}>
+                <RefreshCw className="size-3.5" />
                 重新加载
               </Button>
-              <Button className="min-h-11" variant="outline" nativeButton={false} render={<Link href={projectHref} />}>
+            ) : null}
+            {documentState === 'error' ? (
+              <Button className="min-h-11 sm:min-h-9" size="sm" variant="outline" onClick={() => void saveCurrentDraft()}>
+                <RefreshCw className="size-3.5" />
+                重试保存
+              </Button>
+            ) : null}
+            <Button className="min-h-11 sm:min-h-9" size="sm" variant="outline" onClick={validateDraft} disabled={capabilityLoading || Boolean(capabilityError) || documentState === 'conflict' || releaseState === 'validating' || releaseState === 'publishing'} title={capabilityLoading ? '正在加载运行能力目录' : capabilityError ? '运行能力目录不可用' : undefined}>
+              {capabilityLoading || releaseState === 'validating' ? <Loader2 className="size-3.5 animate-spin" /> : <CheckCircle2 className="size-3.5" />}
+              验证
+            </Button>
+            <Button className="min-h-11 sm:min-h-9" size="sm" onClick={publishDraft} disabled={releaseState !== 'validated' || documentState === 'error' || documentState === 'conflict'} title={releaseState !== 'validated' ? '请先验证当前草稿' : '发布当前已验证草稿'}>
+              {releaseState === 'publishing' ? <Loader2 className="size-3.5 animate-spin" /> : <Rocket className="size-3.5" />}
+              发布
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">草稿修改需重新验证、发布，才会成为项目的默认运行版本。</p>
+        </section>
+      ) : null}
+      <div className="min-h-0 flex-1 overflow-hidden">
+        {standalone ? (
+          <ErrorBoundary label="WorkflowEditor">
+            <WorkflowEditor workspaceId={workspaceId} />
+          </ErrorBoundary>
+        ) : missingProjectContext ? (
+          <div className="grid h-full place-items-center px-4">
+            <div className="flex max-w-lg flex-col items-center gap-4 text-center">
+              <div className="grid size-11 place-items-center rounded-md border bg-muted/30 text-destructive">
+                <AlertTriangle className="size-5" aria-hidden />
+              </div>
+              <div className="space-y-1.5">
+                <h2 className="text-base font-semibold">无法打开工作流</h2>
+                <p className="text-sm leading-6 text-muted-foreground" role="alert">当前地址缺少工作区或项目参数，请从 Studio 重新选择项目。</p>
+              </div>
+              <Button className="min-h-11" variant="outline" nativeButton={false} render={<Link href="/studio" />}>
                 <ArrowLeft className="size-4" />
-                返回项目
+                返回 Studio
               </Button>
             </div>
           </div>
-        </div>
-      ) : (
-        <ErrorBoundary label="WorkflowEditor">
-          <WorkflowEditor
-            workspaceId={workspaceId}
-            documentState={documentState}
-            runPanelScope={workspaceId && projectId && workflowId
-              ? { workspaceId, projectId, workflowId }
-              : null}
-          />
-        </ErrorBoundary>
-      )}
-      {workspaceId && projectId && workflowId ? (
-        lifecyclePanelOpen ? (
-          <div className="absolute inset-x-3 bottom-3 z-40 ml-auto flex max-w-4xl flex-col gap-2 rounded-md border bg-background/90 p-2 backdrop-blur-xl" data-testid="workflow-lifecycle-panel">
-            <div className="flex justify-end">
-              <Button className="min-h-8 gap-1 text-xs" size="sm" variant="ghost" onClick={() => setLifecyclePanelOpen(false)} aria-expanded="true" aria-controls="workflow-lifecycle-panel">
-                收起状态
-                <ChevronDown className="size-3.5" />
-              </Button>
+        ) : loadState === 'loading' ? (
+          <div className="grid h-full place-items-center bg-muted/10" aria-busy="true">
+            <div className="flex flex-col items-center gap-4 text-sm text-muted-foreground" role="status">
+              <Matrix
+                rows={7}
+                cols={7}
+                frames={loader}
+                fps={10}
+                size={5}
+                gap={2}
+                palette={{
+                  on: 'var(--color-primary)',
+                  off: 'var(--color-muted-foreground)',
+                }}
+                ariaLabel="正在加载工作流"
+              />
+              <span>正在加载工作流…</span>
             </div>
-            <WorkflowLifecycleStrip state={documentState === 'error' || documentState === 'conflict' || capabilityError ? 'blocked' : releaseState === 'idle' ? 'draft' : releaseState} revision={savedRevision} publishedVersion={publishedVersion} blockerText={documentState === 'conflict' ? '草稿已在其他位置更新，请重新加载。' : documentState === 'error' ? '草稿保存失败。' : capabilityError ? '运行能力目录不可用，暂时无法验证。' : (releaseBlocker ?? undefined)} />
-            {validationScope ? (
-              <div className="flex items-center justify-between gap-2 px-1.5 text-2xs text-muted-foreground" role="status" data-testid="workflow-validation-scope-summary">
-                <span>{`活动节点 ${validationScope.active} · 未接入节点 ${validationScope.parked}`}</span>
-                <span className="text-3xs opacity-70">未接入节点仅提示，不会阻止发布</span>
+          </div>
+        ) : loadState === 'empty' ? (
+          <div className="grid h-full place-items-center px-4">
+            <div className="flex max-w-lg flex-col items-center gap-4 text-center">
+              <div className="grid size-11 place-items-center rounded-md border bg-muted/30 text-muted-foreground">
+                <Workflow className="size-5" aria-hidden />
               </div>
-            ) : null}
-            <div className="flex flex-wrap items-center justify-end gap-2">
-              <div className="mr-auto flex items-center gap-1.5 px-1.5 text-xs text-muted-foreground" role="status">
-                {documentState === 'loading' || documentState === 'saving' ? <Loader2 className="size-3.5 animate-spin" /> : null}
-                {documentState === 'saved' ? <CheckCircle2 className="size-3.5 text-success" /> : null}
-                {documentState === 'error' || documentState === 'conflict' ? <AlertTriangle className="size-3.5 text-warning" /> : null}
-                {
-                  {
-                    loading: '加载中',
-                    saving: '保存中',
-                    saved: `已保存 · revision ${savedRevision ?? '—'}`,
-                    error: '保存失败',
-                    conflict: '保存冲突',
-                  }[documentState]
-                }
+              <div className="space-y-1.5">
+                <h2 className="text-base font-semibold">项目还没有工作流</h2>
+                <p className="text-sm leading-6 text-muted-foreground">项目“{project?.name}”尚未设置主工作流。创建后会直接打开第一份 Workflow Draft。</p>
+                {creationError ? <p className="text-sm leading-6 text-destructive" role="alert">创建失败：{creationError}</p> : null}
               </div>
-              {documentState === 'conflict' ? (
-                <Button className="min-h-11 sm:min-h-7" size="sm" variant="outline" onClick={() => window.location.reload()}>
-                  <RefreshCw className="size-3.5" />
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                <Button className="min-h-11" onClick={() => void createBlankWorkflow()} disabled={createWorkflow.isPending}>
+                  {createWorkflow.isPending ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}
+                  创建工作流
+                </Button>
+                <Button className="min-h-11" variant="outline" nativeButton={false} render={<Link href={projectHref} />}>
+                  <ArrowLeft className="size-4" />
+                  返回项目
+                </Button>
+              </div>
+            </div>
+          </div>
+        ) : loadState === 'error' ? (
+          <div className="grid h-full place-items-center px-4">
+            <div className="flex max-w-lg flex-col items-center gap-4 text-center">
+              <div className="grid size-11 place-items-center rounded-md border bg-destructive/10 text-destructive">
+                <AlertTriangle className="size-5" aria-hidden />
+              </div>
+              <div className="space-y-1.5">
+                <h2 className="text-base font-semibold">工作流加载失败</h2>
+                <p className="break-words text-sm leading-6 text-destructive" role="alert">{loadError ?? '工作流加载失败'}</p>
+              </div>
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                <Button className="min-h-11" variant="outline" onClick={() => window.location.reload()}>
+                  <RefreshCw className="size-4" />
                   重新加载
                 </Button>
-              ) : null}
-              {documentState === 'error' ? (
-                <Button className="min-h-11 sm:min-h-7" size="sm" variant="outline" onClick={() => void saveDraft(workflowProject)}>
-                  <RefreshCw className="size-3.5" />
-                  重试保存
+                <Button className="min-h-11" variant="outline" nativeButton={false} render={<Link href={projectHref} />}>
+                  <ArrowLeft className="size-4" />
+                  返回项目
                 </Button>
-              ) : null}
-              <Button className="min-h-11 sm:min-h-7" size="sm" variant="outline" onClick={validateDraft} disabled={capabilityLoading || Boolean(capabilityError) || releaseState === 'validating' || releaseState === 'publishing'} title={capabilityLoading ? '正在加载运行能力目录' : capabilityError ? '运行能力目录不可用' : undefined}>
-                {capabilityLoading || releaseState === 'validating' ? <Loader2 className="size-3.5 animate-spin" /> : <CheckCircle2 className="size-3.5" />}
-                验证
-              </Button>
-              <Button className="min-h-11 sm:min-h-7" size="sm" onClick={publishDraft} disabled={releaseState !== 'validated'}>
-                {releaseState === 'publishing' ? <Loader2 className="size-3.5 animate-spin" /> : <Rocket className="size-3.5" />}
-                发布
-              </Button>
+              </div>
             </div>
           </div>
         ) : (
-          <Button className="absolute bottom-3 right-3 z-40 min-h-8 gap-1.5 rounded-md border bg-background/90 px-2.5 text-xs shadow-sm backdrop-blur-xl" size="sm" variant="outline" onClick={() => setLifecyclePanelOpen(true)} aria-expanded="false" aria-controls="workflow-lifecycle-panel" data-testid="workflow-lifecycle-toggle">
-            <ChevronUp className="size-3.5" />
-            状态
-          </Button>
-        )
-      ) : null}
+          <ErrorBoundary label="WorkflowEditor">
+            <WorkflowEditor
+              workspaceId={workspaceId}
+              documentState={documentState}
+              onSaveWorkflow={saveCurrentDraft}
+              runPanelScope={workspaceId && projectId && workflowId
+                ? { workspaceId, projectId, workflowId }
+                : null}
+            />
+          </ErrorBoundary>
+        )}
+      </div>
     </div>
   )
 }

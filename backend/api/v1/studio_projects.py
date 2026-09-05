@@ -2,12 +2,10 @@
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import delete, select, update
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.api.v1.studio_helpers import (
     LOCAL_USER_ID,
-    canonicalize_studio_graph,
     get_workspace,
 )
 from backend.api.v1.studio_schemas import (
@@ -29,6 +27,7 @@ from backend.models.studio import (
 )
 from backend.models.workflow_run import WorkflowRun
 from backend.schemas.common import ApiResponse
+from backend.services.agent_project_service import create_project_bundle
 
 router = APIRouter()
 
@@ -80,60 +79,18 @@ async def bootstrap_project(
     body: ProjectBootstrapCreate,
     db: AsyncSession = Depends(get_db),
 ) -> ApiResponse:
-    await get_workspace(db, workspace_id)
-    existing = await db.scalar(
-        select(StudioProject.id).where(
-            StudioProject.workspace_id == workspace_id,
-            StudioProject.slug == body.project.slug,
-        )
+    created = await create_project_bundle(
+        db,
+        workspace_id=workspace_id,
+        body=body,
+        actor_user_id=LOCAL_USER_ID,
     )
-    if existing is not None:
-        raise HTTPException(status.HTTP_409_CONFLICT, "Project slug already exists")
-
-    try:
-        async with db.begin_nested():
-            project = StudioProject(
-                workspace_id=workspace_id,
-                name=body.project.name,
-                slug=body.project.slug,
-                description=body.project.description,
-                app_type=body.project.app_type,
-                created_by_user_id=LOCAL_USER_ID,
-            )
-            db.add(project)
-            await db.flush()
-
-            workflow = StudioWorkflow(
-                project_id=project.id,
-                name=body.workflow.name,
-                description=body.workflow.description,
-            )
-            db.add(workflow)
-            await db.flush()
-
-            graph = canonicalize_studio_graph(
-                body.workflow.graph.model_dump(mode="json"),
-                workflow_id=workflow.id,
-            )
-            draft = StudioWorkflowDraft(
-                workflow_id=workflow.id,
-                graph=graph,
-                updated_by_user_id=LOCAL_USER_ID,
-            )
-            db.add(draft)
-            project.primary_workflow_id = workflow.id
-            await db.flush()
-    except IntegrityError as exc:
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            "Project or primary workflow already exists",
-        ) from exc
 
     return ApiResponse.ok(
         ProjectBootstrapRead(
-            project=ProjectRead.model_validate(project),
-            primary_workflow=WorkflowRead.model_validate(workflow),
-            draft=DraftRead.model_validate(draft, from_attributes=True),
+            project=ProjectRead.model_validate(created.project),
+            primary_workflow=WorkflowRead.model_validate(created.workflow),
+            draft=DraftRead.model_validate(created.draft, from_attributes=True),
         )
     )
 

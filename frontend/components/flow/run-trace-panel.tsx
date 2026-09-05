@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
-import { Activity, Boxes, FileInput, Loader2, Play, RotateCcw } from "lucide-react"
+import { Activity, FileInput, Loader2, Play, RotateCcw } from "lucide-react"
 import { useSearchParams } from "next/navigation"
 import { getApiAuthToken } from "@/lib/api/auth-token"
 import { useFlowStore } from "@/lib/flow/store"
@@ -24,7 +24,6 @@ import {
   buildWorkflowRunInputTemplate,
   getWorkflowRunFileInput,
   parseWorkflowRunInput,
-  replayWorkspaceWorkflowRunTrace,
   replayWorkflowRunEventStream,
   resumeGaojixingWorkflowRun,
   startWorkspaceWorkflowRun,
@@ -547,27 +546,27 @@ export function RunTracePanel({
       <div className="border-b px-4 py-3">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <SectionCaption>Backend Run</SectionCaption>
+            <SectionCaption>工作流运行</SectionCaption>
             <h2 className="mt-1 flex items-center gap-2 text-sm font-medium">
               <Activity className="size-3.5 text-muted-foreground" />
-              <span>Run Trace</span>
+              <span>运行与追踪</span>
             </h2>
             <p className="mt-0.5 font-mono text-[10px] text-muted-foreground">
               {workflowProject.id} · {nodeCount}N / {edgeCount}E
             </p>
           </div>
           <Badge variant={runState.status === "error" ? "destructive" : "outline"} className="font-mono uppercase">
-            {projection ? RUN_STATUS_LABELS[projection.status] : runState.status}
+            {projection ? RUN_STATUS_LABELS[projection.status] : runState.status === 'idle' ? '未运行' : runState.status === 'error' ? '启动失败' : '运行中'}
           </Badge>
         </div>
         <div className="mt-3 grid grid-cols-[1fr_1fr_auto] gap-2">
           <Button ref={runButtonRef} size="sm" onClick={() => void runBackendWorkflow()} disabled={isRunning || isBackendRunning}>
             {isRunning ? <Loader2 className="size-3.5 animate-spin" /> : <Play className="size-3.5" />}
-            Run
+            启动运行
           </Button>
           <Button size="sm" variant="outline" onClick={runBackendPreview} disabled={isRunning || isBackendRunning}>
             {isBackendRunning ? <Loader2 className="size-3.5 animate-spin" /> : <Activity className="size-3.5" />}
-            Preview
+            编译预览
           </Button>
           <Button
             size="icon-sm"
@@ -576,7 +575,7 @@ export function RunTracePanel({
             disabled={isRunning || isBackendRunning || (runState.status === "idle" && backendState.status === "idle" && !questionBankFile)}
           >
             <RotateCcw className="size-3.5" />
-            <span className="sr-only">Reset run trace</span>
+            <span className="sr-only">清空运行追踪</span>
           </Button>
         </div>
         <details className="mt-3 rounded-md border bg-card/50 p-2.5" open={Boolean(runFileInput) || runInputTemplateText !== "{}"}>
@@ -721,7 +720,7 @@ export function RunTracePanel({
             </>
           ) : (
             <div className="rounded-md border border-dashed p-4 text-center text-xs leading-relaxed text-muted-foreground">
-              no backend run yet
+              尚未启动运行。请先检查本次输入，再点击“启动运行”。
             </div>
           )}
 

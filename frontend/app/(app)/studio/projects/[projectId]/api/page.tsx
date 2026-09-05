@@ -1,16 +1,15 @@
 'use client'
 
-import { ArrowLeft, ArrowRight, Bot, Braces, CheckCircle2, Copy, KeyRound, ShieldCheck, Waypoints } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Bot, Braces, CheckCircle2, KeyRound, ShieldCheck, Waypoints } from 'lucide-react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { use, useEffect, useMemo, useState } from 'react'
-import { toast } from 'sonner'
-
 import { EmptyState, ErrorState, LoadingState } from '@/components/shell/data-states'
 import { PageContainer } from '@/components/shell/page-container'
+import ButtonCopy from '@/components/smoothui/button-copy'
 import { ProjectNavigation } from '@/components/studio/project-navigation'
 import { Badge } from '@/components/ui/badge'
-import { Button, buttonVariants } from '@/components/ui/button'
+import { buttonVariants } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useProjectWorkflows, useWorkspaceProjects } from '@/lib/api/hooks'
@@ -75,15 +74,6 @@ export default function ProjectApiAccessPage({
     ? `/studio/projects/${projectId}/operations?workspace=${workspaceId}${workflowId ? `&workflow=${workflowId}` : ''}`
     : null
 
-  async function copy(text: string, label: string) {
-    try {
-      await navigator.clipboard.writeText(text)
-      toast.success(`${label}已复制`)
-    } catch {
-      toast.error('复制失败，请手动选择文本')
-    }
-  }
-
   return (
     <PageContainer
       eyebrow="Published API & MCP"
@@ -115,15 +105,11 @@ export default function ProjectApiAccessPage({
             <div className="flex min-w-0 items-center gap-3 rounded-lg border bg-muted/25 px-4 py-3">
               <span className="font-mono text-xs font-semibold text-primary">MCP</span>
               <code className="min-w-0 flex-1 truncate text-xs">{mcpEndpoint}</code>
-              <Button type="button" variant="ghost" size="icon-sm" aria-label="复制 MCP 地址" onClick={() => void copy(mcpEndpoint, 'MCP 地址')}>
-                <Copy className="size-4" />
-              </Button>
+              <ButtonCopy text={mcpEndpoint} label="复制 MCP 地址" disabled={!apiOrigin} iconOnly variant="ghost" size="icon-sm" />
             </div>
             <div className="flex items-center justify-between gap-3">
               <p className="text-xs text-muted-foreground">远程客户端直接连接同源端点；协议版本、能力和缓存信息由发现请求协商。</p>
-              <Button type="button" variant="outline" size="sm" onClick={() => void copy(mcpConfig, 'MCP 配置')}>
-                <Copy className="size-4" />复制配置
-              </Button>
+              <ButtonCopy text={mcpConfig} label="复制配置" disabled={!apiOrigin} variant="outline" size="sm" className="min-h-11 md:min-h-7" />
             </div>
             <pre className="max-h-72 overflow-auto rounded-lg border bg-[#090b10] p-4 font-mono text-xs leading-6 text-zinc-200">{mcpConfig}</pre>
           </CardContent>
@@ -169,9 +155,7 @@ export default function ProjectApiAccessPage({
                 <div className="flex min-w-0 items-center gap-3 rounded-lg border bg-muted/25 px-4 py-3">
                   <span className="font-mono text-xs font-semibold text-primary">POST</span>
                   <code className="min-w-0 flex-1 truncate text-xs">{absoluteEndpoint}</code>
-                  <Button type="button" variant="ghost" size="icon-sm" aria-label="复制 API 地址" onClick={() => void copy(absoluteEndpoint, 'API 地址')}>
-                    <Copy className="size-4" />
-                  </Button>
+                  <ButtonCopy text={absoluteEndpoint} label="复制 API 地址" disabled={!apiOrigin || !endpoint} iconOnly variant="ghost" size="icon-sm" />
                 </div>
               </CardContent>
             </Card>
@@ -191,9 +175,7 @@ export default function ProjectApiAccessPage({
               <CardHeader>
                 <div className="flex items-center justify-between gap-3">
                   <div><p className="eyebrow-mono">Request</p><CardTitle className="mt-1 text-base">服务端调用</CardTitle></div>
-                  <Button type="button" variant="outline" size="sm" onClick={() => void copy(curl, 'cURL')}>
-                    <Copy className="size-4" />复制 cURL
-                  </Button>
+                  <ButtonCopy text={curl} label="复制 cURL" disabled={!apiOrigin || !endpoint} variant="outline" size="sm" className="min-h-11 md:min-h-7" />
                 </div>
               </CardHeader>
               <CardContent>

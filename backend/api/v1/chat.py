@@ -26,15 +26,26 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.control.agent_control import ACTION_REGISTRY, agent_control_service
+from backend.api.v1.studio_helpers import canonicalize_studio_graph
+from backend.control.agent_control import (
+    ACTION_REGISTRY,
+    ProposalProvenance,
+    agent_control_service,
+)
 from backend.database import AsyncSessionLocal, get_db
 from backend.llm.base import LlmAdapterError, classify_retryable
 from backend.llm.resolver import ResolverError, resolver
 from backend.models.agent_run import AgentRun, AgentRunEvent, AgentSession
 from backend.models.provider import ModelProvider
+from backend.schemas import workflow as workflow_schemas
 from backend.schemas.common import ApiResponse
 from backend.security.identity import RequestIdentity, get_request_identity
-from backend.services import schedule_service, source_service, task_service
+from backend.security.workspace_rbac import (
+    WorkspacePermission,
+    get_workspace_access,
+    require_permission,
+)
+from backend.services import agent_project_service, schedule_service, source_service, task_service
 from backend.skills.toolcall import _is_xml_tool_model, _parse_tool_use, _safe_json
 
 logger = logging.getLogger(__name__)
@@ -42,6 +53,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/chat", tags=["chat"])
 
 MAX_TOOL_STEPS = 5
+XML_TOOL_MAX_TOKENS = 4096
 
 ActivitySink = Callable[[dict[str, Any]], Awaitable[None]]
 ActivityFlusher = Callable[[], Awaitable[None]]
@@ -60,6 +72,11 @@ _PUBLIC_TOOL_LABELS = {
     "trigger_task": ("启动采集任务", "数据源"),
     "update_schedule": ("更新调度计划", "调度计划"),
     "update_provider": ("更新模型配置", "模型提供商"),
+    "list_projects": ("检查项目", "项目"),
+    "list_workflows": ("检查工作流", "工作流"),
+    "get_workflow_draft": ("读取工作流草稿", "工作流草稿"),
+    "create_project": ("创建项目草稿", "项目"),
+    "update_workflow_draft": ("更新工作流草稿", "工作流草稿"),
 }
 
 
@@ -78,7 +95,11 @@ async def _flush_activity() -> None:
 def _tool_public_description(name: str, args: dict[str, Any]) -> tuple[str, str, str | None]:
     label, target_type = _PUBLIC_TOOL_LABELS.get(name, ("执行操作", "系统对象"))
     target_id = next(
-        (str(args[key]) for key in ("source_id", "schedule_id", "provider_id") if args.get(key)),
+        (
+            str(args[key])
+            for key in ("workflow_id", "project_id", "source_id", "schedule_id", "provider_id")
+            if args.get(key)
+        ),
         None,
     )
     return label, target_type, target_id
@@ -101,11 +122,20 @@ SYSTEM_PROMPT = """你是 opencli-admin 的全局操作助手。用户可能位�
 - 用户要配置 AI 处理(富化)阶段时(换模型 / 开关 AI), 先 list_providers 看现有提供商,
   再 update_provider。
   启用一个 provider = 采集成功后自动用它跑 AI 富化; 全部停用 = 不跑 AI。换模型改 default_model。
+- 用户要查看当前工作区的项目、工作流或草稿时，依次用 list_projects、list_workflows、
+  get_workflow_draft。工作区由服务端绑定，不要向用户索取 workspace_id。
+- 用户要创建项目时，用 create_project 创建 Project、主 Workflow 和 revision=1 的 Draft；
+  用户要改草稿时，用 update_workflow_draft，并使用读取到的当前 revision。
+- create_project 和 update_workflow_draft 都是写操作，只生成待确认提案；
+  草稿不等于已发布或可运行版本。
 - 不要编造 id; 先用 list_* 拿到真实 id 再做写操作。
 - 用中文简洁回答。"""
 
 
 # ── 工具定义 (OpenAI function-calling schema) ───────────────────────────────
+_WORKFLOW_PROJECT_TOOL_SCHEMA = workflow_schemas.WorkflowProject.model_json_schema()
+_WORKFLOW_PROJECT_DEFS = _WORKFLOW_PROJECT_TOOL_SCHEMA.pop("$defs", {})
+
 TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
@@ -201,6 +231,112 @@ TOOLS: list[dict[str, Any]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_projects",
+            "description": "列出当前服务端绑定 Workspace 的 Studio 项目。只读。",
+            "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_workflows",
+            "description": "列出当前 Workspace 中指定 Project 的工作流。只读。",
+            "parameters": {
+                "type": "object",
+                "properties": {"project_id": {"type": "string"}},
+                "required": ["project_id"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_workflow_draft",
+            "description": "读取指定 Studio 工作流的当前草稿图和 revision。只读，不代表已发布。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "project_id": {"type": "string"},
+                    "workflow_id": {"type": "string"},
+                },
+                "required": ["project_id", "workflow_id"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_project",
+            "description": (
+                "创建 Studio Project、主 Workflow 和 revision=1 的 Draft。"
+                "写操作，需确认；不会发布或运行。"
+            ),
+            "parameters": {
+                "type": "object",
+                "$defs": _WORKFLOW_PROJECT_DEFS,
+                "properties": {
+                    "project": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string"},
+                            "slug": {"type": "string"},
+                            "description": {"type": "string"},
+                            "app_type": {
+                                "type": "string",
+                                "enum": [
+                                    "chatbot",
+                                    "agent",
+                                    "chatflow",
+                                    "workflow",
+                                    "text-generator",
+                                ],
+                            },
+                        },
+                        "required": ["name", "slug"],
+                        "additionalProperties": False,
+                    },
+                    "workflow": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string"},
+                            "description": {"type": "string"},
+                            "graph": _WORKFLOW_PROJECT_TOOL_SCHEMA,
+                        },
+                        "required": ["name", "graph"],
+                        "additionalProperties": False,
+                    },
+                },
+                "required": ["project", "workflow"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "update_workflow_draft",
+            "description": (
+                "按当前 revision 更新 Studio Workflow Draft。写操作，需确认；不会发布或运行。"
+            ),
+            "parameters": {
+                "type": "object",
+                "$defs": _WORKFLOW_PROJECT_DEFS,
+                "properties": {
+                    "project_id": {"type": "string"},
+                    "workflow_id": {"type": "string"},
+                    "revision": {"type": "integer", "minimum": 1},
+                    "graph": _WORKFLOW_PROJECT_TOOL_SCHEMA,
+                },
+                "required": ["project_id", "workflow_id", "revision", "graph"],
+                "additionalProperties": False,
+            },
+        },
+    },
 ]
 
 WRITE_TOOLS = ACTION_REGISTRY.action_names
@@ -218,6 +354,12 @@ async def _optional_request_identity(request: Request) -> RequestIdentity | None
 def _require_write_identity(identity: RequestIdentity | None) -> RequestIdentity:
     if identity is None:
         raise HTTPException(status_code=401, detail="Bearer token required for write proposals")
+    return identity
+
+
+def _require_workspace_identity(identity: RequestIdentity | None) -> RequestIdentity:
+    if identity is None:
+        raise HTTPException(status_code=401, detail="Bearer token required for Workspace reads")
     return identity
 
 
@@ -502,7 +644,14 @@ async def _build_client(provider: ModelProvider):
 
 
 # ── 只读工具执行 ─────────────────────────────────────────────────────────────
-async def _run_read_tool(db: AsyncSession, name: str, args: dict[str, Any]) -> Any:
+async def _run_read_tool(
+    db: AsyncSession,
+    name: str,
+    args: dict[str, Any],
+    *,
+    identity: RequestIdentity | None = None,
+    workspace_id: str | None = None,
+) -> Any:
     if name == "list_sources":
         sources, _ = await source_service.list_sources(db, page=1, limit=100)
         return [
@@ -545,6 +694,68 @@ async def _run_read_tool(db: AsyncSession, name: str, args: dict[str, Any]) -> A
             }
             for p in result.scalars().all()
         ]
+    if name in {"list_projects", "list_workflows", "get_workflow_draft"}:
+        scoped_identity = _require_workspace_identity(identity)
+        resolved_workspace_id = await agent_control_service.resolve_workspace_id(
+            db,
+            scoped_identity,
+            workspace_id,
+        )
+        access = await get_workspace_access(db, resolved_workspace_id, scoped_identity)
+        require_permission(access, WorkspacePermission.READ)
+        if name == "list_projects":
+            projects = await agent_project_service.list_projects(
+                db,
+                workspace_id=resolved_workspace_id,
+            )
+            return [
+                {
+                    "id": project.id,
+                    "workspace_id": project.workspace_id,
+                    "name": project.name,
+                    "slug": project.slug,
+                    "description": project.description,
+                    "app_type": project.app_type,
+                    "primary_workflow_id": project.primary_workflow_id,
+                }
+                for project in projects
+            ]
+        project_id = args.get("project_id")
+        if not isinstance(project_id, str) or not project_id.strip():
+            raise HTTPException(status_code=422, detail="project_id is required")
+        if name == "list_workflows":
+            workflows = await agent_project_service.list_workflows(
+                db,
+                workspace_id=resolved_workspace_id,
+                project_id=project_id,
+            )
+            return [
+                {
+                    "id": workflow.id,
+                    "project_id": workflow.project_id,
+                    "name": workflow.name,
+                    "description": workflow.description,
+                    "current_published_version": workflow.current_published_version,
+                }
+                for workflow in workflows
+            ]
+        workflow_id = args.get("workflow_id")
+        if not isinstance(workflow_id, str) or not workflow_id.strip():
+            raise HTTPException(status_code=422, detail="workflow_id is required")
+        draft = await agent_project_service.get_workflow_draft(
+            db,
+            workspace_id=resolved_workspace_id,
+            project_id=project_id,
+            workflow_id=workflow_id,
+        )
+        return {
+            "project_id": project_id,
+            "workflow_id": workflow_id,
+            "revision": draft.revision,
+            "graph": canonicalize_studio_graph(draft.graph, workflow_id=workflow_id),
+            "is_published_version": False,
+            "updated_at": draft.updated_at.isoformat(),
+        }
     return {"error": f"unknown read tool: {name}"}
 
 
@@ -564,6 +775,7 @@ async def _build_proposal(
     *,
     identity: RequestIdentity | None = None,
     workspace_id: str | None = None,
+    provenance: ProposalProvenance | None = None,
 ) -> Proposal:
     """Preview an action and, for authenticated transports, persist its proposal."""
 
@@ -588,7 +800,8 @@ async def _build_proposal(
         identity=identity,
         action_name=name,
         args=args,
-        origin="chat",
+        origin="agent_conversation" if provenance is not None else "chat",
+        provenance=provenance,
     )
     return Proposal(
         tool=recorded.preview.action_name,
@@ -609,6 +822,7 @@ async def _chat_with_client(
     identity: RequestIdentity | None,
     *,
     tool_trace: list[dict[str, Any]] | None = None,
+    proposal_provenance: ProposalProvenance | None = None,
 ) -> ChatExecution:
     """Run either provider protocol while returning a persistence-safe tool trace."""
     await _emit_activity(
@@ -622,7 +836,16 @@ async def _chat_with_client(
         system += f"\n\n当前用户操作上下文 (JSON): {json.dumps(body.context, ensure_ascii=False)}"
 
     if _is_xml_tool_model(model):
-        return await _chat_xml(client, model, system, body, db, identity, tool_trace=tool_trace)
+        return await _chat_xml(
+            client,
+            model,
+            system,
+            body,
+            db,
+            identity,
+            tool_trace=tool_trace,
+            proposal_provenance=proposal_provenance,
+        )
 
     messages: list[dict[str, Any]] = [{"role": "system", "content": system}]
     messages += [{"role": m.role, "content": m.content} for m in body.messages]
@@ -683,6 +906,7 @@ async def _chat_with_client(
                     args,
                     identity=_require_write_identity(identity),
                     workspace_id=body.workspace_id or _workspace_id(body.context),
+                    provenance=proposal_provenance,
                 )
                 tool_trace.append(
                     {
@@ -718,7 +942,13 @@ async def _chat_with_client(
         for tc in tool_calls:
             args = _safe_json(tc.function.arguments)
             label, target_type, target_id = _tool_public_description(tc.function.name, args)
-            result = await _run_read_tool(db, tc.function.name, args)
+            result = await _run_read_tool(
+                db,
+                tc.function.name,
+                args,
+                identity=identity,
+                workspace_id=body.workspace_id or _workspace_id(body.context),
+            )
             tool_trace.append(
                 {
                     "name": tc.function.name,
@@ -754,6 +984,7 @@ async def _chat_single_provider(
     provider_id: str | None,
     *,
     tool_trace: list[dict[str, Any]] | None = None,
+    proposal_provenance: ProposalProvenance | None = None,
 ) -> ApiResponse:
     """Run chat through one provider without failover.
 
@@ -762,7 +993,15 @@ async def _chat_single_provider(
     provider = await _pick_provider(db, provider_id)
     client = await _build_client(provider)
     model = provider.default_model or "gpt-4o-mini"
-    result = await _chat_with_client(client, model, body, db, identity, tool_trace=tool_trace)
+    result = await _chat_with_client(
+        client,
+        model,
+        body,
+        db,
+        identity,
+        tool_trace=tool_trace,
+        proposal_provenance=proposal_provenance,
+    )
     return ApiResponse.ok(result.reply)
 
 
@@ -772,18 +1011,32 @@ async def run_chat_request(
     identity: RequestIdentity | None,
     *,
     tool_trace: list[dict[str, Any]] | None = None,
+    proposal_provenance: ProposalProvenance | None = None,
 ) -> ApiResponse:
     """Execute the existing chat provider/tool loop for persistent sessions."""
     if body.provider_id or not await resolver.has_candidates(db, "chat"):
         return await _chat_single_provider(
-            db, body, identity, body.provider_id, tool_trace=tool_trace
+            db,
+            body,
+            identity,
+            body.provider_id,
+            tool_trace=tool_trace,
+            proposal_provenance=proposal_provenance,
         )
 
     async def operation(adapter: Any, model_id: str) -> ApiResponse:
         provider = adapter.provider
         client = await _build_client(provider)
         model = model_id or provider.default_model or "gpt-4o-mini"
-        result = await _chat_with_client(client, model, body, db, identity, tool_trace=tool_trace)
+        result = await _chat_with_client(
+            client,
+            model,
+            body,
+            db,
+            identity,
+            tool_trace=tool_trace,
+            proposal_provenance=proposal_provenance,
+        )
         return ApiResponse.ok(result.reply)
 
     return await resolver.resolve_with_fallback(db, "chat", operation)
@@ -1035,6 +1288,11 @@ XML_TOOL_TEXT = (
     "- update_schedule(schedule_id, cron_expression?, enabled?): 改调度 cron 或启停 (写)。\n"
     "- list_providers(): 列出模型提供商 (id/name/default_model/enabled)。\n"
     "- update_provider(provider_id, default_model?, enabled?): 配置 AI 富化阶段的模型提供商, 改模型或启停 (写)。\n"  # noqa: E501
+    "- list_projects(): 列出当前 Workspace 的 Studio 项目。\n"
+    "- list_workflows(project_id): 列出项目工作流。\n"
+    "- get_workflow_draft(project_id, workflow_id): 读取草稿 graph 和 revision。\n"
+    "- create_project(project, workflow): 创建项目、主工作流和 revision=1 草稿 (写，需确认，不发布)。\n"  # noqa: E501
+    "- update_workflow_draft(project_id, workflow_id, revision, graph): 更新草稿 (写，需确认，不发布)。\n"  # noqa: E501
     '需要调用工具时, 严格输出 XML: <tool_use name="工具名" id="toolu_1">{json 参数}</tool_use>\n'
     "先用 list_* 拿到真实 id 再做写操作。不要用 markdown 代码块。"
 )
@@ -1049,6 +1307,7 @@ async def _chat_xml(
     identity: RequestIdentity | None,
     *,
     tool_trace: list[dict[str, Any]] | None = None,
+    proposal_provenance: ProposalProvenance | None = None,
 ) -> ChatExecution:
     """Tool loop for XML-style models (parse <tool_use> from content, feed results back as text)."""
     messages: list[dict[str, Any]] = [{"role": "system", "content": system + XML_TOOL_TEXT}]
@@ -1059,7 +1318,7 @@ async def _chat_xml(
         await db.commit()
         try:
             response = await client.chat.completions.create(
-                model=model, messages=messages, max_tokens=1024
+                model=model, messages=messages, max_tokens=XML_TOOL_MAX_TOKENS
             )
         except Exception as exc:
             logger.error("chat(xml) llm error | %s", exc)
@@ -1090,6 +1349,7 @@ async def _chat_xml(
                     args,
                     identity=_require_write_identity(identity),
                     workspace_id=body.workspace_id or _workspace_id(body.context),
+                    provenance=proposal_provenance,
                 )
                 tool_trace.append(
                     {
@@ -1113,7 +1373,13 @@ async def _chat_xml(
                         "argument_keys": sorted(args),
                     }
                 )
-            result = await _run_read_tool(db, name, args)
+            result = await _run_read_tool(
+                db,
+                name,
+                args,
+                identity=identity,
+                workspace_id=body.workspace_id or _workspace_id(body.context),
+            )
             tool_trace.append(
                 {"name": name, "kind": "read", "status": "completed", "argument_keys": sorted(args)}
             )

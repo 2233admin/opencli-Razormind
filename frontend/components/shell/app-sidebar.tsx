@@ -1,11 +1,9 @@
 'use client'
 
 import Link from 'next/link'
-import { motion } from 'motion/react'
 import { usePathname } from 'next/navigation'
 
 import { NAV_GROUPS, type NavItem } from '@/lib/navigation'
-import { Ripple } from '@/components/motion/ripple'
 import {
   Sidebar,
   SidebarContent,
@@ -58,23 +56,20 @@ export function AppSidebar() {
                       <SidebarMenuButton
                         isActive={active}
                         tooltip={item.label}
-                        className="relative overflow-hidden"
+                        className="relative overflow-hidden transition-[color,background-color,border-color,transform,opacity,width,height,padding] duration-(--motion-duration-response) ease-(--motion-ease-spatial)"
                         render={<Link href={item.href} />}
                         onClick={() => {
                           if (isMobile) setOpenMobile(false)
                         }}
                       >
                         {active ? (
-                          <motion.span
-                            layoutId="sidebar-active-telemetry"
+                          <span
                             aria-hidden="true"
                             className="nav-telemetry-rail absolute inset-y-1.5 left-0.5 w-0.5"
-                            transition={{ type: 'spring', stiffness: 520, damping: 42, mass: 0.55 }}
                           />
                         ) : null}
                         <Icon />
                         <span className="flex-1 truncate">{item.label}</span>
-                        <Ripple />
                       </SidebarMenuButton>
                     </SidebarMenuItem>
                   )

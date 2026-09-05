@@ -13,9 +13,10 @@ import {
   type Edge,
   type Node,
   type NodeProps,
+  type ReactFlowInstance,
 } from '@xyflow/react'
 import { AlertTriangle, Check, CircleDot, GitBranch, Trash2 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -79,7 +80,8 @@ function BuilderNodeCard({ data, selected }: NodeProps<BuilderNode>) {
 
 const NODE_TYPES = { builder: BuilderNodeCard }
 
-function layoutFor(index: number) {
+function layoutFor(index: number, compact: boolean) {
+  if (compact) return { x: 42, y: 28 + index * 156 }
   const column = index % 3
   const row = Math.floor(index / 3)
   return { x: 80 + column * 310, y: 80 + row * 190 }
@@ -126,14 +128,47 @@ export function AgentBuilderCanvas({ gapNodeIds = [], onManualEdit, onSpecChange
   const [edges, setEdges] = useState<BuilderEdge[]>([])
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null)
+  const [compactLayout, setCompactLayout] = useState(() => typeof window !== 'undefined' && window.matchMedia('(max-width: 639px)').matches)
+  const canvasRef = useRef<HTMLDivElement>(null)
+  const flowRef = useRef<ReactFlowInstance<BuilderNode, BuilderEdge> | null>(null)
+  const wasVisibleRef = useRef(false)
+  const lastCompactLayoutRef = useRef(compactLayout)
+
+  useEffect(() => {
+    const element = canvasRef.current
+    if (!element) return
+    const observer = new ResizeObserver(() => {
+      const visible = element.clientWidth > 0 && element.clientHeight > 0
+      if (!visible) {
+        wasVisibleRef.current = false
+        return
+      }
+      if (!wasVisibleRef.current && flowRef.current) {
+        wasVisibleRef.current = true
+        requestAnimationFrame(() => flowRef.current?.fitView({ padding: 0.22, duration: 0 }))
+      }
+    })
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [])
+
+  useEffect(() => {
+    const media = window.matchMedia('(max-width: 639px)')
+    const update = () => setCompactLayout(media.matches)
+    update()
+    media.addEventListener('change', update)
+    return () => media.removeEventListener('change', update)
+  }, [])
 
   useEffect(() => {
     setNodes((current) => {
       const positions = new Map(current.map((node) => [node.id, node.position]))
+      const layoutChanged = lastCompactLayoutRef.current !== compactLayout
+      lastCompactLayoutRef.current = compactLayout
       return spec.nodes.map((node, index) => ({
         id: node.id,
         type: 'builder',
-        position: positions.get(node.id) ?? savedPosition(node) ?? layoutFor(index),
+        position: savedPosition(node) ?? (layoutChanged ? undefined : positions.get(node.id)) ?? layoutFor(index, compactLayout),
         data: {
           label: node.label,
           description: node.type === 'email-output' && resolvedDeliveryEmail
@@ -158,7 +193,13 @@ export function AgentBuilderCanvas({ gapNodeIds = [], onManualEdit, onSpecChange
       },
       style: { strokeWidth: 1.5 },
     })))
-  }, [gapSet, resolvedDeliveryEmail, spec])
+  }, [compactLayout, gapSet, resolvedDeliveryEmail, spec])
+
+  useEffect(() => {
+    if (!flowRef.current || !canvasRef.current || canvasRef.current.clientWidth === 0) return
+    const frame = requestAnimationFrame(() => flowRef.current?.fitView({ padding: 0.16, duration: 0 }))
+    return () => cancelAnimationFrame(frame)
+  }, [compactLayout, nodes.length])
 
   const selectedNode = spec.nodes.find((node) => node.id === selectedNodeId)
   const selectedEdgeIndex = selectedEdgeId ? edges.findIndex((edge) => edge.id === selectedEdgeId) : -1
@@ -231,15 +272,22 @@ export function AgentBuilderCanvas({ gapNodeIds = [], onManualEdit, onSpecChange
 
   return (
     <div className="grid min-h-[520px] min-w-0 bg-muted/10 lg:grid-cols-[minmax(0,1fr)_250px]">
-      <div className="relative min-h-[440px] min-w-0" aria-label="可编辑 Workflow Draft 画布">
+      <div ref={canvasRef} className="relative min-h-[440px] min-w-0" aria-label="可编辑 Workflow Draft 画布">
         <ReactFlow<BuilderNode, BuilderEdge>
           nodes={nodes}
           edges={edges}
           nodeTypes={NODE_TYPES}
           fitView
           fitViewOptions={{ padding: 0.22 }}
-          minZoom={0.35}
+          minZoom={0.75}
           maxZoom={1.6}
+          onInit={(instance) => {
+            flowRef.current = instance
+            if (canvasRef.current && canvasRef.current.clientWidth > 0) {
+              wasVisibleRef.current = true
+              requestAnimationFrame(() => instance.fitView({ padding: 0.22, duration: 0 }))
+            }
+          }}
           deleteKeyCode={null}
           isValidConnection={(connection) => connectionAllowed(spec, connection)}
           onConnect={onConnect}
@@ -259,8 +307,8 @@ export function AgentBuilderCanvas({ gapNodeIds = [], onManualEdit, onSpecChange
           }}
         >
           <Background gap={22} size={1} />
-          <Controls showInteractive={false} />
-          <MiniMap pannable zoomable nodeStrokeWidth={2} className="!bg-background/85" />
+          <Controls showInteractive={false} className="!border-border !bg-background/90 !shadow-sm [&_button]:!border-border [&_button]:!bg-background [&_button_svg]:!fill-foreground" />
+          <MiniMap pannable zoomable nodeStrokeWidth={2} className="hidden !bg-background/85 sm:block" />
         </ReactFlow>
         <div className="pointer-events-none absolute top-3 left-3 rounded-sm border bg-background/90 px-2.5 py-1.5 font-mono text-[9px] text-muted-foreground shadow-sm">
           拖拽节点 · 点击边编辑 mapping · DAG 禁止循环 · 多输入必须显式 Merge

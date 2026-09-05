@@ -9,6 +9,7 @@ import { toast } from 'sonner'
 import { ErrorState, LoadingState } from '@/components/shell/data-states'
 import { PageContainer } from '@/components/shell/page-container'
 import { ProjectNavigation } from '@/components/studio/project-navigation'
+import { ProjectAgentWorkspace } from '@/components/studio/project-agent-workspace'
 import { Badge } from '@/components/ui/badge'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -210,6 +211,8 @@ export default function ProjectOverviewPage({ params }: { params: Promise<{ proj
           <ReadinessCard icon={Rocket} label="发布版本" value={publishedVersion === null ? '未发布' : `v${publishedVersion}`} detail={publishedVersion === null ? '验证通过后才能发布' : '已有不可变 Workflow Version'} ready={publishedVersion !== null} />
         </div>
       </section>
+
+      <ProjectAgentWorkspace workspaceId={workspaceId} projectId={projectId} workflowId={primaryWorkflow?.id} />
 
       <section className="grid gap-4 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]" aria-labelledby="runtime-title">
         <Card>

@@ -23,17 +23,20 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 
 import { PageContainer } from '@/components/shell/page-container'
+import { ContextPageLayout } from '@/components/experience/context-page-layout'
+import { useProjectCreation } from '@/components/studio/project-create-form'
 import { AgentBuilderCanvas } from '@/components/studio/agent-builder-canvas'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
-import { useBootstrapWorkspaceProject, useMyWorkspaces } from '@/lib/api/hooks'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { useMyWorkspaces } from '@/lib/api/hooks'
 import { updateProjectWorkflowDraft } from '@/lib/api/endpoints'
 import { analyzeGeneratedWorkflowReadiness, extractWorkflowSchedule, extractWorkflowSource, generateWorkflowLocally } from '@/lib/flow/local-generate'
 import type { GeneratedWorkflowSpec } from '@/lib/flow/types'
 import { generatedSpecToWorkflowProject } from '@/lib/workflow/generated-project'
-import { studioGraphForTemplate, studioSlug } from '@/lib/workflow/studio-templates'
+import { studioGraphForTemplate } from '@/lib/workflow/studio-templates'
 
 const STARTERS = [
   '每天汇总 AI 行业新闻，提取重点后发到我的邮箱',
@@ -57,7 +60,7 @@ type PendingPatch = {
   spec: GeneratedWorkflowSpec
   summary: string[]
 }
-type DurableDraft = { graphId: string; projectId: string; revision: number; workflowId: string }
+type DurableDraft = { graphId: string; projectId: string; revision: number; workflowId: string; workspaceId: string }
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const EMAIL_CAPTURE_PATTERN = /[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/
@@ -162,7 +165,7 @@ export default function NewAgentStudioPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const workspaces = useMyWorkspaces()
-  const bootstrapProject = useBootstrapWorkspaceProject()
+  const projectCreation = useProjectCreation()
   const [workspaceId, setWorkspaceId] = useState<string | null>(searchParams.get('workspace'))
   const [messages, setMessages] = useState<Message[]>([
     { role: 'agent', content: '先告诉我：这个项目要持续完成什么工作？可以写清数据从哪里来、需要怎样判断、最后交付到哪里。' },
@@ -184,7 +187,16 @@ export default function NewAgentStudioPage() {
 
   useEffect(() => {
     if (!workspaces.data?.length) return
-    if (!workspaceId || !workspaces.data.some((workspace) => workspace.id === workspaceId)) setWorkspaceId(workspaces.data[0].id)
+    if (workspaceId && workspaces.data.some((workspace) => workspace.id === workspaceId)) return
+    const preferredWorkspaceId = window.localStorage.getItem('opencli:studio-workspace')
+    const preferredWorkspace = workspaces.data.find((workspace) => workspace.id === preferredWorkspaceId)
+    setWorkspaceId(preferredWorkspace?.id ?? (workspaces.data.length === 1 ? workspaces.data[0].id : null))
+  }, [workspaceId, workspaces.data])
+
+  useEffect(() => {
+    if (workspaceId && workspaces.data?.some((workspace) => workspace.id === workspaceId)) {
+      window.localStorage.setItem('opencli:studio-workspace', workspaceId)
+    }
   }, [workspaceId, workspaces.data])
 
   useEffect(() => () => {
@@ -239,9 +251,9 @@ export default function NewAgentStudioPage() {
     if (fingerprint === lastPersistedGraphRef.current) return
     const save = draftSaveChainRef.current.then(async () => {
       const current = durableDraftRef.current
-      if (!current || !workspaceId) return
+      if (!current || !workspaceId || current.workspaceId !== workspaceId) return
       setDurableSaving(true)
-      const updated = await updateProjectWorkflowDraft(workspaceId, current.projectId, current.workflowId, graph, current.revision)
+      const updated = await updateProjectWorkflowDraft(current.workspaceId, current.projectId, current.workflowId, graph, current.revision)
       setDurableDraftState({ ...current, graphId: updated.graph.id, revision: updated.revision })
       lastPersistedGraphRef.current = JSON.stringify(updated.graph)
     })
@@ -265,25 +277,16 @@ export default function NewAgentStudioPage() {
       return
     }
     const graph = graphForDraft(nextSpec, draftName, state)
+    const draftWorkspaceId = workspaceId
     setDurableSaving(true)
     try {
-      const result = await bootstrapProject.mutateAsync({
-        workspaceId,
-        data: {
-          project: {
-            name: draftName,
-            slug: `${studioSlug(draftName)}-${Date.now().toString(36)}`,
-            description: requirements.join('；') || 'Agent Builder Draft',
-            app_type: 'agent',
-          },
-          workflow: { name: draftName, description: requirements.join('；'), graph },
-        },
-      })
+      const result = await projectCreation.create({ workspaceId: draftWorkspaceId, name: draftName, description: requirements.join('；') || 'Agent Builder Draft', graph, appType: 'agent' })
       setDurableDraftState({
         graphId: result.draft.graph.id,
         projectId: result.project.id,
         revision: result.draft.revision,
         workflowId: result.primary_workflow.id,
+        workspaceId: draftWorkspaceId,
       })
       lastPersistedGraphRef.current = JSON.stringify(result.draft.graph)
       toast.success('第一个有效意图已创建 durable Project Draft')
@@ -384,27 +387,12 @@ export default function NewAgentStudioPage() {
         toast.success(gaps.length
           ? `项目草稿已保存；${gaps.length} 项 Capability Gap 会阻止发布和运行`
           : '项目草稿已保存；验证后请确认真实投递连接再发布')
-        router.push(`/studio/workflow?workspace=${workspaceId}&project=${current.projectId}&workflow=${current.workflowId}`)
+        router.push(`/studio/workflow?workspace=${current.workspaceId}&project=${current.projectId}&workflow=${current.workflowId}`)
         return
       }
 
       const graph = studioGraphForTemplate('blank', finalName)
-      const result = await bootstrapProject.mutateAsync({
-        workspaceId,
-        data: {
-          project: {
-            name: finalName,
-            slug: `${studioSlug(finalName)}-${Date.now().toString(36)}`,
-            description: userRequirements.join('；') || '从空白画布创建',
-            app_type: 'workflow',
-          },
-          workflow: {
-            name: finalName,
-            description: userRequirements.join('；') || '空白工作流',
-            graph,
-          },
-        },
-      })
+      const result = await projectCreation.create({ workspaceId, name: finalName, description: userRequirements.join('；') || '从空白画布创建', graph, appType: 'workflow' })
       toast.success('空白项目已创建')
       router.push(`/studio/workflow?workspace=${workspaceId}&project=${result.project.id}&workflow=${result.primary_workflow.id}&guide=blank`)
     } catch (reason) {
@@ -462,8 +450,19 @@ export default function NewAgentStudioPage() {
         </Button>
       )}
     >
-      <div className="grid min-h-0 overflow-hidden rounded-md border bg-card/25 xl:min-h-[760px] xl:grid-cols-[minmax(0,1.45fr)_minmax(340px,0.55fr)]">
-        <section className="flex min-h-0 min-w-0 flex-col border-b xl:order-2 xl:border-b-0 xl:border-l" aria-label="Agent 对话 Dock">
+      {(workspaces.data?.length ?? 0) > 1 ? (
+        <div className="mb-3 flex flex-wrap items-center gap-2 rounded-md border bg-muted/20 p-2.5 text-xs">
+          <span className="font-medium">保存到 Workspace</span>
+          <Select value={workspaceId ?? ''} onValueChange={(value) => setWorkspaceId(value || null)} disabled={Boolean(durableDraft) || durableSaving || projectCreation.isPending}>
+            <SelectTrigger className="min-h-11 min-w-52 bg-background" aria-label="选择项目 Workspace"><SelectValue>{(workspaces.data ?? []).find((workspace) => workspace.id === workspaceId)?.name ?? '选择已授权 Workspace'}</SelectValue></SelectTrigger>
+            <SelectContent>{(workspaces.data ?? []).map((workspace) => <SelectItem key={workspace.id} value={workspace.id}>{workspace.name}</SelectItem>)}</SelectContent>
+          </Select>
+          {!workspaceId ? <span className="text-muted-foreground">未选择时不会创建草稿。</span> : null}
+          {durableDraft ? <span className="text-muted-foreground">草稿属于 {((workspaces.data ?? []).find((workspace) => workspace.id === durableDraft.workspaceId)?.name ?? durableDraft.workspaceId)}。打开草稿后可创建另一个项目。</span> : null}
+        </div>
+      ) : null}
+      <ContextPageLayout context={<>
+        <section className="flex min-h-0 min-w-0 flex-col" aria-label="Agent 对话 Dock">
           <div className="border-b p-4 sm:p-5">
             <div className="flex items-center gap-3">
               <div className="grid size-10 shrink-0 place-items-center rounded-md bg-foreground text-background">
@@ -632,7 +631,7 @@ export default function NewAgentStudioPage() {
               <button
                 type="button"
                 onClick={() => void persistProject(true)}
-                disabled={!workspaceId || bootstrapProject.isPending}
+                disabled={!workspaceId || projectCreation.isPending}
                 className="inline-flex min-h-11 items-center text-left text-xs text-muted-foreground hover:text-foreground disabled:opacity-50"
               >
                 跳过 Agent，直接空白
@@ -640,8 +639,9 @@ export default function NewAgentStudioPage() {
             </div>
           </div>
         </section>
+      </>}>
 
-        <section className="relative min-h-[560px] min-w-0 overflow-hidden bg-muted/10 xl:order-1" aria-label="Agent 工作流方案">
+        <section className="relative min-h-[560px] min-w-0 overflow-hidden bg-muted/10" aria-label="Agent 工作流方案">
           <div className="relative flex h-full min-w-0 flex-col">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-background/75 px-4 py-4 backdrop-blur sm:px-6">
               <div className="min-w-0">
@@ -707,10 +707,10 @@ export default function NewAgentStudioPage() {
                     <Button
                       className="min-h-11 w-full shrink-0 sm:w-auto"
                       onClick={() => void persistProject()}
-                      disabled={!workspaceId || !name.trim() || bootstrapProject.isPending || durableSaving || generating || pendingPatch !== null}
+                      disabled={!workspaceId || !name.trim() || projectCreation.isPending || durableSaving || generating || pendingPatch !== null}
                     >
                       <Save className="size-4" />
-                      {bootstrapProject.isPending || durableSaving ? '正在保存' : durableDraft ? '打开正式编辑器' : '保存项目草稿'}
+                      {projectCreation.isPending || durableSaving ? '正在保存' : durableDraft ? '打开正式编辑器' : '保存项目草稿'}
                     </Button>
                   </div>
                 </div>
@@ -730,7 +730,7 @@ export default function NewAgentStudioPage() {
             )}
           </div>
         </section>
-      </div>
+      </ContextPageLayout>
     </PageContainer>
   )
 }

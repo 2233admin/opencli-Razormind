@@ -43,9 +43,8 @@ from backend.api.v1.workflows import (
     list_evidence_batches,
     parse_projection_includes,
 )
-from backend.models.gaojixing_collection import GaojixingCollectionRun
-from backend.schemas.workflow_runtime import WorkflowRunStatus, WorkflowRunTraceResponse
 from backend.database import get_db, rollback_session
+from backend.models.gaojixing_collection import GaojixingCollectionRun
 from backend.models.studio import (
     StudioProject,
     StudioWorkflow,
@@ -55,6 +54,8 @@ from backend.models.studio import (
 from backend.models.workflow_run import WorkflowRun
 from backend.schemas import workflow as workflow_schemas
 from backend.schemas.common import ApiResponse, PaginationMeta
+from backend.schemas.workflow_runtime import WorkflowRunStatus, WorkflowRunTraceResponse
+from backend.services.agent_project_service import update_workflow_draft
 from backend.services.gaojixing_collection_service import (
     GaojixingCollectionConflictError,
     resume_collection,
@@ -1099,18 +1100,12 @@ async def update_draft(
     body: DraftUpdate,
     db: AsyncSession = Depends(get_db),
 ) -> ApiResponse:
-    await get_workflow(db, workspace_id, project_id, workflow_id)
-    row = await db.scalar(
-        select(StudioWorkflowDraft)
-        .where(StudioWorkflowDraft.workflow_id == workflow_id)
-        .with_for_update()
+    row = await update_workflow_draft(
+        db,
+        workspace_id=workspace_id,
+        project_id=project_id,
+        workflow_id=workflow_id,
+        body=body,
+        actor_user_id=LOCAL_USER_ID,
     )
-    if row is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Workflow draft not found")
-    if row.revision != body.revision:
-        raise HTTPException(status.HTTP_409_CONFLICT, "Workflow draft revision conflict")
-    row.graph = canonicalize_studio_graph(body.graph, workflow_id=workflow_id)
-    row.revision += 1
-    row.updated_by_user_id = LOCAL_USER_ID
-    await db.flush()
     return ApiResponse.ok(DraftRead.model_validate(row, from_attributes=True))

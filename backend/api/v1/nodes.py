@@ -225,6 +225,10 @@ async def register_node(
     result = await db.execute(select(BrowserInstance).where(BrowserInstance.endpoint == url))
     inst = result.scalar_one_or_none()
     if inst:
+        if inst.profile_kind != body.profile_kind:
+            from backend.services.browser_account_service import require_unassigned
+
+            await require_unassigned(db, inst.id)
         inst.mode = body.mode
         inst.agent_url = url
         inst.agent_protocol = body.agent_protocol
@@ -367,8 +371,6 @@ async def delete_node(node_id: str, db: AsyncSession = Depends(get_db)) -> ApiRe
     if not node:
         raise HTTPException(status_code=404, detail="Node not found")
 
-    _pool_remove(node.url)
-
     # Also remove BrowserInstance record
     from backend.models.browser import BrowserInstance
 
@@ -377,10 +379,14 @@ async def delete_node(node_id: str, db: AsyncSession = Depends(get_db)) -> ApiRe
     )
     bi = bi_result.scalar_one_or_none()
     if bi:
+        from backend.services.browser_account_service import require_unassigned
+
+        await require_unassigned(db, bi.id)
         await db.delete(bi)
 
     await db.delete(node)
     await db.commit()
+    _pool_remove(node.url)
     logger.info("Node deleted: %s", node.url)
     return ApiResponse.ok(None)
 
@@ -875,6 +881,10 @@ async def node_ws_endpoint(ws: WebSocket) -> None:
                 )
                 inst = result.scalar_one_or_none()
                 if inst:
+                    if inst.profile_kind != profile_kind:
+                        from backend.services.browser_account_service import require_unassigned
+
+                        await require_unassigned(db, inst.id)
                     inst.mode = mode
                     inst.agent_url = agent_url
                     inst.agent_protocol = "ws"
@@ -893,6 +903,9 @@ async def node_ws_endpoint(ws: WebSocket) -> None:
                     )
                     db.add(inst)
                 await db.commit()
+        except HTTPException:
+            await ws.close(code=1008, reason="Account Profile is reserved")
+            return
         except Exception as exc:
             logger.warning("WS node %s: DB upsert failed (non-fatal): %s", agent_url, exc)
 

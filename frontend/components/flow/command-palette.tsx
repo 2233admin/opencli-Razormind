@@ -440,6 +440,8 @@ export function CommandPalette({
   open,
   onClose,
   onMessage,
+  onSaveWorkflow,
+  projectPersistence = false,
   onNodeCreated,
   getAnchor,
   initialTab = "nodes",
@@ -453,6 +455,8 @@ export function CommandPalette({
   open: boolean
   onClose: () => void
   onMessage?: (msg: string) => void
+  onSaveWorkflow?: () => void
+  projectPersistence?: boolean
   onNodeCreated?: () => void
   getAnchor?: () => { x: number; y: number }
   initialTab?: PickerTab
@@ -1197,7 +1201,7 @@ export function CommandPalette({
                   <PickerRow icon={Boxes} label={copy.startFromNode} description={copy.startFromNodeDescription} onClick={() => { setActiveTab("nodes"); setQuery("") }} />
                   <SectionLabel>{copy.canvasActions}</SectionLabel>
                   <PickerRow icon={LayoutGrid} label={copy.autoLayout} description={copy.autoLayoutDescription} onClick={() => { void autoLayout("TB", "elk", true); onMessage?.(language === "zh-CN" ? "已应用自动布局" : "Auto-layout applied"); onClose() }} />
-                  <PickerRow icon={Save} label={copy.saveDraft} description={copy.saveDraftDescription} onClick={() => { save(); onMessage?.(language === "zh-CN" ? "已保存到本地" : "Saved locally"); onClose() }} />
+                  <PickerRow icon={Save} label={copy.saveDraft} description={projectPersistence ? (language === "zh-CN" ? "保存到当前项目，与自动保存保持一致" : "Save to this project, using the same destination as autosave") : copy.saveDraftDescription} onClick={() => { if (onSaveWorkflow) onSaveWorkflow(); else { save(); onMessage?.(language === "zh-CN" ? "已保存到本地" : "Saved locally") }; onClose() }} />
                   <PickerRow icon={RotateCcw} label={copy.restoreExample} description={copy.restoreExampleDescription} onClick={() => { reset(); onMessage?.(language === "zh-CN" ? "已恢复示例工作流" : "Example workflow restored"); onClose() }} />
                 </section>
               ) : null}

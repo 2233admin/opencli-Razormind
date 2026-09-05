@@ -486,21 +486,24 @@ async def remove_instance(
     if endpoint not in pool.endpoints:
         raise HTTPException(status_code=404, detail=f"Endpoint {endpoint!r} not in pool")
 
-    if isinstance(pool, LocalBrowserPool):
-        pool.remove_endpoint(endpoint)
-
     result = await db.execute(select(BrowserInstance).where(BrowserInstance.endpoint == endpoint))
     inst = result.scalar_one_or_none()
     if inst:
+        from backend.services.browser_account_service import require_unassigned
+
+        await require_unassigned(db, inst.id)
         await db.delete(inst)
         await db.commit()
+
+    if isinstance(pool, LocalBrowserPool):
+        pool.remove_endpoint(endpoint)
 
     logger.info("Removed pool entry: %s", endpoint)
     return ApiResponse.ok({"removed": endpoint, "total": len(pool.endpoints)})
 
 
 @router.delete("/chrome-instances/{n}", response_model=ApiResponse[dict])
-async def remove_chrome_instance(n: int) -> ApiResponse:
+async def remove_chrome_instance(n: int, db: AsyncSession = Depends(get_db)) -> ApiResponse:
     """Stop and remove agent-N (N >= 2). Instance 1 is managed by docker-compose."""
     if n < 2:
         raise HTTPException(status_code=400, detail="Instance 1 is managed by docker-compose")
@@ -510,6 +513,13 @@ async def remove_chrome_instance(n: int) -> ApiResponse:
     pool = get_pool()
     name = f"agent-{n}"
     endpoint = f"http://{name}:19222"
+
+    from backend.models.browser import BrowserInstance
+    from backend.services.browser_account_service import require_unassigned
+
+    instance = await db.scalar(select(BrowserInstance).where(BrowserInstance.endpoint == endpoint))
+    if instance:
+        await require_unassigned(db, instance.id)
 
     client = docker_client()
     try:

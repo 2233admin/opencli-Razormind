@@ -7,6 +7,7 @@ type AgentMessageLike = {
 
 type AgentProposalLike = {
   tool: string
+  args: Record<string, unknown>
   workspace_id?: string | null
 }
 
@@ -25,6 +26,8 @@ const QUERY_KEYS_BY_PROPOSAL_TOOL: Readonly<Record<string, readonly (readonly un
   trigger_task: [['tasks'], ['dashboard', 'stats']],
   update_schedule: [['schedules']],
   update_provider: [['providers']],
+  create_project: [['workspace-projects']],
+  update_workflow_draft: [['workspace-projects'], ['project-workflows']],
 }
 
 export function proposalQueryKeys(proposal: AgentProposalLike): readonly (readonly unknown[])[] {
@@ -32,6 +35,11 @@ export function proposalQueryKeys(proposal: AgentProposalLike): readonly (readon
   const targetQueryKeys = QUERY_KEYS_BY_PROPOSAL_TOOL[proposal.tool]
   if (targetQueryKeys) queryKeys.push(...targetQueryKeys)
   if (proposal.workspace_id) queryKeys.push(['operations-inbox', proposal.workspace_id])
+  if (proposal.workspace_id && (proposal.tool === 'create_project' || proposal.tool === 'update_workflow_draft')) {
+    queryKeys.push(['workspace-projects', proposal.workspace_id])
+    const projectId = typeof proposal.args.project_id === 'string' ? proposal.args.project_id : undefined
+    if (projectId) queryKeys.push(['project-workflows', proposal.workspace_id, projectId])
+  }
   queryKeys.push(['control-actions'])
   return queryKeys
 }

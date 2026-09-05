@@ -2,7 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query"
 
-import { getApiAuthToken } from "@/lib/api/auth-token"
+import { getApiAuthHeaders } from "@/lib/api/auth-headers"
 import type {
   WorkflowCapability,
   WorkflowNodeKind,
@@ -109,7 +109,7 @@ export async function fetchBackendNodeCapabilityCatalog(
     : "/api/v1/plugins/capabilities"
   const response = await fetch(path, {
     cache: "no-store",
-    headers: apiAuthHeaders(),
+    headers: getApiAuthHeaders(),
   })
   const payload = (await response.json().catch(() => null)) as
     | ApiResponse<BackendNodeCapabilityCatalog>
@@ -162,9 +162,4 @@ function readApiError<T>(payload: ApiResponse<T> | null, fallback: string): stri
     return payload.detail.message ?? payload.detail.code ?? fallback
   }
   return payload?.message ?? payload?.error ?? fallback
-}
-
-function apiAuthHeaders(): HeadersInit {
-  const token = getApiAuthToken()
-  return token ? { Authorization: `Bearer ${token}` } : {}
 }

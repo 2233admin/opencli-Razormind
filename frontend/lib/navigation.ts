@@ -69,6 +69,7 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     label: '管理',
     items: [
+      { href: '/browser-accounts', label: '账号登录', icon: ShieldCheck },
       {
         href: '/providers',
         label: '模型与连接',
@@ -113,6 +114,7 @@ export const ROUTE_LABELS: Record<string, string> = {
   '/nodes': '执行资源',
   '/workers': 'Worker',
   '/browsers': 'Chrome 池',
+  '/browser-accounts': '账号登录',
   '/control/actions': '控制与审计',
   '/control/kill-switch': '熔断开关',
   '/control/advisory-report': '建议报告',

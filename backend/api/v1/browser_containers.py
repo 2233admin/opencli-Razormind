@@ -144,7 +144,9 @@ async def add_chrome_instance(
 
     pool = get_pool()
     project = _project_name()
-    novnc_base = int(os.environ.get("NOVNC_BASE_PORT", 6080))
+    from backend.config import get_settings
+
+    novnc_base = get_settings().novnc_base_port
     network = f"{project}_default"
     image = os.environ.get("CHROME_IMAGE", f"{project}-chrome")
     client = docker_client()
@@ -172,7 +174,24 @@ async def add_chrome_instance(
 
     created: list[dict] = []
     for _ in range(count):
-        instance_index = len(pool.endpoints) + 1
+        # A removed slot can leave holes; never select an existing account slot
+        # merely because the pool's size decreased.
+        known_endpoints = set(pool.endpoints) | set(
+            await db.scalars(select(BrowserInstance.endpoint))
+        )
+        # Other previews or a previous failed request may have created containers
+        # not present in this database. Their names/ports are still occupied.
+        known_endpoints.update(
+            f"http://{container.name}:19222"
+            for container in client.containers.list(all=True, filters={"label": "agent.pool.extra=true"})
+            if re.fullmatch(r"agent-[1-9]\d*", container.name)
+        )
+        indices = [
+            int(match[1] or 1)
+            for endpoint in known_endpoints
+            if (match := re.fullmatch(r"https?://agent(?:-([1-9]\d*))?(?::\d+)?/?", endpoint))
+        ]
+        instance_index = max(indices, default=1) + 1
         name = f"agent-{instance_index}"
         novnc_port = novnc_base + instance_index - 1
         resolved_profile_name = clean_profile_name or name

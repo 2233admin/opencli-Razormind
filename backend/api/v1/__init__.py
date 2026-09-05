@@ -8,6 +8,7 @@ from backend.api.v1 import (
     analysis_findings,
     analysis_snapshots,
     automations,
+    browser_accounts,
     browser_act,
     browser_containers,
     browser_spaces,
@@ -76,6 +77,7 @@ def create_v1_router(workflow_plugins: WorkflowPluginRegistry) -> APIRouter:
     v1_router.include_router(automations.router)
     v1_router.include_router(odp_reconciliation.router)
     v1_router.include_router(image_studio.router)
+    v1_router.include_router(browser_accounts.router)
     v1_router.include_router(browser_act.router)
     v1_router.include_router(browser_containers.router)
     v1_router.include_router(browsers.router)

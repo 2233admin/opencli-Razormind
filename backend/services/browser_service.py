@@ -330,6 +330,13 @@ async def update_browser_instance(
     payload: BrowserInstanceConfigUpdate,
 ) -> BrowserInstance:
     values = payload.model_dump(exclude_unset=True)
+    if any(
+        key in values and values[key] != getattr(instance, key)
+        for key in ("profile_name", "profile_kind")
+    ):
+        from backend.services.browser_account_service import require_unassigned
+
+        await require_unassigned(session, instance.id)
     if "runtime_bundle_id" in values and values["runtime_bundle_id"] is not None:
         if not await get_runtime_bundle(session, values["runtime_bundle_id"]):
             raise BrowserRuntimeError("unknown_bundle", "selected runtime bundle does not exist")

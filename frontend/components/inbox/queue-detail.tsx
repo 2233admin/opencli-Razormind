@@ -5,11 +5,13 @@ import Link from 'next/link'
 import { useState, type ReactNode } from 'react'
 
 import AIApproval, { type AIApprovalOption } from '@/components/smoothui/ai-approval'
+import { InboxConversationThread, InboxConversationUnavailable } from '@/components/inbox/inbox-conversation-thread'
 import { StatusBadge } from '@/components/shell/status-badge'
 import { buttonVariants } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { useDecideOperationsApproval } from '@/lib/api/hooks'
 import type { ApprovalDecision, OperationsWorkItem } from '@/lib/api/types'
+import { inboxOriginActions, inboxOriginUnavailableMessage, readInboxOrigin } from '@/lib/inbox/origin-navigation'
 
 export type QueueDetailItem = {
   id: string
@@ -27,6 +29,7 @@ export type QueueDetailItem = {
   detailLabel: string
   detailValue: string
   approval?: OperationsWorkItem
+  proposal?: OperationsWorkItem
 }
 
 export type QueueSectionMeta = {
@@ -157,6 +160,8 @@ export function ApprovalQueueDetail({ item }: { item: QueueDetailItem }) {
   const [decisionError, setDecisionError] = useState<string | null>(null)
   const [cardRevision, setCardRevision] = useState(0)
   const approval = item.approval
+  const origin = approval ? readInboxOrigin(approval.evidence, approval.workspace_id) : { unavailableReason: 'missing' as const }
+  const originActions = inboxOriginActions(origin)
 
   async function decideApproval(option: AIApprovalOption) {
     if (!approval || !reason.trim() || decision.isPending) return
@@ -217,6 +222,31 @@ export function ApprovalQueueDetail({ item }: { item: QueueDetailItem }) {
             </p>
           </AIApproval>
 
+          <section aria-labelledby="approval-origin-heading" className="rounded-lg border bg-muted/15 p-3">
+            <h3 id="approval-origin-heading" className="text-xs font-medium text-muted-foreground">运行来源</h3>
+            {originActions.length ? (
+              <div className="mt-2 flex flex-wrap gap-2">
+                {originActions.map((action) => (
+                  <Link key={action.href} href={action.href} className={buttonVariants({ variant: 'outline', size: 'sm' })}>
+                    {action.label}<ArrowUpRight aria-hidden="true" className="size-3.5" />
+                  </Link>
+                ))}
+              </div>
+            ) : <p className="mt-2 text-xs text-muted-foreground">{inboxOriginUnavailableMessage(origin)}</p>}
+          </section>
+
+          {origin.conversation ? (
+            <InboxConversationThread
+              conversationId={origin.conversation}
+              context={{
+                project_id: origin.project ?? null,
+                workflow_id: origin.workflow ?? null,
+                run_id: origin.run ?? null,
+                surface: 'inbox_result',
+              }}
+            />
+          ) : <InboxConversationUnavailable reason={origin.unavailableReason} />}
+
           {decisionError ? (
             <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
               {decisionError}。决定尚未生效，请检查连接后重试。
@@ -242,6 +272,61 @@ export function ApprovalQueueDetail({ item }: { item: QueueDetailItem }) {
           <ArrowUpRight aria-hidden="true" className="size-3.5" />
         </Link>
       </div>
+    </div>
+  )
+}
+
+/** Change proposals are confirmed by the originating Agent Dock, never by the
+ * operations-approval mutation which governs a separate approval workflow. */
+export function ProposalQueueDetail({ item }: { item: QueueDetailItem }) {
+  const proposal = item.proposal
+  const origin = proposal ? readInboxOrigin(proposal.evidence, proposal.workspace_id) : { unavailableReason: 'missing' as const }
+  const actions = inboxOriginActions(origin)
+  const conversationAction = actions.find((action) => action.label === '继续原会话')
+  const sourceActions = actions.filter((action) => action !== conversationAction)
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="border-b px-5 py-3.5">
+        <p className="text-xs font-medium text-muted-foreground">{item.eyebrow}</p>
+        <h2 className="mt-0.5 text-base font-semibold">{item.title}</h2>
+      </div>
+      <ScrollArea className="min-h-0 flex-1">
+        <div className="mx-auto w-full max-w-3xl space-y-5 p-5 lg:p-7">
+          <section aria-labelledby="proposal-detail-heading">
+            <h3 id="proposal-detail-heading" className="text-xs font-medium text-muted-foreground">提案内容</h3>
+            <p className="mt-3 whitespace-pre-wrap text-sm leading-6">{item.summary}</p>
+          </section>
+          <section className="rounded-lg border bg-muted/15 p-3" aria-labelledby="proposal-origin-heading">
+            <h3 id="proposal-origin-heading" className="text-xs font-medium text-muted-foreground">来源与处理位置</h3>
+            {conversationAction ? (
+              <Link href={conversationAction.href} className={buttonVariants({ size: 'sm', className: 'mt-2' })}>
+                {conversationAction.label}<ArrowUpRight aria-hidden="true" className="size-3.5" />
+              </Link>
+            ) : (
+              <p className="mt-2 text-xs text-muted-foreground">没有可恢复的原会话，无法在收件箱确认此提案。</p>
+            )}
+            {sourceActions.length ? (
+              <div className="mt-3 flex flex-wrap gap-2">
+                {sourceActions.map((action) => (
+                  <Link key={action.href} href={action.href} className={buttonVariants({ variant: 'outline', size: 'sm' })}>{action.label}</Link>
+                ))}
+              </div>
+            ) : null}
+          </section>
+          {origin.conversation ? (
+            <InboxConversationThread
+              conversationId={origin.conversation}
+              context={{
+                project_id: origin.project ?? null,
+                workflow_id: origin.workflow ?? null,
+                run_id: origin.run ?? null,
+                surface: 'inbox_result',
+              }}
+            />
+          ) : <InboxConversationUnavailable reason={origin.unavailableReason} />}
+        </div>
+      </ScrollArea>
+      <div className="border-t px-5 py-3 text-xs text-muted-foreground">请在原 Agent 会话中确认或调整此提案。</div>
     </div>
   )
 }

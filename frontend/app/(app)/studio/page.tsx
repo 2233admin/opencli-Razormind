@@ -7,6 +7,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 
 import { PageContainer } from '@/components/shell/page-container'
+import { ProjectCreateForm } from '@/components/studio/project-create-form'
 import { ErrorState } from '@/components/shell/data-states'
 import { Badge } from '@/components/ui/badge'
 import { Button, buttonVariants } from '@/components/ui/button'
@@ -20,7 +21,7 @@ import { PROJECT_APP_CATEGORY_LABELS, projectAppCategoryLabel, projectAppTypeFor
 import type { ProjectSummary } from '@/lib/api/types'
 import { translateWorkflowDslManaged, type WorkflowImportResult } from '@/lib/workflow/codec'
 import { businessProjectName } from '@/lib/workflow/business-node-experience'
-import { studioAppTypeForTemplate, studioGraphForTemplate, studioSlug, type StudioTemplateId } from '@/lib/workflow/studio-templates'
+import { studioSlug, type StudioTemplateId } from '@/lib/workflow/studio-templates'
 import { cn } from '@/lib/utils'
 const CAPABILITY_CONTEXT_KEYS = ['provider', 'capability', 'adapter', 'command'] as const
 
@@ -57,7 +58,6 @@ export default function StudioPage() {
   const [type, setType] = useState<ProjectAppTypeFilter>('all')
   const [sort, setSort] = useState('updated-desc')
   const [createTemplate, setCreateTemplate] = useState<StudioTemplateId | null>(null)
-  const [projectName, setProjectName] = useState('')
   const [pendingImport, setPendingImport] = useState<Extract<WorkflowImportResult, { ok: true }> | null>(null)
   const [importProjectId, setImportProjectId] = useState('')
   const [importProjectName, setImportProjectName] = useState('')
@@ -82,20 +82,28 @@ export default function StudioPage() {
         || workspace.slug === `governed-${governedWorkspace.slug}`,
       )
       : undefined
+    const preferredWorkspaceId = window.localStorage.getItem('opencli:studio-workspace')
+    const preferredWorkspace = workspaces.data.find((workspace) => workspace.id === preferredWorkspaceId)
     setWorkspaceId(
       requestedWorkspace?.id
         ?? (governedWorkspace ? governedWorkspace.id : undefined)
         ?? mappedWorkspace?.id
-        ?? workspaces.data[0].id,
+        ?? preferredWorkspace?.id
+        ?? (workspaces.data.length === 1 ? workspaces.data[0].id : null),
     )
   }, [workspaceId, workspaces.data, governedWorkspaces.data, governedWorkspaces.isLoading])
+
+  useEffect(() => {
+    if (workspaceId && workspaces.data?.some((workspace) => workspace.id === workspaceId)) {
+      window.localStorage.setItem('opencli:studio-workspace', workspaceId)
+    }
+  }, [workspaceId, workspaces.data])
 
   useEffect(() => {
     if (!workspaceId || createIntentHandled.current) return
     if (new URLSearchParams(window.location.search).get('create') === 'workflow') {
       createIntentHandled.current = true
       setCreateTemplate('opencli-live-pipeline')
-      setProjectName('OpenCLI 实时采集清洗发送')
       const url = new URL(window.location.href)
       url.searchParams.delete('create')
       window.history.replaceState(window.history.state, '', url)
@@ -117,23 +125,6 @@ export default function StudioPage() {
   }, [projects.data, search, sort, type])
   const selectedWorkspace = workspaces.data?.find((workspace) => workspace.id === workspaceId)
 
-  async function submitCreate() {
-    if (!workspaceId || !createTemplate || !projectName.trim()) return
-    try {
-      const result = await bootstrapProject.mutateAsync({
-        workspaceId,
-        data: {
-          project: { name: projectName.trim(), slug: `${studioSlug(projectName)}-${Date.now().toString(36)}`, description: '由工作区模板创建', app_type: studioAppTypeForTemplate(createTemplate) },
-          workflow: { name: projectName.trim(), description: '工作区默认工作流', graph: studioGraphForTemplate(createTemplate, projectName.trim()) },
-        },
-      })
-      setCreateTemplate(null)
-      toast.success('项目与工作流已创建')
-      router.push(`/studio/workflow?workspace=${workspaceId}&project=${result.project.id}&workflow=${result.primary_workflow.id}${capabilityQuery ? `&${capabilityQuery}` : ''}`)
-    } catch (reason) {
-      toast.error(reason instanceof Error ? reason.message : '创建失败')
-    }
-  }
 
   async function importDsl(file: File) {
     if (!workspaceId) return
@@ -210,7 +201,8 @@ export default function StudioPage() {
         <DropdownMenu>
           <DropdownMenuTrigger render={<Button className="min-h-11" disabled={!workspaceId} />}><Plus className="size-4" />创建<ChevronDown className="size-3.5" /></DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-48">
-            <DropdownMenuItem onClick={() => { setCreateTemplate('blank'); setProjectName('未命名项目') }}><Plus className="size-4" />创建空白工作流</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setCreateTemplate('blank')}><Plus className="size-4" />创建空白工作流</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => router.push(`/studio/new${workspaceId ? `?workspace=${workspaceId}` : ''}`)}><Sparkles className="size-4" />描述需求创建</DropdownMenuItem>
             <DropdownMenuItem onClick={() => router.push(`/plugins?type=template&workspace=${workspaceId}${capabilityQuery ? `&${capabilityQuery}` : ''}`)}>从模板创建</DropdownMenuItem>
             <DropdownMenuItem onClick={() => importInputRef.current?.click()}><FileUp className="size-4" />导入 DSL</DropdownMenuItem>
           </DropdownMenuContent>
@@ -219,6 +211,9 @@ export default function StudioPage() {
     >
       <input ref={importInputRef} type="file" accept=".json,.yml,.yaml,application/json,text/yaml" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (file) void importDsl(file) }} />
       <div className="space-y-3 border-b pb-4" aria-label="项目浏览工具栏">
+        {!workspaceId && (workspaces.data?.length ?? 0) > 1 ? (
+          <div className="rounded-lg border border-warning/40 bg-warning/10 p-3 text-xs" role="status">请选择已授权 Workspace 后再创建或查看项目。系统不会自动选择其他 Workspace。</div>
+        ) : null}
         <div className="flex flex-wrap items-center gap-2">
           {(workspaces.data?.length ?? 0) > 1 ? (
             <Select value={workspaceId ?? ''} onValueChange={(value) => setWorkspaceId(value || null)}>
@@ -298,7 +293,8 @@ export default function StudioPage() {
             <h2 className="mt-4 text-sm font-medium">创建你的第一个项目</h2>
             <p className="mt-1 text-xs text-muted-foreground">创建空白工作流、从模板开始，或者导入现有工作流。Agent 始终在顶部可用。</p>
             <div className="mt-5 grid gap-2 text-left">
-              <CreateChoice title="创建空白工作流" description="从需求节点开始，自由添加业务能力。" onClick={workspaceId ? () => { setCreateTemplate('blank'); setProjectName('未命名项目') } : undefined} icon={Plus} />
+              <CreateChoice title="创建空白工作流" description="从需求节点开始，自由添加业务能力。" onClick={workspaceId ? () => setCreateTemplate('blank') : undefined} icon={Plus} />
+              <CreateChoice title="描述需求创建" description="先说明持续目标，再保存同一份 Project Draft。" href={workspaceId ? `/studio/new?workspace=${workspaceId}` : '/studio/new'} icon={Sparkles} />
               <CreateChoice title="从应用模板创建" description="选择预设的数据链路，最快体验 OpenCLI。" href={workspaceId ? `/plugins?type=template&workspace=${workspaceId}` : '/plugins?type=template'} icon={Sparkles} />
               <div className="my-0.5 flex items-center gap-3 text-3xs text-muted-foreground before:h-px before:flex-1 before:bg-border after:h-px after:flex-1 after:bg-border">或</div>
               <CreateChoice title="导入 DSL 文件" description="兼容迁移 Dify、n8n 和 OpenCLI 工作流。" onClick={workspaceId ? () => importInputRef.current?.click() : undefined} icon={FileUp} />
@@ -328,8 +324,7 @@ export default function StudioPage() {
       <Dialog open={createTemplate !== null} onOpenChange={(open) => !open && setCreateTemplate(null)}>
         <DialogContent>
           <DialogHeader><DialogTitle>创建项目</DialogTitle><DialogDescription>项目和第一条工作流会同时保存到当前工作区。</DialogDescription></DialogHeader>
-          <label className="space-y-2 text-sm"><span>项目名称</span><Input value={projectName} onChange={(event) => setProjectName(event.target.value)} autoFocus /></label>
-          <DialogFooter><Button variant="outline" onClick={() => setCreateTemplate(null)}>取消</Button><Button onClick={submitCreate} disabled={!projectName.trim() || bootstrapProject.isPending}>创建并打开</Button></DialogFooter>
+          {workspaceId && createTemplate ? <ProjectCreateForm workspaceId={workspaceId} template={createTemplate} initialName={createTemplate === 'opencli-live-pipeline' ? 'OpenCLI 实时采集清洗发送' : '未命名项目'} onCancel={() => setCreateTemplate(null)} onCreated={(result) => { setCreateTemplate(null); toast.success('项目与工作流已创建'); router.push(`/studio/workflow?workspace=${workspaceId}&project=${result.project.id}&workflow=${result.primary_workflow.id}${capabilityQuery ? `&${capabilityQuery}` : ''}`) }} /> : null}
         </DialogContent>
       </Dialog>
       <Dialog open={pendingImport !== null} onOpenChange={(open) => !open && setPendingImport(null)}>

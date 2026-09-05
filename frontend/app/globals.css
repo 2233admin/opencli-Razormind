@@ -1,7 +1,15 @@
-@import 'tailwindcss';
+@import 'tailwindcss' source(none);
 @import 'tw-animate-css';
 @import 'shadcn/tailwind.css';
 @import './flow-canvas.css';
+
+/* Scan product sources only. Concurrent Next build directories can contain
+ * binary cache fragments that look like arbitrary Tailwind selectors. */
+@source './';
+@source '../components';
+@source '../features';
+@source '../hooks';
+@source '../lib';
 
 @custom-variant dark (&:is(.dark *));
 
@@ -326,11 +334,6 @@
 .nav-telemetry-rail {
   color: var(--foreground);
   background: repeating-linear-gradient(to bottom, currentColor 0 2px, transparent 2px 3px);
-}
-
-::view-transition-group(theme-icon) {
-  animation-duration: var(--motion-duration-response);
-  animation-timing-function: var(--motion-ease-settle);
 }
 
 @layer utilities {

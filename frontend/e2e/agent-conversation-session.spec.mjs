@@ -15,6 +15,7 @@ test('agent conversation session sends, restores, continues, and confirms a prop
     const url = new URL(route.request().url())
     const reply = (data) => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ data }) })
     if (url.pathname.endsWith('/auth/me')) return reply({ subject: 'test-user', email: null, name: 'Test User', username: 'test', picture: null, is_platform_admin: true, auth_method: 'test' })
+    if (url.pathname.endsWith('/governance/workspaces')) return reply([workspace])
     if (url.pathname.endsWith('/workspaces')) return reply([workspace])
     if (url.pathname.endsWith('/chat/sessions') && route.request().method() === 'GET') return reply(created ? [conversation] : [])
     if (url.pathname.endsWith('/chat/sessions') && route.request().method() === 'POST') {
@@ -66,6 +67,7 @@ test('agent conversation reports a create-session API failure', async ({ page })
     const url = new URL(route.request().url())
     const reply = (data, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify({ data }) })
     if (url.pathname.endsWith('/auth/me')) return reply({ subject: 'test-user', email: null, name: 'Test User', username: 'test', picture: null, is_platform_admin: true, auth_method: 'test' })
+    if (url.pathname.endsWith('/governance/workspaces')) return reply([workspace])
     if (url.pathname.endsWith('/workspaces')) return reply([workspace])
     if (url.pathname.endsWith('/chat/sessions') && route.request().method() === 'GET') return reply([])
     if (url.pathname.endsWith('/chat/sessions') && route.request().method() === 'POST') {
@@ -79,4 +81,52 @@ test('agent conversation reports a create-session API failure', async ({ page })
   await page.getByLabel('给全局 Agent 的消息').fill('创建会话')
   await page.getByRole('button', { name: '发送' }).click()
   await expect(page.getByText('conversation service unavailable')).toBeVisible()
+})
+
+test('agent URL intent opens the requested session without falling back across a project boundary', async ({ page }) => {
+  const pageErrors = []
+  page.on('pageerror', (error) => pageErrors.push(error.message))
+  await page.addInitScript(() => {
+    sessionStorage.setItem('opencli.bootstrapIdentityToken', 'test-token')
+    localStorage.setItem('opencli:agent-session:workspace-a', 'conversation-a')
+  })
+  await page.route('**/api/v1/**', async (route) => {
+    const url = new URL(route.request().url())
+    const reply = (data) => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ data }) })
+    if (url.pathname.endsWith('/auth/me')) return reply({ subject: 'test-user', email: null, name: 'Test User', username: 'test', picture: null, is_platform_admin: true, auth_method: 'test' })
+    if (url.pathname.endsWith('/governance/workspaces')) return reply([workspace])
+    if (url.pathname.endsWith('/workspaces')) return reply([workspace])
+    if (url.pathname.endsWith('/workspaces/workspace-a/projects')) return reply([])
+    if (url.pathname.endsWith('/chat/sessions')) return reply([conversation])
+    if (url.pathname.endsWith('/chat/sessions/missing-session')) return route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ detail: 'not found' }) })
+    return reply({})
+  })
+
+  await page.goto('/studio?workspace=workspace-a&project=project-b&agent=1&conversation=missing-session')
+  await expect(page.getByRole('dialog', { name: '全局 Agent' })).toBeVisible()
+  await expect(page.getByText('指定的 Agent 会话不存在，或你无权访问。没有打开其他会话。')).toBeVisible()
+  await expect(page.getByLabel('选择 Agent 会话')).toHaveValue('')
+  expect(pageErrors).toEqual([])
+})
+
+test('agent URL intent fetches an older exact session outside the session-list page', async ({ page }) => {
+  const older = { ...conversation, id: 'conversation-older', context_binding: { project_id: 'project-a' }, turns: [{ sequence: 1, request_id: 'older-request', status: 'completed', user_content: '继续旧项目', response: { type: 'message', content: '已恢复旧会话。' }, context_binding: { project_id: 'project-a' }, tool_trace: [] }] }
+  const pageErrors = []
+  page.on('pageerror', (error) => pageErrors.push(error.message))
+  await page.addInitScript(() => sessionStorage.setItem('opencli.bootstrapIdentityToken', 'test-token'))
+  await page.route('**/api/v1/**', async (route) => {
+    const url = new URL(route.request().url())
+    const reply = (data) => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ data }) })
+    if (url.pathname.endsWith('/auth/me')) return reply({ subject: 'test-user', name: 'Test User', username: 'test', is_platform_admin: true, auth_method: 'test' })
+    if (url.pathname.endsWith('/governance/workspaces')) return reply([workspace])
+    if (url.pathname.endsWith('/workspaces')) return reply([workspace])
+    if (url.pathname.endsWith('/workspaces/workspace-a/projects')) return reply([])
+    if (url.pathname.endsWith('/chat/sessions')) return reply([conversation])
+    if (url.pathname.endsWith('/chat/sessions/conversation-older')) return reply(older)
+    return reply({})
+  })
+  await page.goto('/studio?workspace=workspace-a&project=project-a&agent=1&conversation=conversation-older')
+  await expect(page.getByText('继续旧项目')).toBeVisible()
+  await expect(page.getByText('已恢复旧会话。')).toBeVisible()
+  expect(pageErrors).toEqual([])
 })

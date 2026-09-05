@@ -17,9 +17,9 @@ This change integrates completed Designer Pipeline work into the shared OpenCLI 
 - Typography roles live in `app/globals.css` and use Noto Sans SC / IBM Plex Mono.
 - Physical response tokens are shared by buttons, cards, switches, toggles, tabs, and sliders.
 - Sidebar and header remain mounted while only routed content animates.
-- SSGOI owns global route movement; React/Next View Transition is opt-in for local elements outside that surface.
+- SSGOI owns global route movement. Persistent shell elements must not mount React ViewTransition boundaries, which can snapshot the whole document during navigation.
 - `prefers-reduced-motion` collapses route, local, and primitive motion.
 - Route loading and recovery use App Router `loading.tsx` and `error.tsx` boundaries.
 - Navigation only exposes routes present in the current checkout.
 
-Set `NEXT_PUBLIC_ENABLE_VIEW_TRANSITIONS=false` before build to disable the experimental Next integration and render the static local fallback.
+Route motion reads the shared spatial tokens and observes runtime `prefers-reduced-motion` changes. See `docs/verification/frontend-route-motion.md` for browser measurements and regression commands.

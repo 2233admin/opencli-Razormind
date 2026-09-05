@@ -1,6 +1,6 @@
 import hashlib
 
-from sqlalchemy import JSON, ForeignKey, String, Text, UniqueConstraint, event
+from sqlalchemy import JSON, Boolean, ForeignKey, String, Text, UniqueConstraint, event
 from sqlalchemy.orm import Mapped, mapped_column
 
 from backend.models.base import TimestampMixin
@@ -48,6 +48,7 @@ class BrowserInstance(TimestampMixin):
     # derived from this writable volume.
     profile_kind: Mapped[str] = mapped_column(String(20), nullable=False, default="authenticated")
     profile_name: Mapped[str] = mapped_column(String(100), nullable=False, default="")
+    login_reserved: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     runtime_bundle_id: Mapped[str | None] = mapped_column(
         ForeignKey("browser_runtime_bundles.id", ondelete="RESTRICT"),
         nullable=True,

@@ -2,9 +2,6 @@
 
 import Link from 'next/link'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
-import { motion } from 'motion/react'
-
-import { Ripple } from '@/components/motion/ripple'
 import { cn } from '@/lib/utils'
 
 export type RouteTab = {
@@ -15,8 +12,7 @@ export type RouteTab = {
 }
 
 /**
- * M3-style segmented route tabs linking sibling views (e.g. 任务/记录/通知).
- * The active pill slides between tabs via a shared layout animation.
+ * Sibling views use the shared color response; page movement belongs to SSGOI.
  */
 export function RouteTabs({ tabs, className }: { tabs: RouteTab[]; className?: string }) {
   const pathname = usePathname()
@@ -78,19 +74,11 @@ export function RouteTabs({ tabs, className }: { tabs: RouteTab[]; className?: s
               router.replace(destinationHref, { scroll: false })
             }}
             className={cn(
-              'relative overflow-hidden rounded-full px-4 py-1.5 text-sm font-medium transition-colors',
-              active ? 'text-primary-foreground' : 'text-muted-foreground hover:text-foreground',
+              'relative overflow-hidden rounded-full px-4 py-1.5 text-sm font-medium transition-colors duration-(--motion-duration-response) ease-(--motion-ease-spatial)',
+              active ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground',
             )}
           >
-            {active ? (
-              <motion.span
-                layoutId="route-tab-pill"
-                className="absolute inset-0 rounded-full bg-primary"
-                transition={{ type: 'spring', stiffness: 460, damping: 38, mass: 0.6 }}
-              />
-            ) : null}
             <span className="relative">{tab.label}</span>
-            <Ripple />
           </Link>
         )
       })}

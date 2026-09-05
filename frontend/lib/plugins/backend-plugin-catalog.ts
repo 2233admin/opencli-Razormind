@@ -2,7 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query"
 
-import { getApiAuthToken } from "@/lib/api/auth-token"
+import { getApiAuthHeaders } from "@/lib/api/auth-headers"
 
 export type BackendPluginBlocker = {
   code: string
@@ -75,7 +75,7 @@ export async function fetchPluginInstallations(
 ): Promise<BackendPluginInstallation[]> {
   const response = await fetch(pluginPath(workspaceId), {
     cache: "no-store",
-    headers: apiAuthHeaders(),
+    headers: getApiAuthHeaders(),
   })
   const payload = (await response.json().catch(() => null)) as
     | ApiResponse<BackendPluginInstallation[]>
@@ -94,7 +94,7 @@ export async function importDifyPluginPackage(
   body.append("file", file)
   const response = await fetch(`${pluginPath(workspaceId)}/import/dify`, {
     method: "POST",
-    headers: apiAuthHeaders(),
+    headers: getApiAuthHeaders(),
     body,
   })
   const payload = (await response.json().catch(() => null)) as
@@ -113,7 +113,7 @@ export async function updatePluginInstallation(
 ): Promise<BackendPluginInstallation> {
   const response = await fetch(`${pluginPath(workspaceId)}/${installationId}`, {
     method: "PATCH",
-    headers: { ...apiAuthHeaders(), "Content-Type": "application/json" },
+    headers: { ...getApiAuthHeaders(), "Content-Type": "application/json" },
     body: JSON.stringify(update),
   })
   const payload = (await response.json().catch(() => null)) as
@@ -155,9 +155,4 @@ function readApiError<T>(payload: ApiResponse<T> | null, fallback: string): stri
     return payload.detail.message ?? payload.detail.code ?? fallback
   }
   return payload?.error ?? fallback
-}
-
-function apiAuthHeaders(): HeadersInit {
-  const token = getApiAuthToken()
-  return token ? { Authorization: `Bearer ${token}` } : {}
 }

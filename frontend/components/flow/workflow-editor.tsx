@@ -64,10 +64,12 @@ type PendingConnection = {
 
 function EditorCanvas({
   documentState,
+  onSaveWorkflow,
   workspaceId,
   runPanelScope,
 }: {
   documentState?: "loading" | "saving" | "saved" | "error" | "conflict"
+  onSaveWorkflow?: () => Promise<void>
   workspaceId?: string | null
   runPanelScope?: RunPanelScope | null
 }) {
@@ -135,7 +137,6 @@ function EditorCanvas({
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [projectSettingsOpen, setProjectSettingsOpen] = useState(false)
   const [runTraceOpen, setRunTraceOpen] = useState(false)
-  const [runRequestId, setRunRequestId] = useState(0)
   const [nodeManagementOpen, setNodeManagementOpen] = useState(false)
   const [workbenchMode, setWorkbenchMode] = useState<WorkflowWorkbenchMode | null>(null)
   const [zoom, setZoom] = useState(1)
@@ -179,6 +180,18 @@ function EditorCanvas({
   )
 
   const showToast = useCallback((msg: string) => setToast(msg), [])
+  const saveWorkflow = useCallback(() => {
+    if (onSaveWorkflow) {
+      void onSaveWorkflow()
+      return
+    }
+    try {
+      save()
+      showToast("工作流已保存到本地")
+    } catch {
+      showToast("本地保存失败，请重试或导出备份")
+    }
+  }, [onSaveWorkflow, save, showToast])
   const setMiniMapVisible = useCallback((visible: boolean) => settings.set("showMiniMap", visible), [settings])
 
   useApplyWorkflowCapabilities({ applyWorkflowCapabilities, capabilities, workflowProjectId: workflowProject.id })
@@ -203,7 +216,7 @@ function EditorCanvas({
     paste,
     projectSettingsOpen,
     redo,
-    save,
+    save: saveWorkflow,
     screenToFlowPosition,
     scissorCutRef,
     scissorDraggingRef,
@@ -343,8 +356,7 @@ function EditorCanvas({
   const runWorkflow = useCallback(() => {
     setNodeMenu(null)
     setRunTraceOpen(true)
-    setRunRequestId((current) => current + 1)
-    showToast("正在提交真实运行")
+    showToast("请在运行面板检查输入，再启动运行")
   }, [showToast])
 
   const importAppFromMenu = useCallback(() => {
@@ -501,6 +513,7 @@ function EditorCanvas({
       <CommandStrip
         importInputRef={importInputRef}
         documentState={documentState}
+        onSaveWorkflow={saveWorkflow}
         onOpenPalette={openNodePicker}
         onExported={showToast}
         collab={settings.collabProvider !== "off"}
@@ -572,7 +585,6 @@ function EditorCanvas({
           primitiveMenuGroups={primitiveMenuGroups}
           projectSettingsOpen={projectSettingsOpen}
           runTraceOpen={runTraceOpen}
-          runRequestId={runRequestId}
           scissorTrail={scissorTrail}
           setNodeManagementOpen={setNodeManagementOpen}
           settings={settings}
@@ -605,6 +617,8 @@ function EditorCanvas({
           clearWiringSession()
         }}
         onMessage={showToast}
+        onSaveWorkflow={saveWorkflow}
+        projectPersistence={Boolean(onSaveWorkflow)}
         onNodeCreated={onPaletteNodeCreated}
         getAnchor={() => screenToFlowPosition(paletteAnchor ?? mousePos.current)}
       />
@@ -614,16 +628,18 @@ function EditorCanvas({
 
 export function WorkflowEditor({
   documentState,
+  onSaveWorkflow,
   workspaceId,
   runPanelScope,
 }: {
   documentState?: "loading" | "saving" | "saved" | "error" | "conflict"
+  onSaveWorkflow?: () => Promise<void>
   workspaceId?: string | null
   runPanelScope?: RunPanelScope | null
 } = {}) {
   return (
     <ReactFlowProvider>
-      <EditorCanvas documentState={documentState} workspaceId={workspaceId} runPanelScope={runPanelScope} />
+      <EditorCanvas documentState={documentState} onSaveWorkflow={onSaveWorkflow} workspaceId={workspaceId} runPanelScope={runPanelScope} />
     </ReactFlowProvider>
   )
 }

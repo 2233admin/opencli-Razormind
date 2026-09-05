@@ -34,10 +34,23 @@ export function useMyWorkspaces() {
   return useQuery({ queryKey: ["workspaces"], queryFn: api.listMyWorkspaces });
 }
 
-export function useAgentConversations(workspaceId: string | null, enabled = true) {
+export function useAgentConversations(
+  workspaceId: string | null,
+  options: {
+    enabled?: boolean
+    projectId?: string | null
+    workflowId?: string | null
+    runId?: string | null
+  } = {},
+) {
+  const { enabled = true, projectId, workflowId, runId } = options
   return useQuery({
-    queryKey: ['agent-conversations', workspaceId],
-    queryFn: () => api.listAgentConversations(workspaceId as string),
+    queryKey: ['agent-conversations', workspaceId, projectId, workflowId, runId],
+    queryFn: () => api.listAgentConversations(workspaceId as string, 20, {
+      project_id: projectId,
+      workflow_id: workflowId,
+      run_id: runId,
+    }),
     enabled: enabled && !!workspaceId,
   })
 }

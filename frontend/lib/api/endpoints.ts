@@ -5,6 +5,7 @@ import type {
   AgentConversation,
   AgentConversationDetail,
   AgentConversationMessageResult,
+  AgentConversationListFilters,
   CreateAgentConversationInput,
   SendAgentConversationMessageInput,
 } from "./agent-conversations";
@@ -127,9 +128,21 @@ export const listMyWorkspaces = () =>
     .get<ApiResponse<WorkspaceSummary[]>>("/workspaces")
     .then((r) => r.data.data);
 
-export const listAgentConversations = (workspaceId: string, limit = 20) =>
+export const listAgentConversations = (
+  workspaceId: string,
+  limit = 20,
+  filters?: AgentConversationListFilters,
+) =>
   apiClient
-    .get<ApiResponse<AgentConversation[]>>('/chat/sessions', { params: { workspace_id: workspaceId, limit } })
+    .get<ApiResponse<AgentConversation[]>>('/chat/sessions', {
+      params: {
+        workspace_id: workspaceId,
+        limit,
+        ...(filters?.project_id ? { project_id: filters.project_id } : {}),
+        ...(filters?.workflow_id ? { workflow_id: filters.workflow_id } : {}),
+        ...(filters?.run_id ? { run_id: filters.run_id } : {}),
+      },
+    })
     .then((r) => r.data.data)
 
 export const getAgentConversation = (conversationId: string, afterSequence = 0, limit = 50) =>

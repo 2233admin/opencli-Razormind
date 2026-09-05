@@ -48,11 +48,29 @@ async def create_session(
 @router.get("/sessions", response_model=ApiResponse[list[AgentConversationRead]])
 async def list_sessions(
     workspace_id: str | None = Query(default=None),
+    project_id: str | None = Query(default=None, min_length=1, max_length=255),
+    workflow_id: str | None = Query(default=None, min_length=1, max_length=255),
+    run_id: str | None = Query(default=None, min_length=1, max_length=255),
     limit: int = Query(default=20, ge=1, le=50),
     identity: RequestIdentity = Depends(get_request_identity),
     db: AsyncSession = Depends(get_db),
 ) -> ApiResponse:
-    rows = await service.list_conversations(db, identity, workspace_id=workspace_id, limit=limit)
+    context = {
+        key: value
+        for key, value in {
+            "project_id": project_id,
+            "workflow_id": workflow_id,
+            "run_id": run_id,
+        }.items()
+        if value is not None
+    }
+    rows = await service.list_conversations(
+        db,
+        identity,
+        workspace_id=workspace_id,
+        limit=limit,
+        context=context,
+    )
     return ApiResponse.ok([AgentConversationRead.model_validate(row) for row in rows])
 
 

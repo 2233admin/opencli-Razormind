@@ -1,48 +1,36 @@
 'use client'
 
-import { Ssgoi, type SsgoiConfig } from '@ssgoi/react'
-import { axis, drill } from '@ssgoi/react/view-transitions'
-import { useReducedMotion } from 'motion/react'
+import { Ssgoi, type NavigationDirection, type SsgoiConfig } from '@ssgoi/react'
 import { usePathname } from 'next/navigation'
+import { useEffect, useRef, useState } from 'react'
 
-const APP_ROUTES = [
-  '/dashboard',
-  '/studio',
-  '/studio/workflow',
-  '/sources',
-  '/sources/*',
-  '/records',
-  '/agents',
-  '/operations-agents',
-  '/skills',
-  '/providers',
-  '/nodes',
-  '/workers',
-  '/control/kill-switch',
-  '/control/advisory-report',
-  '/control/odp-state',
-  '/canvas',
-] as const
+import { createRouteTransition, observeRouteDirection } from './route-transition'
 
-const MOTION_CONFIG: SsgoiConfig = {
-  transitions: [
-    { from: '/studio', to: '/studio/workflow', transition: drill({ type: 'parallax' }) },
-    { from: '/sources', to: '/sources/*', transition: drill({ type: 'slide' }) },
-    { ordered: APP_ROUTES, transition: axis({ type: 'x', variant: 'snappy' }) },
-  ],
-}
-
-const STATIC_CONFIG: SsgoiConfig = { transitions: [] }
 /** Keeps persistent application chrome outside the routed animation boundary. */
 export function AppRouteTransition({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
-  const prefersReducedMotion = useReducedMotion()
-  // All Action Center sibling tabs share /inbox, so this boundary never remounts
-  // or runs a pathname-level transition while their query state changes.
-  const transitionKey = pathname === '/inbox' ? '/inbox' : pathname
+  const direction = useRef<NavigationDirection | undefined>(undefined)
+  // SSGOI must retain one context across renders and preference changes.
+  const [config] = useState<SsgoiConfig>(() => ({
+    transitions: [{
+      on: '/**',
+      transition: createRouteTransition(() => {
+        const pendingDirection = direction.current
+        direction.current = undefined
+        return pendingDirection
+      }),
+    }],
+  }))
+
+  useEffect(() => observeRouteDirection((nextDirection) => {
+    direction.current = nextDirection
+  }), [])
+
+  // Query-only tabs and filters update in place without replaying page entry.
+  const transitionKey = pathname
 
   return (
-    <Ssgoi config={prefersReducedMotion ? STATIC_CONFIG : MOTION_CONFIG}>
+    <Ssgoi config={config}>
       <div
         key={transitionKey}
         data-ssgoi-transition={transitionKey}
