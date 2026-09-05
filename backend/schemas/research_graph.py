@@ -1,11 +1,15 @@
 # ruff: noqa: N815, UP045
 """Versioned ResearchGraph semantic contracts."""
 
-from typing import Any, Literal, Optional, Self
+import json
+from typing import Annotated, Any, Literal, Optional, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from backend.schemas.workflow_runtime import WorkflowNodeRunEvent
+
+BoundedGraphId = Annotated[str, Field(min_length=1, max_length=255)]
+BoundedLineageValue = Annotated[str, Field(min_length=1, max_length=2048)]
 
 WorkflowResearchGraphEventType = Literal[
     "source/recorded",
@@ -28,14 +32,34 @@ class WorkflowResearchGraphEntity(BaseModel):
     id: str = Field(..., min_length=1, max_length=255)
     kind: WorkflowResearchGraphEntityKind
     label: Optional[str] = Field(default=None, min_length=1, max_length=500)
-    sourceIds: list[str] = Field(default_factory=list)
-    evidenceIds: list[str] = Field(default_factory=list)
+    sourceIds: list[BoundedGraphId] = Field(default_factory=list, max_length=500)
+    evidenceIds: list[BoundedGraphId] = Field(default_factory=list, max_length=500)
     subjectId: Optional[str] = Field(default=None, min_length=1, max_length=255)
     objectId: Optional[str] = Field(default=None, min_length=1, max_length=255)
     attributes: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def validate_research_graph_entity(self) -> Self:
+        pending = [(self.attributes, 0)]
+        while pending:
+            value, depth = pending.pop()
+            if depth > 8:
+                raise ValueError("attributes exceed maximum nesting depth")
+            if isinstance(value, dict):
+                if len(value) > 100 or any(
+                    not isinstance(key, str) or len(key) > 255 for key in value
+                ):
+                    raise ValueError("attributes contain too many or oversized keys")
+                pending.extend((item, depth + 1) for item in value.values())
+            elif isinstance(value, list):
+                if len(value) > 500:
+                    raise ValueError("attribute arrays exceed 500 items")
+                pending.extend((item, depth + 1) for item in value)
+        if (
+            len(json.dumps(self.attributes, ensure_ascii=False, allow_nan=False).encode("utf-8"))
+            > 65536
+        ):
+            raise ValueError("attributes exceed 64 KiB")
         for name, values in (
             ("sourceIds", self.sourceIds),
             ("evidenceIds", self.evidenceIds),
@@ -67,13 +91,13 @@ class WorkflowResearchGraphEvent(BaseModel):
     eventId: str = Field(..., min_length=1, max_length=255)
     idempotencyKey: str = Field(..., min_length=1, max_length=255)
     eventType: WorkflowResearchGraphEventType
-    runId: str = Field(..., min_length=1)
-    traceId: str = Field(..., min_length=1)
-    nodeId: str = Field(..., min_length=1)
+    runId: str = Field(..., min_length=1, max_length=255)
+    traceId: str = Field(..., min_length=1, max_length=255)
+    nodeId: str = Field(..., min_length=1, max_length=255)
     revisionId: Optional[str] = Field(default=None, min_length=1, max_length=255)
     expectedRevision: Optional[str] = Field(default=None, min_length=1, max_length=255)
     expectedSequence: Optional[int] = Field(default=None, ge=0)
-    lineage: dict[str, str] = Field(default_factory=dict)
+    lineage: dict[BoundedGraphId, BoundedLineageValue] = Field(default_factory=dict, max_length=64)
     action: Literal["record", "propose", "verify", "reject", "retract"] = "record"
     targetId: Optional[str] = Field(default=None, min_length=1, max_length=255)
     entity: Optional[WorkflowResearchGraphEntity] = None
@@ -86,8 +110,7 @@ class WorkflowResearchGraphEvent(BaseModel):
             expected_kind = self.eventType.split("/", maxsplit=1)[0]
             if self.entity.kind != expected_kind:
                 raise ValueError(
-                    f"eventType {self.eventType!r} does not match entity kind "
-                    f"{self.entity.kind!r}"
+                    f"eventType {self.eventType!r} does not match entity kind {self.entity.kind!r}"
                 )
             if self.targetId is not None:
                 raise ValueError(f"{self.action} ResearchGraph events cannot declare targetId")
@@ -110,10 +133,10 @@ class WorkflowResearchGraphMutationRequest(BaseModel):
     expectedRevision: Optional[str] = Field(..., min_length=1, max_length=255)
     expectedSequence: int = Field(..., ge=0)
     action: WorkflowResearchGraphMutationAction
-    traceId: str = Field(..., min_length=1)
-    nodeId: str = Field(..., min_length=1)
+    traceId: str = Field(..., min_length=1, max_length=255)
+    nodeId: str = Field(..., min_length=1, max_length=255)
     revisionId: Optional[str] = Field(default=None, min_length=1, max_length=255)
-    lineage: dict[str, str] = Field(default_factory=dict)
+    lineage: dict[BoundedGraphId, BoundedLineageValue] = Field(default_factory=dict, max_length=64)
     entity: Optional[WorkflowResearchGraphEntity] = None
     targetId: Optional[str] = Field(default=None, min_length=1, max_length=255)
 
@@ -130,33 +153,33 @@ class WorkflowResearchGraphMutationRequest(BaseModel):
 
 
 class WorkflowResearchGraphEntityProjection(WorkflowResearchGraphEntity):
-    eventId: str = Field(..., min_length=1)
+    eventId: str = Field(..., min_length=1, max_length=255)
     sequence: int = Field(..., ge=1)
-    runId: str = Field(..., min_length=1)
-    traceId: str = Field(..., min_length=1)
-    nodeId: str = Field(..., min_length=1)
+    runId: str = Field(..., min_length=1, max_length=255)
+    traceId: str = Field(..., min_length=1, max_length=255)
+    nodeId: str = Field(..., min_length=1, max_length=255)
     revisionId: Optional[str] = None
-    lineage: dict[str, str] = Field(default_factory=dict)
+    lineage: dict[BoundedGraphId, BoundedLineageValue] = Field(default_factory=dict, max_length=64)
     state: WorkflowResearchGraphState = "recorded"
     authoritative: bool = False
 
 
 class WorkflowResearchGraphHistoryEntry(BaseModel):
-    eventId: str = Field(..., min_length=1)
+    eventId: str = Field(..., min_length=1, max_length=255)
     sequence: int = Field(..., ge=1)
     action: Literal["record", "propose", "verify", "reject", "retract"]
     targetId: Optional[str] = None
     entityId: Optional[str] = None
     revisionId: Optional[str] = None
-    runId: str = Field(..., min_length=1)
-    traceId: str = Field(..., min_length=1)
-    nodeId: str = Field(..., min_length=1)
-    lineage: dict[str, str] = Field(default_factory=dict)
+    runId: str = Field(..., min_length=1, max_length=255)
+    traceId: str = Field(..., min_length=1, max_length=255)
+    nodeId: str = Field(..., min_length=1, max_length=255)
+    lineage: dict[BoundedGraphId, BoundedLineageValue] = Field(default_factory=dict, max_length=64)
 
 
 class WorkflowResearchGraphProjection(BaseModel):
-    runId: str = Field(..., min_length=1)
-    traceId: str = Field(..., min_length=1)
+    runId: str = Field(..., min_length=1, max_length=255)
+    traceId: str = Field(..., min_length=1, max_length=255)
     eventCount: int = Field(0, ge=0)
     lastSequence: int = Field(0, ge=0)
     currentRevision: Optional[str] = None

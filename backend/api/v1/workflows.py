@@ -339,6 +339,7 @@ async def start_run(
     status_code=202,
 )
 async def start_run_from_question_bank(
+    http_request: Request,
     question_bank: UploadFile = File(..., alias="questionBank"),
     request: str = Form(...),
     db: AsyncSession = Depends(get_db),
@@ -391,6 +392,7 @@ async def start_run_from_question_bank(
             ),
             session=db,
             graphon_client=graphon_client,
+            plugins=http_request.app.state.workflow_plugins,
         )
     except Exception:
         if staged.created:
@@ -694,6 +696,7 @@ async def get_run_evidence_projection(
     status_code=202,
 )
 async def continue_run_with_source_outputs(
+    http_request: Request,
     run_id: str,
     body: workflow_schemas.WorkflowRunSourceOutputsRequest,
     db: AsyncSession = Depends(get_db),
@@ -714,7 +717,9 @@ async def continue_run_with_source_outputs(
             status_code=409,
             detail=("Image generation outputs are accepted only from the platform job worker"),
         )
-    projection = await continue_workflow_run_with_source_outputs(run_id, body, session=db)
+    projection = await continue_workflow_run_with_source_outputs(
+        run_id, body, session=db, plugins=http_request.app.state.workflow_plugins
+    )
     if projection is None:
         raise HTTPException(status_code=404, detail="Workflow run not found")
     return ApiResponse.ok(projection)
@@ -774,6 +779,7 @@ async def get_run_research_ledger(
     status_code=202,
 )
 async def continue_research_run(
+    http_request: Request,
     run_id: str,
     body: WorkflowResearchContinuationRequest,
     db: AsyncSession = Depends(get_db),
@@ -782,7 +788,9 @@ async def continue_research_run(
 
     await reject_workspace_scoped_run(db, run_id)
     try:
-        result = await continue_research_workflow_run(run_id, body, session=db)
+        result = await continue_research_workflow_run(
+            run_id, body, session=db, plugins=http_request.app.state.workflow_plugins
+        )
     except ResearchContinuationError as exc:
         status_code = 413 if "too_large" in exc.code else 409
         raise HTTPException(

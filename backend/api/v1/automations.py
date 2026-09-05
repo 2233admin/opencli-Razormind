@@ -62,38 +62,8 @@ async def install_automation_starters(
     return ApiResponse.ok(result)
 
 
-@router.get(
-    "/starters/preview",
-    response_model=ApiResponse[StarterInstallationPreview],
-)
-async def preview_automation_starters(
-    workspace_id: str,
-    identity: RequestIdentity = Depends(get_request_identity),
-    db: AsyncSession = Depends(get_db),
-) -> ApiResponse:
-    access = await get_workspace_access(db, workspace_id, identity)
-    require_permission(access, WorkspacePermission.READ)
-    preview = await preview_starter_installation(db, workspace_id=workspace_id)
-    return ApiResponse.ok(preview)
 
 
-@router.post(
-    "/starters/install",
-    response_model=ApiResponse[StarterInstallationResult],
-)
-async def install_automation_starters(
-    workspace_id: str,
-    identity: RequestIdentity = Depends(get_request_identity),
-    db: AsyncSession = Depends(get_db),
-) -> ApiResponse:
-    access = await get_workspace_access(db, workspace_id, identity)
-    require_permission(access, WorkspacePermission.MANAGE_AGENT_IDENTITIES)
-    result = await install_starters(
-        db,
-        workspace_id=workspace_id,
-        created_by_user_id=access.user_id,
-    )
-    return ApiResponse.ok(result)
 
 
 @router.get("", response_model=ApiResponse[list[AutomationRead]])

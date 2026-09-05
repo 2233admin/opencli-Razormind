@@ -41,7 +41,7 @@ def _skill_brief(s: Skill) -> dict[str, Any]:
         "id": s.id,
         "domain": s.domain,
         "capability": s.capability,
-        "name": s.name,
+        "name": s.capability,
         "version": s.version,
         "status": s.status,
         "enabled": s.enabled,

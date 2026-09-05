@@ -820,6 +820,15 @@ async def test_scoped_research_graph_route_ownership_prefix_and_bounds(client, d
     workspace_id = created["workspace_id"]
     project_id = created["project"]["id"]
     workflow_id = created["workflow"]["id"]
+    from backend.main import app
+    from backend.models.identity import User, Workspace, WorkspaceMembership, WorkspaceRole
+    from backend.security.identity import RequestIdentity, get_request_identity
+    identity_workspace = await db_session.get(Workspace, workspace_id)
+    if identity_workspace is None:
+        db_session.add(Workspace(id=workspace_id, name="Research", slug="research-scope"))
+    db_session.add(User(id="research-operator", subject="research-operator"))
+    db_session.add(WorkspaceMembership(workspace_id=workspace_id, user_id="research-operator", role=WorkspaceRole.OPERATOR))
+    app.dependency_overrides[get_request_identity] = lambda: RequestIdentity(subject="research-operator")
     run_id = "scoped-research-graph-run"
     trace_id = "scoped-research-graph-trace"
     db_session.add(
@@ -876,7 +885,7 @@ async def test_scoped_research_graph_route_ownership_prefix_and_bounds(client, d
     assert data["lastSequence"] == 2
     assert data["eventCount"] == 1
     assert len(data["entities"]) == 1
-    assert (await client.get(base.replace(workspace_id, "wrong-workspace"))).status_code == 404
+    assert (await client.get(base.replace(workspace_id, "wrong-workspace"))).status_code == 403
     assert (await client.get(base.replace(project_id, "wrong-project"))).status_code == 404
     assert (await client.get(base.replace(workflow_id, "wrong-workflow"))).status_code == 404
     mutation_url = f"{base}/mutations"

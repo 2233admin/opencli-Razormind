@@ -98,9 +98,7 @@ class WorkflowPluginRegistry:
             self._validate_capabilities(plugin)
         self._plugins = (*self._plugins, *candidate)
 
-    def contribute_events(
-        self, context: WorkflowPluginEventContext
-    ) -> list[WorkflowNodeRunEvent]:
+    def contribute_events(self, context: WorkflowPluginEventContext) -> list[WorkflowNodeRunEvent]:
         events: list[WorkflowNodeRunEvent] = []
         for plugin in self._plugins:
             if WorkflowPluginCapability.EVENT_CONTRIBUTION in plugin.capabilities:
@@ -158,9 +156,9 @@ class WorkflowPluginRegistry:
                 except Exception as exc:
                     failures.append(exc)
             if failures:
-                raise WorkflowPluginLifecycleError(
-                    "workflow plugin shutdown failed"
-                ) from failures[0]
+                raise WorkflowPluginLifecycleError("workflow plugin shutdown failed") from failures[
+                    0
+                ]
 
     @staticmethod
     def _validate_capabilities(plugin: WorkflowPlugin) -> None:
@@ -175,7 +173,7 @@ class WorkflowPluginRegistry:
                 raise WorkflowPluginRegistrationError(
                     f"workflow plugin {plugin.key!r} does not implement {capability}"
                 )
-            if capability is WorkflowPluginCapability.LIFECYCLE and not callable(
+            if capability == WorkflowPluginCapability.LIFECYCLE and not callable(
                 getattr(plugin, "stop", None)
             ):
                 raise WorkflowPluginRegistrationError(

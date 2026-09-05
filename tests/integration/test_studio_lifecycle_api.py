@@ -626,7 +626,7 @@ async def test_studio_api_run_is_version_bound_idempotent_and_visible_in_logs(
     assert empty_evidence_batches.status_code == 200, empty_evidence_batches.text
     assert empty_evidence_batches.json()["data"]["batches"] == []
     empty_evidence_projection = await client.get(
-        f"{created['base_url']}/runs/{projection['runId']}/evidence-batches/projection",
+        f"{created['base_url']}/runs/{projection['runId']}/projection",
     )
     assert empty_evidence_projection.status_code == 200, empty_evidence_projection.text
     assert empty_evidence_projection.json()["data"]["runId"] == projection["runId"]

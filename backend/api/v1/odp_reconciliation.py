@@ -8,7 +8,7 @@ connection.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 from uuid import NAMESPACE_URL, UUID, uuid5
 
@@ -98,7 +98,7 @@ async def _ledger_delegation(
         trace_id=trace_id,
         allowed_source_ids=(source_id,),
         allowed_modes=(mode,),
-        expires_at=datetime.now(datetime.UTC) + _DELEGATION_TTL,
+        expires_at=datetime.now(UTC) + _DELEGATION_TTL,
     )
 
 

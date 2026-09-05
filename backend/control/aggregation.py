@@ -41,7 +41,7 @@ from ``TaskRun.records_collected`` (which the runner sets to ``stored``) rather
 than returning ``None`` — a failed run is still evidence.
 """
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -364,7 +364,7 @@ async def _measurement_from_run(
         fetch_latency_ms = int(latest_run.duration_ms or 0)
 
     observed_at = latest_run.finished_at or latest_run.created_at or datetime.now(
-        datetime.UTC
+        UTC
     )
 
     return SourceMeasurement.derive(

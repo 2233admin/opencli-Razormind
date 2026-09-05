@@ -1,10 +1,16 @@
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.acquisition.capabilities import probe_capabilities
 from backend.database import get_db
+from backend.security.identity import get_request_identity
+from backend.security.workspace_rbac import (
+    WorkspacePermission,
+    get_workspace_access,
+    require_permission,
+)
 from backend.executor import get_executor
 from backend.models.acquisition import AcquisitionExecutionStatus
 from backend.schemas.acquisition import (
@@ -17,9 +23,8 @@ from backend.services import acquisition_service
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(
-    prefix="/internal/geo-acquisition", tags=["internal-geo-acquisition"]
-)
+router = APIRouter(prefix="/internal/geo-acquisition", tags=["internal-geo-acquisition"])
+
 
 async def _validate_capability(body: AcquisitionSubmission) -> CapabilityDescriptor:
     capabilities = await probe_capabilities()
@@ -29,9 +34,7 @@ async def _validate_capability(body: AcquisitionSubmission) -> CapabilityDescrip
             status_code=422,
             detail={"code": "unsupported_capability", "message": body.capability.id},
         )
-    same_version = [
-        c for c in same_id if c.capability_version == body.capability.version
-    ]
+    same_version = [c for c in same_id if c.capability_version == body.capability.version]
     if not same_version:
         raise HTTPException(
             status_code=422,
@@ -68,14 +71,19 @@ async def list_capabilities() -> CapabilityList:
     return CapabilityList(capabilities=await probe_capabilities())
 
 
-@router.post(
-    "/executions", response_model=AcquisitionExecutionRead, status_code=202
-)
+@router.post("/executions", response_model=AcquisitionExecutionRead, status_code=202)
 async def submit_execution(
     body: AcquisitionSubmission,
     response: Response,
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ) -> AcquisitionExecutionRead:
+    if body.workflow_run_correlation is not None:
+        identity = await get_request_identity(request)
+        access = await get_workspace_access(
+            db, body.workflow_run_correlation.workspace_id, identity
+        )
+        require_permission(access, WorkspacePermission.RUN_OPERATIONS_AGENTS)
     await _validate_capability(body)
     try:
         outcome = await acquisition_service.submit_execution(db, body)
@@ -113,27 +121,31 @@ async def submit_execution(
     return AcquisitionExecutionRead.from_execution(outcome.execution)
 
 
-@router.get(
-    "/executions/{execution_id}", response_model=AcquisitionExecutionRead
-)
+@router.get("/executions/{execution_id}", response_model=AcquisitionExecutionRead)
 async def get_execution(
-    execution_id: str, db: AsyncSession = Depends(get_db)
+    execution_id: str, request: Request, db: AsyncSession = Depends(get_db)
 ) -> AcquisitionExecutionRead:
     execution = await acquisition_service.get_execution(db, execution_id)
     if execution is None:
         raise HTTPException(status_code=404, detail="Acquisition execution not found")
+    if execution.workspace_id is not None:
+        identity = await get_request_identity(request)
+        access = await get_workspace_access(db, execution.workspace_id, identity)
+        require_permission(access, WorkspacePermission.READ)
     return AcquisitionExecutionRead.from_execution(execution)
 
 
-@router.post(
-    "/executions/{execution_id}/cancel", response_model=AcquisitionExecutionRead
-)
+@router.post("/executions/{execution_id}/cancel", response_model=AcquisitionExecutionRead)
 async def cancel_execution(
-    execution_id: str, db: AsyncSession = Depends(get_db)
+    execution_id: str, request: Request, db: AsyncSession = Depends(get_db)
 ) -> AcquisitionExecutionRead:
     execution = await acquisition_service.get_execution(db, execution_id)
     if execution is None:
         raise HTTPException(status_code=404, detail="Acquisition execution not found")
+    if execution.workspace_id is not None:
+        identity = await get_request_identity(request)
+        access = await get_workspace_access(db, execution.workspace_id, identity)
+        require_permission(access, WorkspacePermission.RUN_OPERATIONS_AGENTS)
     if not execution.status.accepts_cancel_request:
         raise HTTPException(
             status_code=409,

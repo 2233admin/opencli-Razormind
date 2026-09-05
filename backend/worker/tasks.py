@@ -123,10 +123,14 @@ async def _resume_workflow_image_generation(
             return None
         if canonical_assets is None:
             return None
+        from backend.config import get_settings
+        from backend.workflow.plugin_registry import build_workflow_plugin_registry
+
         projection = await continue_workflow_run_with_source_outputs(
             run_id,
             WorkflowRunSourceOutputsRequest(sourceOutputs={node_id: canonical_assets}),
             session=session,
+            plugins=build_workflow_plugin_registry(get_settings()),
         )
         if projection is None:
             return None

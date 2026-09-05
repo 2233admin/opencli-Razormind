@@ -31,6 +31,7 @@ def _parse_item_timestamp(value: Any) -> datetime | None:
         dt = parsedate_to_datetime(value)
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=UTC)
+        return dt
     except (TypeError, ValueError):
         pass
     try:

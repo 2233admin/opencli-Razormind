@@ -1,20 +1,25 @@
 """add analysis snapshot receipts and acquisition run correlation
 
 Revision ID: analysis20260905
-Revises: q4r5s6t7u8v9
+Revises: q4r5s6t7u8v9, n3o4p5q6r7s8
 Create Date: 2026-09-02
 """
 
 import sqlalchemy as sa
-from alembic import op
+from alembic import context, op
+from backend.migrations.versions.n3o4p5q6r7s8_add_acquisition_executions import upgrade as create_acquisition_executions
 
 revision = "analysis20260905"
-down_revision = "q4r5s6t7u8v9"
+down_revision = ("q4r5s6t7u8v9", "n3o4p5q6r7s8")
 branch_labels = None
 depends_on = None
 
 
 def upgrade() -> None:
+    # Legacy plugin databases can be stamped past the acquisition revision
+    # without its table; restore that original schema before adding correlation.
+    if not context.is_offline_mode() and not sa.inspect(op.get_bind()).has_table("acquisition_executions"):
+        create_acquisition_executions()
     with op.batch_alter_table("acquisition_executions") as batch_op:
         batch_op.add_column(sa.Column("workspace_id", sa.String(length=36), nullable=True))
         batch_op.add_column(sa.Column("project_id", sa.String(length=36), nullable=True))

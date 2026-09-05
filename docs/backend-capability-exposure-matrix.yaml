@@ -1,6 +1,6 @@
 version: 1
 source: backend.main.app.openapi
-openapi_operation_count: 329
+openapi_operation_count: 342
 allowed_dispositions:
 - operator_ui
 - studio_binding
@@ -2606,29 +2606,20 @@ operations:
   capability_id: studio.workflow
 - method: GET
   path: /api/v1/workspaces/{workspace_id}/projects/{project_id}/workflows/{workflow_id}/runs/{run_id}/evidence-batches
-  operation_id: get_project_run_evidence_batches_api_v1_workspaces__workspace_id__projects__project_id__workflows__workflow_id__runs__run_id__evidence_batches_get
+  operation_id: list_project_workflow_evidence_batches_api_v1_workspaces__workspace_id__projects__project_id__workflows__workflow_id__runs__run_id__evidence_batches_get
   disposition: studio_binding
-  frontend_route: /studio/workflow
+  frontend_route: /studio
   wrapper: null
-  decision: Read EvidenceBatch lists through the project-scoped Studio runtime boundary.
-  target_epic: Epic 8
-  capability_id: studio.workflow
-- method: GET
-  path: /api/v1/workspaces/{workspace_id}/projects/{project_id}/workflows/{workflow_id}/runs/{run_id}/evidence-batches/projection
-  operation_id: get_project_run_evidence_projection_api_v1_workspaces__workspace_id__projects__project_id__workflows__workflow_id__runs__run_id__evidence_batches_projection_get
-  disposition: studio_binding
-  frontend_route: /studio/workflow
-  wrapper: null
-  decision: Read EvidenceBatch projections through the project-scoped Studio runtime boundary.
+  decision: Bind scoped evidence batch listing to Workflow Studio.
   target_epic: Epic 8
   capability_id: studio.workflow
 - method: GET
   path: /api/v1/workspaces/{workspace_id}/projects/{project_id}/workflows/{workflow_id}/runs/{run_id}/evidence-batches/{batch_id}
-  operation_id: get_project_run_evidence_batch_api_v1_workspaces__workspace_id__projects__project_id__workflows__workflow_id__runs__run_id__evidence_batches__batch_id__get
+  operation_id: get_project_workflow_evidence_batch_api_v1_workspaces__workspace_id__projects__project_id__workflows__workflow_id__runs__run_id__evidence_batches__batch_id__get
   disposition: studio_binding
-  frontend_route: /studio/workflow
+  frontend_route: /studio
   wrapper: null
-  decision: Read EvidenceBatch detail through the project-scoped Studio runtime boundary.
+  decision: Bind scoped evidence batch reads to Workflow Studio.
   target_epic: Epic 8
   capability_id: studio.workflow
 - method: POST
@@ -3226,24 +3217,6 @@ operations:
   target_epic: Epic 8
   capability_id: studio.workflow
 - method: GET
-  path: /api/v1/workspaces/{workspace_id}/projects/{project_id}/workflows/{workflow_id}/runs/{run_id}/evidence-batches
-  operation_id: list_project_workflow_evidence_batches_api_v1_workspaces__workspace_id__projects__project_id__workflows__workflow_id__runs__run_id__evidence_batches_get
-  disposition: studio_binding
-  frontend_route: /studio
-  wrapper: null
-  decision: Bind scoped evidence batch listing to Workflow Studio.
-  target_epic: Epic 8
-  capability_id: studio.workflow
-- method: GET
-  path: /api/v1/workspaces/{workspace_id}/projects/{project_id}/workflows/{workflow_id}/runs/{run_id}/evidence-batches/{batch_id}
-  operation_id: get_project_workflow_evidence_batch_api_v1_workspaces__workspace_id__projects__project_id__workflows__workflow_id__runs__run_id__evidence_batches__batch_id__get
-  disposition: studio_binding
-  frontend_route: /studio
-  wrapper: null
-  decision: Bind scoped evidence batch reads to Workflow Studio.
-  target_epic: Epic 8
-  capability_id: studio.workflow
-- method: GET
   path: /api/v1/workspaces/{workspace_id}/projects/{project_id}/workflows/{workflow_id}/runs/{run_id}/projection
   operation_id: get_project_workflow_evidence_projection_api_v1_workspaces__workspace_id__projects__project_id__workflows__workflow_id__runs__run_id__projection_get
   disposition: studio_binding
@@ -3251,6 +3224,123 @@ operations:
   wrapper: null
   decision: Bind scoped workflow evidence projections to Workflow Studio.
   target_epic: Epic 8
+  capability_id: studio.workflow
+- method: POST
+  path: /api/v1/workspaces/{workspace_id}/projects/{project_id}/workflows/{workflow_id}/runs/{run_id}/analysis-findings
+  operation_id: create_analysis_finding_api_v1_workspaces__workspace_id__projects__project_id__workflows__workflow_id__runs__run_id__analysis_findings_post
+  frontend_route: /studio
+  wrapper: null
+  disposition: studio_binding
+  target_epic: Workflow Studio
+  decision: Expose scoped analysis and research evidence through the Studio run inspector.
+  capability_id: studio.workflow
+- method: GET
+  path: /api/v1/workspaces/{workspace_id}/projects/{project_id}/workflows/{workflow_id}/runs/{run_id}/analysis-findings
+  operation_id: list_analysis_findings_api_v1_workspaces__workspace_id__projects__project_id__workflows__workflow_id__runs__run_id__analysis_findings_get
+  frontend_route: /studio
+  wrapper: null
+  disposition: studio_binding
+  target_epic: Workflow Studio
+  decision: Expose scoped analysis and research evidence through the Studio run inspector.
+  capability_id: studio.workflow
+- method: GET
+  path: /api/v1/workspaces/{workspace_id}/projects/{project_id}/workflows/{workflow_id}/runs/{run_id}/analysis-findings/{finding_id}
+  operation_id: read_analysis_finding_api_v1_workspaces__workspace_id__projects__project_id__workflows__workflow_id__runs__run_id__analysis_findings__finding_id__get
+  frontend_route: /studio
+  wrapper: null
+  disposition: studio_binding
+  target_epic: Workflow Studio
+  decision: Expose scoped analysis and research evidence through the Studio run inspector.
+  capability_id: studio.workflow
+- method: GET
+  path: /api/v1/workspaces/{workspace_id}/projects/{project_id}/workflows/{workflow_id}/runs/{run_id}/analysis-snapshots/capability
+  operation_id: read_capability_api_v1_workspaces__workspace_id__projects__project_id__workflows__workflow_id__runs__run_id__analysis_snapshots_capability_get
+  frontend_route: /studio
+  wrapper: null
+  disposition: studio_binding
+  target_epic: Workflow Studio
+  decision: Expose scoped analysis and research evidence through the Studio run inspector.
+  capability_id: studio.workflow
+- method: POST
+  path: /api/v1/workspaces/{workspace_id}/projects/{project_id}/workflows/{workflow_id}/runs/{run_id}/analysis-snapshots/preview
+  operation_id: preview_snapshot_api_v1_workspaces__workspace_id__projects__project_id__workflows__workflow_id__runs__run_id__analysis_snapshots_preview_post
+  frontend_route: /studio
+  wrapper: null
+  disposition: studio_binding
+  target_epic: Workflow Studio
+  decision: Expose scoped analysis and research evidence through the Studio run inspector.
+  capability_id: studio.workflow
+- method: POST
+  path: /api/v1/workspaces/{workspace_id}/projects/{project_id}/workflows/{workflow_id}/runs/{run_id}/analysis-snapshots
+  operation_id: export_snapshot_api_v1_workspaces__workspace_id__projects__project_id__workflows__workflow_id__runs__run_id__analysis_snapshots_post
+  frontend_route: /studio
+  wrapper: null
+  disposition: studio_binding
+  target_epic: Workflow Studio
+  decision: Expose scoped analysis and research evidence through the Studio run inspector.
+  capability_id: studio.workflow
+- method: GET
+  path: /api/v1/workspaces/{workspace_id}/projects/{project_id}/workflows/{workflow_id}/runs/{run_id}/analysis-snapshots
+  operation_id: list_run_snapshots_api_v1_workspaces__workspace_id__projects__project_id__workflows__workflow_id__runs__run_id__analysis_snapshots_get
+  frontend_route: /studio
+  wrapper: null
+  disposition: studio_binding
+  target_epic: Workflow Studio
+  decision: Expose scoped analysis and research evidence through the Studio run inspector.
+  capability_id: studio.workflow
+- method: GET
+  path: /api/v1/workspaces/{workspace_id}/projects/{project_id}/workflows/{workflow_id}/runs/{run_id}/analysis-snapshots/{snapshot_id}/summary
+  operation_id: read_snapshot_summary_api_v1_workspaces__workspace_id__projects__project_id__workflows__workflow_id__runs__run_id__analysis_snapshots__snapshot_id__summary_get
+  frontend_route: /studio
+  wrapper: null
+  disposition: studio_binding
+  target_epic: Workflow Studio
+  decision: Expose scoped analysis and research evidence through the Studio run inspector.
+  capability_id: studio.workflow
+- method: GET
+  path: /api/v1/workspaces/{workspace_id}/projects/{project_id}/workflows/{workflow_id}/runs/{run_id}/analysis-snapshots/{snapshot_id}
+  operation_id: read_snapshot_receipt_api_v1_workspaces__workspace_id__projects__project_id__workflows__workflow_id__runs__run_id__analysis_snapshots__snapshot_id__get
+  frontend_route: /studio
+  wrapper: null
+  disposition: studio_binding
+  target_epic: Workflow Studio
+  decision: Expose scoped analysis and research evidence through the Studio run inspector.
+  capability_id: studio.workflow
+- method: GET
+  path: /api/v1/workflows/runs/{run_id}/research-graph
+  operation_id: get_run_research_graph_api_v1_workflows_runs__run_id__research_graph_get
+  frontend_route: /studio
+  wrapper: null
+  disposition: studio_binding
+  target_epic: Workflow Studio
+  decision: Expose scoped analysis and research evidence through the Studio run inspector.
+  capability_id: studio.workflow
+- method: POST
+  path: /api/v1/workflows/runs/{run_id}/research-graph/mutations
+  operation_id: mutate_run_research_graph_api_v1_workflows_runs__run_id__research_graph_mutations_post
+  frontend_route: /studio
+  wrapper: null
+  disposition: studio_binding
+  target_epic: Workflow Studio
+  decision: Expose scoped analysis and research evidence through the Studio run inspector.
+  capability_id: studio.workflow
+- method: GET
+  path: /api/v1/workspaces/{workspace_id}/projects/{project_id}/workflows/{workflow_id}/runs/{run_id}/research-graph
+  operation_id: get_project_research_graph_api_v1_workspaces__workspace_id__projects__project_id__workflows__workflow_id__runs__run_id__research_graph_get
+  frontend_route: /studio
+  wrapper: null
+  disposition: studio_binding
+  target_epic: Workflow Studio
+  decision: Expose scoped analysis and research evidence through the Studio run inspector.
+  capability_id: studio.workflow
+- method: POST
+  path: /api/v1/workspaces/{workspace_id}/projects/{project_id}/workflows/{workflow_id}/runs/{run_id}/research-graph/mutations
+  operation_id: mutate_project_research_graph_api_v1_workspaces__workspace_id__projects__project_id__workflows__workflow_id__runs__run_id__research_graph_mutations_post
+  frontend_route: /studio
+  wrapper: null
+  disposition: studio_binding
+  target_epic: Workflow Studio
+  decision: Expose scoped analysis and research evidence through the Studio run inspector.
   capability_id: studio.workflow
 unreferenced_wrappers:
 - wrapper: invokeBrowserCapability

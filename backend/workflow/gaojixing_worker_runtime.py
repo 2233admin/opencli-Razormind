@@ -69,6 +69,10 @@ async def execute_collection_job(job_id: str, *, driver_factory: Any = None) -> 
 
     from backend.database import AsyncSessionLocal
     from backend.workflow.gaojixing_collection_runner import run_collection_job
+    from backend.config import get_settings
+    from backend.workflow.plugin_registry import build_workflow_plugin_registry
+
+    plugins = build_workflow_plugin_registry(get_settings())
 
     if driver_factory is None:
         from backend.workflow.gaojixing_doubao_driver import (
@@ -81,7 +85,7 @@ async def execute_collection_job(job_id: str, *, driver_factory: Any = None) -> 
     async def resume(run_id: str) -> None:
         from backend.workflow.opencli_hda_tracer import resume_gaojixing_workflow_run
 
-        await resume_gaojixing_workflow_run(run_id)
+        await resume_gaojixing_workflow_run(run_id, plugins=plugins)
 
     outcome = await run_collection_job(
         job_id,
@@ -101,7 +105,7 @@ async def execute_collection_job(job_id: str, *, driver_factory: Any = None) -> 
             job = await session.get(GaojixingCollectionRun, job_id)
             run_id = job.workflow_run_id if job is not None else None
         if run_id is not None:
-            await refresh_gaojixing_workflow_run(run_id)
+            await refresh_gaojixing_workflow_run(run_id, plugins=plugins)
     return outcome
 
 

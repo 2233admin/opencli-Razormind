@@ -210,6 +210,7 @@ from backend.workflow.webhook_delivery import (
     WorkflowWebhookDeliveryError,
     execute_workflow_webhook_delivery,
 )
+from backend.workflow.workflow_plugins import WorkflowPluginEventContext, WorkflowPluginRegistry
 from backend.workflow.workflow_run_events import append_workflow_run_events
 
 
@@ -401,6 +402,7 @@ async def start_workflow_run(
     studio_workflow_version_id: str | None = None,
     graphon_client: DifyGraphonClient | None = None,
     replay_source_node_ids: set[str] | None = None,
+    plugins: WorkflowPluginRegistry | None = None,
 ) -> WorkflowRunProjection:
     """Create a replayable workflow run projection from a compiled WorkflowProject."""
 
@@ -453,6 +455,7 @@ async def start_workflow_run(
                 session=session,
                 workflow_version_id=workflow_version_id,
                 studio_workflow_version_id=studio_workflow_version_id,
+                plugins=plugins,
             )
             return projection
         scope_project = scope_result.project
@@ -506,6 +509,7 @@ async def start_workflow_run(
             session=session,
             workflow_version_id=workflow_version_id,
             studio_workflow_version_id=studio_workflow_version_id,
+            plugins=plugins,
         )
         return projection
 
@@ -517,6 +521,7 @@ async def start_workflow_run(
             body.input.sourceId or body.input.source if body.trigger.kind == "webhook" else None
         ),
         initial_sequence=len(prior_events),
+        plugins=plugins,
     )
     runtime_nodes, trigger_selection_error = _select_runtime_nodes_for_trigger(
         compile_result.plan.runtime.nodes,
@@ -551,6 +556,7 @@ async def start_workflow_run(
             session=session,
             workflow_version_id=workflow_version_id,
             studio_workflow_version_id=studio_workflow_version_id,
+            plugins=plugins,
         )
         return projection
 
@@ -575,6 +581,7 @@ async def start_workflow_run(
             session=session,
             workflow_version_id=workflow_version_id,
             studio_workflow_version_id=studio_workflow_version_id,
+            plugins=plugins,
         )
     should_trace_opencli = any(
         _binding_id(node) == OPENCLI_BINDING_ID for node in runtime_nodes
@@ -1040,10 +1047,7 @@ async def start_workflow_run(
             if not bool(getattr(body.project.agentPermissions, "canFetchNetwork", False)):
                 reason = WorkflowRunBlockReason(
                     code=FETCH_PERMISSION_REQUIRED,
-                    message=(
-                        "Collector source fetch requires "
-                        "agentPermissions.canFetchNetwork."
-                    ),
+                    message=("Collector source fetch requires agentPermissions.canFetchNetwork."),
                     source="workflow_permissions",
                     details={
                         "nodeId": node.id,
@@ -1079,17 +1083,9 @@ async def start_workflow_run(
 
             source_results_by_node[node.id] = source_results
             outputs_by_node[node.id] = output_items
-            failed = [
-                result for result in source_results if result["status"] == "failed"
-            ]
-            completed = [
-                result
-                for result in source_results
-                if result["status"] == "completed"
-            ]
-            skipped = [
-                result for result in source_results if result["status"] == "skipped"
-            ]
+            failed = [result for result in source_results if result["status"] == "failed"]
+            completed = [result for result in source_results if result["status"] == "completed"]
+            skipped = [result for result in source_results if result["status"] == "skipped"]
             details = {
                 "bindingId": _binding_id(node),
                 "items": output_items[:50],
@@ -1397,9 +1393,7 @@ async def start_workflow_run(
             propagated_source_results = details.get("sourceResults")
             if isinstance(propagated_source_results, list):
                 source_results_by_node[node.id] = [
-                    dict(result)
-                    for result in propagated_source_results
-                    if isinstance(result, dict)
+                    dict(result) for result in propagated_source_results if isinstance(result, dict)
                 ]
             else:
                 source_results_by_node[node.id] = [
@@ -1422,12 +1416,14 @@ async def start_workflow_run(
             continue
 
         if _is_first_loop_native_node(node):
-            runtime_block = _opentabs_tool_block_reason(
-                node,
-                body.project.agentPermissions,
-            ) or _bbx_tool_block_reason(
-                node, body.project.agentPermissions
-            ) or _feishu_writeback_block_reason(node, body.project.agentPermissions)
+            runtime_block = (
+                _opentabs_tool_block_reason(
+                    node,
+                    body.project.agentPermissions,
+                )
+                or _bbx_tool_block_reason(node, body.project.agentPermissions)
+                or _feishu_writeback_block_reason(node, body.project.agentPermissions)
+            )
             runtime_block = runtime_block or _feishu_bitable_block_reason(
                 node, body.project.agentPermissions
             )
@@ -1484,9 +1480,7 @@ async def start_workflow_run(
                         output_item_count=len(output_items),
                     ),
                     "outputPort": binding_input.get("outputPort", "unknown"),
-                    "sampleOutputs": [
-                        _trace_sample_output(item) for item in output_items[:3]
-                    ],
+                    "sampleOutputs": [_trace_sample_output(item) for item in output_items[:3]],
                 }
                 emitter.emit(
                     node,
@@ -1706,13 +1700,24 @@ async def start_workflow_run(
                 )
                 await _persist_emitter_events(run_id, emitter, session=session)
                 continue
+            if plugins is not None:
+                emitter.events.extend(
+                    plugins.contribute_events(
+                        WorkflowPluginEventContext(
+                            workflow_id=body.project.id,
+                            run_id=run_id,
+                            trace_id=trace_id,
+                            node_id=node.id,
+                            sequence=emitter._initial_sequence + len(emitter.events),
+                            output_items=output_items,
+                        )
+                    )
+                )
             outputs_by_node[node.id] = output_items
             propagated_source_results = details.get("sourceResults")
             if isinstance(propagated_source_results, list):
                 source_results_by_node[node.id] = [
-                    dict(result)
-                    for result in propagated_source_results
-                    if isinstance(result, dict)
+                    dict(result) for result in propagated_source_results if isinstance(result, dict)
                 ]
             else:
                 source_results_by_node[node.id] = [
@@ -1849,7 +1854,7 @@ async def start_workflow_run(
         output_items = _opencli_dispatch_source_items(node, dispatch, output_items)
         batch = _batch_reference(body.project.id, run_id, dispatch)
         if output_items:
-            batch = batch.model_copy(update={"itemCount": len(output_items)})
+            batch = batch.model_copy(update={"item_count": len(output_items)})
         dispatch_trace_details = {
             **({"fleetMatch": fleet_match_details} if fleet_match_details else {}),
             **resource_details,
@@ -1967,9 +1972,7 @@ async def start_workflow_run(
             continue
 
         descendant_ids = {
-            node.id
-            for node in runtime_nodes
-            if package_node.id in _package_ancestor_ids(node)
+            node.id for node in runtime_nodes if package_node.id in _package_ancestor_ids(node)
         }
         waiting_descendant_ids = sorted(descendant_ids & waiting_nodes)
         if waiting_descendant_ids:
@@ -2080,6 +2083,7 @@ async def start_workflow_run(
         session=session,
         workflow_version_id=workflow_version_id,
         studio_workflow_version_id=studio_workflow_version_id,
+        plugins=plugins,
     )
     if session is not None:
         stored = await _load_workflow_run(run_id, session=session, cache=False)
@@ -2103,6 +2107,7 @@ async def start_workflow_run(
                 session=session,
                 workflow_version_id=workflow_version_id,
                 studio_workflow_version_id=studio_workflow_version_id,
+                plugins=plugins,
             )
     await _materialize_waiting_image_jobs(
         body,
@@ -2240,6 +2245,7 @@ async def replay_downstream_from_persisted_gaojixing_source(
     expected_workflow_id: str,
     expected_studio_workflow_version_id: str,
     session: AsyncSession,
+    plugins: WorkflowPluginRegistry | None = None,
 ) -> WorkflowRunProjection:
     """Replay only a completed Gaojixing source's persisted downstream path."""
     source_run = await _load_workflow_run(source_run_id, session=session)
@@ -2339,9 +2345,7 @@ async def replay_downstream_from_persisted_gaojixing_source(
                 or evidence.get("nodeId") != node_id
                 or answer.get("artifactId") != artifact_id
             ):
-                raise ValueError(
-                    f"Persisted Gaojixing source {node_id} lacks completed evidence"
-                )
+                raise ValueError(f"Persisted Gaojixing source {node_id} lacks completed evidence")
 
             conversation_url = _read_string(conversation.get("url"))
             source_row_id = _read_string(source_record.get("source_row_id"))
@@ -2422,6 +2426,7 @@ async def replay_downstream_from_persisted_gaojixing_source(
         workflow_version_id=source_run.workflow_version_id,
         studio_workflow_version_id=expected_studio_workflow_version_id,
         replay_source_node_ids=set(source_outputs),
+        plugins=plugins,
     )
 
 
@@ -2430,6 +2435,7 @@ async def continue_workflow_run_with_source_outputs(
     body: WorkflowRunSourceOutputsRequest,
     *,
     session: AsyncSession | None = None,
+    plugins: WorkflowPluginRegistry | None = None,
 ) -> WorkflowRunProjection | None:
     # Hold the per-run_id lock across the read of prior stored state through
     # the write in _store_workflow_run (invoked inside start_workflow_run).
@@ -2484,6 +2490,7 @@ async def continue_workflow_run_with_source_outputs(
             existing_events=stored.events,
             workflow_version_id=stored.workflow_version_id,
             studio_workflow_version_id=stored.studio_workflow_version_id,
+            plugins=plugins,
         )
 
 
@@ -2491,6 +2498,7 @@ async def resume_gaojixing_workflow_run(
     run_id: str,
     *,
     session: AsyncSession | None = None,
+    plugins: WorkflowPluginRegistry | None = None,
 ) -> WorkflowRunProjection | None:
     """Resume governed collection from its durable REVIEWING state only.
 
@@ -2506,6 +2514,7 @@ async def resume_gaojixing_workflow_run(
             projection = await resume_gaojixing_workflow_run(
                 run_id,
                 session=owned_session,
+                plugins=plugins,
             )
             await commit_session(owned_session)
             return projection
@@ -2552,6 +2561,7 @@ async def resume_gaojixing_workflow_run(
             existing_events=stored.events,
             workflow_version_id=stored.workflow_version_id,
             studio_workflow_version_id=stored.studio_workflow_version_id,
+            plugins=plugins,
         )
         if projection.status == "completed":
             await mark_collection_succeeded(session, workflow_run_id=run_id)
@@ -2568,6 +2578,7 @@ async def refresh_gaojixing_workflow_run(
     run_id: str,
     *,
     session: AsyncSession | None = None,
+    plugins: WorkflowPluginRegistry | None = None,
 ) -> WorkflowRunProjection | None:
     """Project durable worker waiting/failure state without accepting inputs."""
 
@@ -2578,6 +2589,7 @@ async def refresh_gaojixing_workflow_run(
             projection = await refresh_gaojixing_workflow_run(
                 run_id,
                 session=owned_session,
+                plugins=plugins,
             )
             await commit_session(owned_session)
             return projection
@@ -2595,6 +2607,7 @@ async def refresh_gaojixing_workflow_run(
             existing_events=stored.events,
             workflow_version_id=stored.workflow_version_id,
             studio_workflow_version_id=stored.studio_workflow_version_id,
+            plugins=plugins,
         )
 
 
@@ -2607,6 +2620,7 @@ async def _store_workflow_run(
     session: AsyncSession | None,
     workflow_version_id: str | None = None,
     studio_workflow_version_id: str | None = None,
+    plugins: WorkflowPluginRegistry | None = None,
 ) -> None:
     events_to_mirror = list(events)
     stored_events = list(events)
@@ -2630,6 +2644,7 @@ async def _store_workflow_run(
             session,
             run_id=run_id,
             events=events,
+            plugins=plugins,
         )
         stored_events = append_result.events
         events_to_mirror = append_result.appended_events
@@ -2666,6 +2681,7 @@ async def _persist_emitter_events(
         session,
         run_id=run_id,
         events=emitter.events,
+        plugins=emitter.plugins,
     )
     emitter.events[:] = result.events
     if result.appended_events:
@@ -2796,12 +2812,14 @@ class _WorkflowRunEventEmitter:
         trace_id: str,
         source_id: str | None = None,
         initial_sequence: int = 0,
+        plugins: WorkflowPluginRegistry | None = None,
     ) -> None:
         self._workflow_id = workflow_id
         self._run_id = run_id
         self._trace_id = trace_id
         self._source_id = source_id
         self._initial_sequence = initial_sequence
+        self.plugins = plugins
         self.events: list[WorkflowNodeRunEvent] = []
 
     def emit(
@@ -2916,13 +2934,13 @@ def _build_projection(
         )
         if event.nodeId not in ordered_ids:
             ordered_ids.append(event.nodeId)
-        state.latestEventId = event.id
-        state.eventCount += 1
+        state.latest_event_id = event.id
+        state.event_count += 1
         state.status = _status_after_event(event.eventType)
-        if event.sourceGroup and event.sourceGroup not in state.sourceGroups:
-            state.sourceGroups.append(event.sourceGroup)
+        if event.sourceGroup and event.sourceGroup not in state.source_groups:
+            state.source_groups.append(event.sourceGroup)
         if event.blockReason:
-            state.blockReasons.append(event.blockReason)
+            state.block_reasons.append(event.blockReason)
         if event.batch:
             if all(batch.batchId != event.batch.batchId for batch in state.batches):
                 state.batches.append(event.batch)
@@ -4117,9 +4135,7 @@ def _gaojixing_source_record(upstream: dict[str, Any] | None) -> dict[str, Any]:
             number = _read_string(fields.get(key))
             if number:
                 break
-    record_id = _read_string(raw.get("source_row_id")) or _read_string(
-        feishu.get("record_id")
-    )
+    record_id = _read_string(raw.get("source_row_id")) or _read_string(feishu.get("record_id"))
     if not raw and not record_id:
         return {}
     return {
@@ -4244,6 +4260,7 @@ def _fixture_source_items(node: CompiledWorkflowNode) -> list[dict[str, Any]]:
                     "sourceGroup": source_group,
                     "artifact": "fixtureItems",
                     "index": index,
+                    **({"sourceId": source_id} if (source_id := _read_string(node.params.get("sourceId"))) else {}),
                 }
             ],
         }
@@ -4268,6 +4285,7 @@ def _request_source_items(
                     "sourceGroup": source_group,
                     "artifact": "sourceOutputs",
                     "index": index,
+                    **({"sourceId": source_id} if (source_id := _read_string(item.get("sourceId")) or _read_string(node.params.get("sourceId"))) else {}),
                 }
             ],
         }
@@ -4429,8 +4447,7 @@ async def _execute_collector_source_node(
         ]
         if mismatched_sources:
             raise ValueError(
-                f"collector_source_kind_mismatch:{collector_type}:"
-                + ",".join(mismatched_sources)
+                f"collector_source_kind_mismatch:{collector_type}:" + ",".join(mismatched_sources)
             )
 
     execution = _read_dict(binding_input.get("execution"))
@@ -4620,9 +4637,7 @@ def _collector_channel_config(
         }
     )
     if sensitive_paths:
-        raise ValueError(
-            "collector_plaintext_credential_forbidden:" + ",".join(sensitive_paths)
-        )
+        raise ValueError("collector_plaintext_credential_forbidden:" + ",".join(sensitive_paths))
     config = _read_dict(source.get("config"))
     safe = {
         key: value
@@ -4691,10 +4706,7 @@ def _collector_channel_config(
                 raise ValueError(f"unknown_opencli_adapter_node:{adapter_id}")
             if adapter.access != "read":
                 raise ValueError(f"opencli_adapter_write_access_forbidden:{adapter_id}")
-            arguments = (
-                _read_dict(source.get("arguments"))
-                or _read_dict(source.get("args"))
-            )
+            arguments = _read_dict(source.get("arguments")) or _read_dict(source.get("args"))
             validate_opencli_adapter_arguments(adapter, arguments)
             safe["site"] = adapter.site
             safe["command"] = adapter.command
@@ -4789,9 +4801,7 @@ def _find_collector_sensitive_paths(
             matches.extend(_find_collector_sensitive_paths(item, nested_path))
     elif isinstance(value, list | tuple):
         for index, item in enumerate(value):
-            matches.extend(
-                _find_collector_sensitive_paths(item, (*path, str(index)))
-            )
+            matches.extend(_find_collector_sensitive_paths(item, (*path, str(index))))
     return matches
 
 
@@ -5037,12 +5047,8 @@ async def _execute_native_node(
             {
                 "bindingId": binding_id,
                 "strategy": binding_input.get("strategy", "concat"),
-                "inputType": binding_input.get(
-                    "inputType", "CollectorMergeInputV1"
-                ),
-                "outputType": binding_input.get(
-                    "outputType", "recordCandidate[]"
-                ),
+                "inputType": binding_input.get("inputType", "CollectorMergeInputV1"),
+                "outputType": binding_input.get("outputType", "recordCandidate[]"),
                 "preserveLineage": binding_input.get("preserveLineage", True),
                 "inputCandidateCount": len(input_items),
                 "mergedCandidateCount": len(merged),
@@ -5530,9 +5536,7 @@ async def _execute_external_tool_capability(
             notification_permission_granted=agent_can_send_notifications,
         )
         output["runtimeRevision"] = _gaojixing_runtime_revision()
-        output_items = [
-            _external_tool_output(node, output, input_items, run_id, 0, binding_input)
-        ]
+        output_items = [_external_tool_output(node, output, input_items, run_id, 0, binding_input)]
         if output.get("status") == "verification_required":
             raise _GaojixingToolTerminalError(
                 event_type="waiting",
@@ -5567,9 +5571,7 @@ async def _execute_external_tool_capability(
             input_items,
             _gaojixing_tool_params(binding_input, workflow_input, run_id=run_id),
         )
-        output_items = [
-            _external_tool_output(node, output, input_items, run_id, 0, binding_input)
-        ]
+        output_items = [_external_tool_output(node, output, input_items, run_id, 0, binding_input)]
         if output.get("status") == "rejected":
             raise _GaojixingToolTerminalError(
                 event_type="failed",
@@ -6017,9 +6019,7 @@ async def _store_record_sink_outputs(
                 sink_node_id=node.id,
                 cache=materialized_source_tasks,
             )
-            channel_type = _workflow_source_channel_type(
-                runtime_nodes_by_id[source_node_id]
-            )
+            channel_type = _workflow_source_channel_type(runtime_nodes_by_id[source_node_id])
         elif _is_gaojixing_project_record(item):
             source_node_id = f"gaojixing-certified-archive:{run_id}"
             source_id, task_id = await _materialize_gaojixing_source_task(
@@ -7120,9 +7120,9 @@ def _expand_gaojixing_project_records(
             )
     return expanded
 
+
 def _is_gaojixing_project_record(item: dict[str, Any]) -> bool:
     return _read_dict(item.get("raw")).get("schema") == "gaojixing.project-record.v1"
-
 
 
 def _read_string(value: object) -> str | None:

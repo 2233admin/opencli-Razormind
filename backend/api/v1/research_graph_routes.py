@@ -6,6 +6,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.api.v1.studio_helpers import get_workflow
 from backend.api.v1.workflow_run_access import reject_workspace_scoped_run
 from backend.database import get_db
+from backend.security.identity import RequestIdentity, get_request_identity
+from backend.security.workspace_rbac import (
+    WorkspacePermission,
+    get_workspace_access,
+    require_permission,
+)
 from backend.models.workflow_run import WorkflowRun
 from backend.schemas.common import ApiResponse
 from backend.schemas.research_graph import (
@@ -122,9 +128,12 @@ async def get_project_research_graph(
     entity_id: str | None = Query(default=None, min_length=1, alias="entityId"),
     limit: int = Query(default=200, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
+    identity: RequestIdentity = Depends(get_request_identity),
 ) -> ApiResponse[WorkflowResearchGraphProjection]:
     """Fold a project-owned run transcript into its ResearchGraph view."""
 
+    access = await get_workspace_access(db, workspace_id, identity)
+    require_permission(access, WorkspacePermission.READ)
     await _get_project_run(
         db,
         workspace_id=workspace_id,
@@ -166,9 +175,19 @@ async def mutate_project_research_graph(
     body: WorkflowResearchGraphMutationRequest,
     request: Request,
     db: AsyncSession = Depends(get_db),
+    identity: RequestIdentity = Depends(get_request_identity),
 ) -> ApiResponse[WorkflowResearchGraphMutationResponse]:
     """Append one versioned semantic mutation to a workspace-owned workflow run."""
 
+    access = await get_workspace_access(db, workspace_id, identity)
+    require_permission(
+        access,
+        (
+            WorkspacePermission.WORK_INBOX
+            if body.action == "propose"
+            else WorkspacePermission.APPROVE_ACTIONS
+        ),
+    )
     await _get_project_run(
         db,
         workspace_id=workspace_id,

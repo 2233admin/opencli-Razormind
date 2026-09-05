@@ -4,7 +4,6 @@ import asyncio
 import logging
 import secrets
 from contextlib import asynccontextmanager
-from importlib import import_module
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,10 +18,7 @@ from backend.security.fleet_auth import (
     resolve_uvicorn_host,
 )
 from backend.security.question_bank_body_limit import QuestionBankBodyLimitMiddleware
-from backend.workflow.workflow_plugins import (
-    WorkflowPluginRegistrationError,
-    WorkflowPluginRegistry,
-)
+from backend.workflow.plugin_registry import build_workflow_plugin_registry
 
 
 def _configure_logging() -> None:
@@ -46,21 +42,6 @@ logger = logging.getLogger(__name__)
 
 settings = get_settings()
 
-
-def build_workflow_plugin_registry(app_settings: Settings) -> WorkflowPluginRegistry:
-    """Assemble optional workflow adapters before the application is returned."""
-
-    enabled = app_settings.workflow_plugin_ids
-    unknown = set(enabled).difference({"research-graph"})
-    if unknown:
-        raise WorkflowPluginRegistrationError(
-            f"unknown workflow plugins: {', '.join(sorted(unknown))}"
-        )
-    registry = WorkflowPluginRegistry()
-    if "research-graph" in enabled:
-        plugin_module = import_module("backend.workflow.research_graph")
-        registry.register(plugin_module.ResearchGraphWorkflowPlugin())
-    return registry
 
 
 def _read_chrome_endpoints() -> list[str]:

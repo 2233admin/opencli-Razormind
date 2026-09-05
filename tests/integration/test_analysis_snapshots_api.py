@@ -134,11 +134,8 @@ async def _seed_scope(
         created_at=start,
         updated_at=end,
     )
-    identity_workspace = Workspace(
-        id=scope["workspace"].id,
-        name="Analysis API",
-        slug=f"analysis-api-{role.value}",
-    )
+    identity_workspace = await db_session.get(Workspace, scope["workspace"].id)
+    assert identity_workspace is not None
     user = User(id=f"analysis-{role.value}", subject=f"analysis-{role.value}")
     membership = WorkspaceMembership(
         workspace_id=identity_workspace.id,

@@ -191,7 +191,7 @@ async def test_submission_rejects_unsupported_required_artifact(
 
 
 @pytest.mark.asyncio
-async def test_submission_rejects_invalid_workflow_run_correlation(
+async def test_submission_rejects_unauthenticated_workflow_run_correlation(
     client, acquisition_executor
 ):
     response = await client.post(
@@ -206,11 +206,8 @@ async def test_submission_rejects_invalid_workflow_run_correlation(
         ),
     )
 
-    assert response.status_code == 422
-    assert response.json()["detail"] == {
-        "code": "workflow_run_correlation_invalid",
-        "message": "Workflow run correlation is invalid",
-    }
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Bearer token required"
     acquisition_executor.dispatch_acquisition.assert_not_awaited()
 
 

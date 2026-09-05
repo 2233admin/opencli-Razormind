@@ -14,7 +14,7 @@ from backend.models.skill import Skill
 
 async def _seed_skill(db_session, **overrides) -> Skill:
     defaults = dict(
-        domain="d", capability="c", name="seed", scope="s",
+        domain="d", capability="c", scope="s",
         skill_md="OLD MD", elements={"terminal_conditions": ["done"]},
         evidence=[], version=1, status="active", enabled=True,
     )

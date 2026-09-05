@@ -2,7 +2,7 @@
 
 import asyncio
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 
 from croniter import croniter
 
@@ -50,7 +50,7 @@ async def _get_enabled_schedules() -> list[dict]:
 
 def _now() -> datetime:
     """Thin seam over datetime.now so tests can drive the clock without sleeping."""
-    return datetime.now(datetime.UTC)
+    return datetime.now(UTC)
 
 
 def _fires_in_window(

@@ -633,6 +633,7 @@ async def start_published_workflow_run(
     status_code=202,
 )
 async def start_published_workflow_run_from_question_bank(
+    http_request: Request,
     workspace_id: str,
     project_id: str,
     workflow_id: str,
@@ -702,6 +703,7 @@ async def start_published_workflow_run_from_question_bank(
             trigger_kind=body.trigger_kind,
             trigger_node_id=body.trigger_node_id,
             run_id=run_id,
+            plugins=http_request.app.state.workflow_plugins,
         )
     except Exception:
         if request_owns_run_directory and staged.created:
@@ -721,6 +723,7 @@ async def start_published_workflow_run_from_question_bank(
     status_code=202,
 )
 async def replay_persisted_gaojixing_source_downstream(
+    http_request: Request,
     workspace_id: str,
     project_id: str,
     workflow_id: str,
@@ -755,6 +758,7 @@ async def replay_persisted_gaojixing_source_downstream(
             expected_workflow_id=workflow_id,
             expected_studio_workflow_version_id=version.id,
             session=db,
+            plugins=http_request.app.state.workflow_plugins,
         )
     except ValueError as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
