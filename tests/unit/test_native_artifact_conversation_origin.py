@@ -7,6 +7,7 @@ from backend.workflow.intelligence_store import (
     IntelligenceArtifactInvariantError,
     IntelligenceStore,
 )
+from backend.workflow.native_intelligence_contracts import canonical_hash
 
 
 def _artifact(*, conversation_id=None):
@@ -49,3 +50,18 @@ async def test_central_writer_rejects_producer_declared_conversation(db_session)
 
     with pytest.raises(IntelligenceArtifactInvariantError):
         await store._append_artifacts([_artifact(conversation_id="forged-conversation")])
+
+
+@pytest.mark.asyncio
+async def test_legacy_originless_artifact_serialization_and_hash_remain_stable(db_session):
+    store = IntelligenceStore(db_session)
+    artifact = _artifact()
+    expected_hash = canonical_hash(artifact.model_dump(mode="json"))
+    expected_provenance = artifact.provenance.model_dump(mode="json")
+
+    await store._append_artifacts([artifact])
+    row = await db_session.scalar(select(IntelligenceArtifact))
+
+    assert row is not None
+    assert row.provenance == expected_provenance
+    assert row.content_hash == expected_hash

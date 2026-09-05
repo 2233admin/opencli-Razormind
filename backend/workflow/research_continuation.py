@@ -26,6 +26,7 @@ from backend.schemas.workflow_runtime import (
     WorkflowNodeRunEvent,
     WorkflowRunProjection,
 )
+from backend.workflow.native_intelligence_contracts import WorkflowConversationOrigin
 from backend.workflow.opencli_hda_tracer import start_workflow_run
 from backend.workflow.workflow_plugins import WorkflowPluginRegistry
 
@@ -70,7 +71,7 @@ async def continue_research_workflow_run(
             "proposalId is not the latest collection proposal.",
         )
 
-    parent_request, _, parent_events = parent
+    parent_request, _, parent_events, parent_conversation_origin = parent
     report = _latest_coverage_report(parent_events)
     if report is None or report.get("decision") != "collect_more":
         raise ResearchContinuationError(
@@ -215,7 +216,12 @@ async def continue_research_workflow_run(
         },
         deep=True,
     )
-    await start_workflow_run(child_request, session=session, plugins=plugins)
+    await start_workflow_run(
+        child_request,
+        session=session,
+        plugins=plugins,
+        conversation_origin=parent_conversation_origin,
+    )
     return await _continuation_response(
         ledger_id=root_run_id,
         parent_run_id=parent_run_id,
@@ -242,7 +248,7 @@ async def get_research_ledger(
         loaded = await _load_run(current_run_id, session)
         if loaded is None:
             return None if not chain else None
-        request, projection, events = loaded
+        request, projection, events, _ = loaded
         chain.append((current_run_id, request, projection, events))
         context = _dict(request.input.payload.get("researchLedger"))
         current_run_id = _text(context.get("parentRunId"))
@@ -308,7 +314,12 @@ async def _continuation_response(
 async def _load_run(
     run_id: str,
     session: AsyncSession,
-) -> tuple[WorkflowRunStartRequest, WorkflowRunProjection, list[WorkflowNodeRunEvent]] | None:
+) -> tuple[
+    WorkflowRunStartRequest,
+    WorkflowRunProjection,
+    list[WorkflowNodeRunEvent],
+    WorkflowConversationOrigin | None,
+] | None:
     row = await session.get(WorkflowRun, run_id)
     if row is None:
         return None
@@ -323,10 +334,17 @@ async def _load_run(
         .scalars()
         .all()
     )
+    stored_request = dict(row.request)
+    raw_conversation_origin = stored_request.pop("_serverConversationOrigin", None)
     return (
-        WorkflowRunStartRequest.model_validate(row.request),
+        WorkflowRunStartRequest.model_validate(stored_request),
         WorkflowRunProjection.model_validate(row.projection),
         [WorkflowNodeRunEvent.model_validate(event.payload) for event in event_rows],
+        (
+            WorkflowConversationOrigin.model_validate(raw_conversation_origin)
+            if raw_conversation_origin is not None
+            else None
+        ),
     )
 
 

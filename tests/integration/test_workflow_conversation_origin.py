@@ -17,8 +17,14 @@ from backend.models.studio import (
 )
 from backend.models.workflow_run import WorkflowRun
 from backend.schemas.workflow import WorkflowRunSourceOutputsRequest
+from backend.schemas.workflow_research import WorkflowResearchContinuationRequest
 from backend.security.identity import RequestIdentity, get_request_identity
 from backend.workflow.opencli_hda_tracer import continue_workflow_run_with_source_outputs
+from backend.workflow.research_continuation import (
+    continue_research_workflow_run,
+    get_research_ledger,
+)
+from tests.integration.test_workflow_deep_research_api import _project as _research_project
 
 
 def _native_research_graph(workflow_id: str) -> dict:
@@ -201,6 +207,27 @@ def _native_session_id(workflow_id: str, run_id: str) -> str:
     return str(uuid.uuid5(uuid.NAMESPACE_URL, f"opencli-admin/{workflow_id}/{run_id}"))
 
 
+async def _seed_published_research_scope(db_session):
+    scope = await _seed_scope(db_session)
+    project = _research_project(["funding", "risk"])
+    project["id"] = scope["workflow"].id
+    source = next(node for node in project["nodes"] if node["id"] == "fixture-source")
+    source["params"]["fixtureItems"] = source["params"]["fixtureItems"][:1]
+    project["nodes"].append(_native_research_graph(scope["workflow"].id)["nodes"][0])
+    project["edges"].append(
+        {
+            "id": "e-record-sink-native-research",
+            "source": "record-sink",
+            "target": "native-research",
+            "sourcePort": "stored",
+            "targetPort": "in",
+        }
+    )
+    scope["version"].graph = project
+    await db_session.commit()
+    return scope
+
+
 @pytest.mark.asyncio
 async def test_published_native_artifact_has_reauthorized_conversation_origin(client, db_session):
     scope = await _seed_scope(db_session)
@@ -249,6 +276,88 @@ async def test_published_native_artifact_has_reauthorized_conversation_origin(cl
     assert detail.status_code == 200, detail.text
     assert detail.json()["data"]["conversation_id"] == "origin-conversation-a"
     assert detail.json()["data"]["provenance"]["conversation_id"] == ("origin-conversation-a")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("conversation_id", "expected_conversation_id"),
+    [("origin-conversation-a", "origin-conversation-a"), (None, None)],
+)
+async def test_research_continuation_restores_persisted_origin_to_child_native_artifact(
+    client, db_session, conversation_id, expected_conversation_id
+):
+    scope = await _seed_published_research_scope(db_session)
+    run_body = {
+        "inputs": {},
+        "user": "studio-run-trace",
+    }
+    if conversation_id is not None:
+        run_body["conversation_id"] = conversation_id
+    started = await client.post(
+        _run_url(scope),
+        headers={"Authorization": "Bearer test"},
+        json=run_body,
+    )
+    assert started.status_code == 202, started.text
+    parent_run_id = started.json()["data"]["runId"]
+    parent = await db_session.get(WorkflowRun, parent_run_id)
+    assert parent is not None
+    persisted_origin = parent.request.get("_serverConversationOrigin")
+    if expected_conversation_id is None:
+        assert persisted_origin is None
+    else:
+        assert persisted_origin["conversation_id"] == expected_conversation_id
+
+    ledger = await get_research_ledger(parent_run_id, session=db_session)
+    assert ledger is not None
+    parent_entry = ledger.entries[-1]
+    assert parent_entry.researchStatus == "needs_evidence"
+    assert parent_entry.proposal is not None
+    continuation_body = WorkflowResearchContinuationRequest.model_validate(
+        {
+            "expectedRevisionId": parent_entry.revisionId,
+            "proposalId": parent_entry.proposal["proposalId"],
+            "idempotencyKey": "origin-followup-v1",
+            "conversation_origin": {"conversation_id": "origin-conversation-b"},
+            "sourceOutputs": {
+                "fixture-source": [
+                    {
+                        "claimKey": "liquidity",
+                        "statement": "Liquidity supports the synthetic market.",
+                        "evidenceId": "origin-followup-risk",
+                        "stance": "support",
+                        "dimension": "risk",
+                        "content": "Follow-up risk evidence.",
+                        "url": "https://example.test/origin-followup-risk",
+                    }
+                ]
+            },
+        }
+    )
+
+    continued = await continue_research_workflow_run(
+        parent_run_id,
+        continuation_body,
+        session=db_session,
+        plugins=app.state.workflow_plugins,
+    )
+    assert continued is not None
+    child = await db_session.get(WorkflowRun, continued.childRunId)
+    assert child is not None
+    if persisted_origin is None:
+        assert "_serverConversationOrigin" not in child.request
+    else:
+        assert child.request["_serverConversationOrigin"] == persisted_origin
+
+    child_artifact = await db_session.scalar(
+        select(IntelligenceArtifact).where(
+            IntelligenceArtifact.session_id
+            == _native_session_id(scope["workflow"].id, continued.childRunId),
+            IntelligenceArtifact.kind == "research",
+        )
+    )
+    assert child_artifact is not None
+    assert child_artifact.provenance.get("conversation_id") == expected_conversation_id
 
 
 @pytest.mark.asyncio
