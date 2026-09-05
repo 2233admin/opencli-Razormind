@@ -33,18 +33,7 @@
     "next-env.d.ts",
     "**/*.ts",
     "**/*.tsx",
-    ".next/types/**/*.ts",
-    ".next/dev/types/**/*.ts",
-    ".next-slider-smoke/types/**/*.ts",
-    ".next-slider-smoke/dev/types/**/*.ts",
-    ".next-eldora-verify/types/**/*.ts",
-    ".next-eldora-verify/dev/types/**/*.ts",
-    ".next-agent-rollout/types/**/*.ts",
-    ".next-agent-rollout/dev/types/**/*.ts",
-    ".next-agent-smoke/types/**/*.ts",
-    ".next-agent-smoke/dev/types/**/*.ts",
-    ".next-agent-webpack/types/**/*.ts",
-    ".next-agent-webpack/dev/types/**/*.ts"
+    ".next/types/**/*.ts"
   ],
   "exclude": [
     "node_modules"

@@ -52,7 +52,7 @@ test('sidebar keeps automation separate from Agent surfaces', async () => {
   }
 
   assert.doesNotMatch(navigation, /href: '\/agent-workbench'/)
-  assert.match(navigation, /href: '\/inbox'/)
+  assert.match(navigation, /href: '\/inbox\?tab=pending'/)
   assert.match(navigation, /match: \['\/inbox', '\/tasks', '\/notifications'\]/)
   assert.match(navigation, /match: \['\/operations-agents', '\/schedules'\]/)
   assert.doesNotMatch(navigation, /label: '自动化与 Agent'/)
@@ -158,8 +158,9 @@ test('SSGOI boundary is pathname-keyed, interruptible, and reduced-motion safe',
   const transition = await read('components/motion/app-route-transition.tsx')
 
   assert.match(transition, /const pathname = usePathname\(\)/)
-  assert.match(transition, /key=\{pathname\}/)
-  assert.match(transition, /data-ssgoi-transition=\{pathname\}/)
+  assert.match(transition, /key=\{transitionKey\}/)
+  assert.match(transition, /data-ssgoi-transition=\{transitionKey\}/)
+  assert.match(transition, /const transitionKey = pathname === '\/inbox' \? '\/inbox' : pathname/)
   assert.match(transition, /className="[^"]*h-full[^"]*min-h-full[^"]*"/)
   assert.match(transition, /ordered: APP_ROUTES, transition: axis\(\{ type: 'x', variant: 'snappy' \}\)/)
   assert.match(transition, /prefersReducedMotion \? STATIC_CONFIG : MOTION_CONFIG/)

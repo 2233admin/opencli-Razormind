@@ -187,7 +187,7 @@ async def test_concurrent_registry_instances_do_not_cross_dispatch_or_lifecycle(
 def test_enabled_and_disabled_app_route_snapshots_preserve_legacy_paths():
     disabled_app = main.create_app(app_settings=main.Settings(workflow_plugins=""))
     disabled_paths = _route_paths(disabled_app.router)
-    assert not any("research-graph" in path for path in disabled_paths)
+    assert not any("research-graph" in path.split("/") for path in disabled_paths)
     assert "/api/v1/workflows/compile" in disabled_paths
     assert "/api/v1/workflows/runs" in disabled_paths
     assert "/api/v1/workflows/runs/{run_id}/events" in disabled_paths

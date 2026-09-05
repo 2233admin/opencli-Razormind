@@ -22,7 +22,6 @@ import {
   fetchWorkspaceWorkflowEvidenceBatches,
   fetchWorkflowResearchLedger,
   buildWorkflowRunInputTemplate,
-  continueWorkflowResearch,
   getWorkflowRunFileInput,
   parseWorkflowRunInput,
   replayWorkspaceWorkflowRunTrace,

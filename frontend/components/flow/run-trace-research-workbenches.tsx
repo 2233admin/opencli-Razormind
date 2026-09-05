@@ -24,6 +24,7 @@ export type EvidenceBatchState = {
 
 export function ResearchLedgerWorkbench({
   ledger,
+  allowSourceOutputs,
   sourceOutputs,
   onSourceOutputsChange,
   onContinue,
@@ -31,6 +32,7 @@ export function ResearchLedgerWorkbench({
   error,
 }: {
   ledger: WorkflowResearchLedgerResponse
+  allowSourceOutputs: boolean
   sourceOutputs: string
   onSourceOutputsChange: (value: string) => void
   onContinue: () => void
@@ -38,7 +40,7 @@ export function ResearchLedgerWorkbench({
   error: string | null
 }) {
   const latest = ledger.entries.at(-1)
-  const canContinue = latest?.researchStatus === "needs_evidence"
+  const canContinue = allowSourceOutputs && latest?.researchStatus === "needs_evidence"
     && Boolean(latest.revisionId && latest.proposal?.proposalId)
   return (
     <div className="space-y-3" aria-label="Research revision ledger">

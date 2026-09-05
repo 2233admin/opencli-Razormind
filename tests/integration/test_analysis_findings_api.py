@@ -55,11 +55,13 @@ async def _seed_scope(
     scope["run"].status = "completed"
     scope["run"].created_at = start
     scope["run"].updated_at = end
-    identity_workspace = Workspace(
-        id=scope["workspace"].id,
-        name=f"Analysis Finding {suffix}",
-        slug=f"analysis-finding-{suffix}",
-    )
+    identity_workspace = await db_session.get(Workspace, scope["workspace"].id)
+    if identity_workspace is None:
+        identity_workspace = Workspace(
+            id=scope["workspace"].id,
+            name=f"Analysis Finding {suffix}",
+            slug=f"analysis-finding-{suffix}",
+        )
     user = User(id=f"finding-user-{suffix}", subject=f"finding-user-{suffix}")
     membership = WorkspaceMembership(
         workspace_id=identity_workspace.id,
