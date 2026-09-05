@@ -61,6 +61,8 @@ dependencies = [
     "crawl4ai>=0.7.0",
     # Official MCP v2 line implementing the 2026-07-28 protocol.
     "mcp==2.0.0",
+    # Official Feishu/Lark callback verification and event schema implementation.
+    "lark-channel-sdk[fastapi]==1.4.0",
 ]
 
 [project.scripts]
