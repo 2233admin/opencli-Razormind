@@ -42,7 +42,7 @@ async def _authorized_scope(
     workflow_id: str | None,
     run_id: str | None,
     identity: RequestIdentity,
-) -> tuple[service.ProjectArtifactScope, str]:
+) -> tuple[service.ProjectArtifactScope, str, str]:
     context = {
         key: value
         for key, value in {
@@ -69,7 +69,7 @@ async def _authorized_scope(
         )
     except service.ProjectArtifactError as exc:
         _raise_artifact_error(exc)
-    return scope, auth_scope.workspace_id
+    return scope, auth_scope.studio_workspace_id or workspace_id, auth_scope.workspace_id
 
 
 @router.get(
@@ -87,7 +87,7 @@ async def list_project_artifacts(
     identity: RequestIdentity = Depends(get_request_identity),
 ) -> ApiResponse[list[ProjectArtifactSummary]]:
     try:
-        scope, conversation_workspace_id = await _authorized_scope(
+        scope, studio_workspace_id, conversation_workspace_id = await _authorized_scope(
             db,
             workspace_id=workspace_id,
             project_id=project_id,
@@ -101,6 +101,7 @@ async def list_project_artifacts(
             limit=limit,
             offset=offset,
             conversation_workspace_id=conversation_workspace_id,
+            studio_workspace_id=studio_workspace_id,
         )
     except service.ProjectArtifactError as exc:
         _raise_artifact_error(exc)
@@ -121,7 +122,7 @@ async def read_project_artifact(
     identity: RequestIdentity = Depends(get_request_identity),
 ) -> ApiResponse[ProjectArtifactDetail]:
     try:
-        scope, conversation_workspace_id = await _authorized_scope(
+        scope, studio_workspace_id, conversation_workspace_id = await _authorized_scope(
             db,
             workspace_id=workspace_id,
             project_id=project_id,
@@ -134,6 +135,7 @@ async def read_project_artifact(
             scope=scope,
             artifact_id=artifact_id,
             conversation_workspace_id=conversation_workspace_id,
+            studio_workspace_id=studio_workspace_id,
         )
     except service.ProjectArtifactError as exc:
         _raise_artifact_error(exc)

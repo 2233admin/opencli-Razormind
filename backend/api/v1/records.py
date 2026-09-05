@@ -42,6 +42,11 @@ async def list_records(
         include_in_schema=False,
     ),
     run_id: str | None = Query(default=None, alias="run_id"),
+    run_id_camel: str | None = Query(
+        default=None,
+        alias="runId",
+        include_in_schema=False,
+    ),
     status: str | None = None,
     search: str | None = Query(None),
     page: int = Query(1, ge=1),
@@ -50,21 +55,32 @@ async def list_records(
     sort_order: RecordSortOrder = Query("desc"),
     db: AsyncSession = Depends(get_db),
 ) -> ApiResponse:
-    records, total = await record_service.list_records(
-        db,
-        source_id=source_id,
-        task_id=task_id,
-        project_id=project_id,
-        workflow_id=workflow_id,
-        workflow_run_id=workflow_run_id or workflow_run_id_snake,
-        run_id=run_id,
-        status=status,
-        search=search,
-        page=page,
-        limit=limit,
-        sort_by=sort_by,
-        sort_order=sort_order,
-    )
+    try:
+        effective_workflow_run_id = record_service.resolve_workflow_run_id(
+            run_id=workflow_run_id,
+            workflow_run_id=workflow_run_id_snake,
+        )
+        effective_run_id = record_service.resolve_workflow_run_id(
+            run_id=run_id,
+            workflow_run_id=run_id_camel,
+        )
+        records, total = await record_service.list_records(
+            db,
+            source_id=source_id,
+            task_id=task_id,
+            project_id=project_id,
+            workflow_id=workflow_id,
+            workflow_run_id=effective_workflow_run_id,
+            run_id=effective_run_id,
+            status=status,
+            search=search,
+            page=page,
+            limit=limit,
+            sort_by=sort_by,
+            sort_order=sort_order,
+        )
+    except record_service.RecordRunFilterConflictError as exc:
+        raise HTTPException(status_code=400, detail="record_run_filter_conflict") from exc
     return ApiResponse.ok(
         data=[CollectedRecordRead.model_validate(r) for r in records],
         meta=PaginationMeta(total=total, page=page, limit=limit, pages=max(1, -(-total // limit))),

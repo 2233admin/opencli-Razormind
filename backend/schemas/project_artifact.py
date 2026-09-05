@@ -27,7 +27,7 @@ class ProjectArtifactSummary(UTCModel):
     project_id: str
     workflow_id: str
     run_id: str
-    session_id: str
+    session_id: str | None = None
     conversation_id: str | None = None
     source: str | None = None
     simulated: bool
@@ -43,8 +43,8 @@ class ProjectArtifactDetail(ProjectArtifactSummary):
     payload: dict[str, Any]
     provenance: dict[str, Any]
     grounding_artifact_ids: list[str]
-    algorithm_version: str
-    seed: int
+    algorithm_version: str | None = None
+    seed: int | None = None
 
 
 __all__ = ["ProjectArtifactDetail", "ProjectArtifactSummary"]

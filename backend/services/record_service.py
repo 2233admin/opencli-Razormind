@@ -5,6 +5,22 @@ from backend.models.record import CollectedRecord
 from backend.models.studio import StudioWorkflow
 
 
+class RecordRunFilterConflictError(ValueError):
+    """Raised when legacy run filter aliases disagree."""
+
+
+def resolve_workflow_run_id(
+    *,
+    run_id: str | None,
+    workflow_run_id: str | None,
+) -> str | None:
+    if run_id is not None and workflow_run_id is not None and run_id != workflow_run_id:
+        raise RecordRunFilterConflictError(
+            "run_id and workflow_run_id must identify the same workflow run"
+        )
+    return run_id if run_id is not None else workflow_run_id
+
+
 async def list_records(
     session: AsyncSession,
     source_id: str | None = None,
@@ -61,7 +77,10 @@ async def list_records(
         filters.append(
             CollectedRecord.workflow_id.in_(select(StudioWorkflow.id).where(workflow_filter))
         )
-    effective_run_id = run_id or workflow_run_id
+    effective_run_id = resolve_workflow_run_id(
+        run_id=run_id,
+        workflow_run_id=workflow_run_id,
+    )
     if effective_run_id:
         filters.append(CollectedRecord.workflow_run_id == effective_run_id)
     if status:

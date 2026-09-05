@@ -1,10 +1,45 @@
 from __future__ import annotations
 
+import pytest
+from fastapi import HTTPException
+
+from backend.api.v1 import records as records_api
 from backend.models.record import CollectedRecord
 from backend.models.source import DataSource
 from backend.models.studio import StudioProject, StudioWorkflow
 from backend.models.task import CollectionTask
 from backend.services import record_service
+
+
+def test_record_run_filter_alias_conflicts_are_rejected():
+    try:
+        record_service.resolve_workflow_run_id(
+            run_id="run-a",
+            workflow_run_id="run-b",
+        )
+    except record_service.RecordRunFilterConflictError:
+        pass
+    else:  # pragma: no cover
+        raise AssertionError("contradictory run aliases must be rejected")
+
+    assert (
+        record_service.resolve_workflow_run_id(
+            run_id="run-a",
+            workflow_run_id="run-a",
+        )
+        == "run-a"
+    )
+
+
+async def test_record_route_rejects_conflicting_camel_run_alias(db_session):
+    with pytest.raises(HTTPException) as error:
+        await records_api.list_records(
+            run_id="run-a",
+            run_id_camel="run-b",
+            db=db_session,
+        )
+    assert error.value.status_code == 400
+    assert error.value.detail == "record_run_filter_conflict"
 
 
 async def test_record_run_filter_stays_inside_project_and_workflow(db_session):

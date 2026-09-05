@@ -4,17 +4,26 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from datetime import datetime
 from enum import StrEnum
+from hashlib import sha256
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.models.agent_conversation import AgentConversation
-from backend.models.intelligence import IntelligenceArtifact, IntelligenceSession
+from backend.models.intelligence import (
+    IntelligenceArtifact,
+    IntelligenceSession,
+    IntelligenceTransition,
+)
 from backend.models.studio import StudioProject, StudioWorkflow
 from backend.models.workflow_run import WorkflowRun
 from backend.schemas.project_artifact import ProjectArtifactDetail, ProjectArtifactSummary
+from backend.schemas.workflow_evidence import EvidenceBatchSummary, WorkflowEvidenceBatchDetail
+from backend.schemas.workflow_runtime import WorkflowRunProjection
+from backend.workflow.evidence_projection import get_evidence_batch, list_evidence_batches
 from backend.workflow.native_intelligence_contracts import MAX_ARTIFACT_PAYLOAD_BYTES
 
 
@@ -50,6 +59,18 @@ class _ArtifactRow:
     run: WorkflowRun
     workflow: StudioWorkflow
     project: StudioProject
+
+
+@dataclass(frozen=True)
+class _EvidenceRow:
+    batch: EvidenceBatchSummary
+    detail: WorkflowEvidenceBatchDetail
+    run: WorkflowRun
+    workflow: StudioWorkflow
+    project: StudioProject
+
+
+_ArtifactLike = _ArtifactRow | _EvidenceRow
 
 
 async def resolve_scope(
@@ -134,10 +155,6 @@ def _base_query(scope: ProjectArtifactScope):
             StudioWorkflow.archived.is_(False),
         )
     )
-    if scope.workflow_id is not None:
-        query = query.where(WorkflowRun.workflow_id == scope.workflow_id)
-    if scope.run_id is not None:
-        query = query.where(WorkflowRun.id == scope.run_id)
     return query
 
 
@@ -146,29 +163,135 @@ async def _rows(
     *,
     scope: ProjectArtifactScope,
     artifact_id: str | None = None,
-    limit: int | None = None,
-    offset: int = 0,
 ) -> list[_ArtifactRow]:
-    query = _base_query(scope).order_by(
-        IntelligenceArtifact.created_at.desc(), IntelligenceArtifact.id.desc()
-    )
-    if artifact_id is not None:
-        query = query.where(IntelligenceArtifact.artifact_id == artifact_id)
-    if offset:
-        query = query.offset(offset)
-    if limit is not None:
-        query = query.limit(limit)
-    rows = (await db.execute(query)).all()
-    return [
-        _ArtifactRow(
-            artifact=row[0],
-            session=row[1],
-            run=row[2],
-            workflow=row[3],
-            project=row[4],
+    rows = (await db.execute(_base_query(scope))).all()
+    if not rows:
+        return []
+
+    session_ids = {row[1].id for row in rows}
+    transitions = (
+        await db.scalars(
+            select(IntelligenceTransition)
+            .where(IntelligenceTransition.session_id.in_(session_ids))
+            .order_by(IntelligenceTransition.sequence.asc(), IntelligenceTransition.id.asc())
         )
-        for row in rows
-    ]
+    ).all()
+    producer_by_artifact: dict[tuple[str, str], str] = {}
+    conflicting_artifacts: set[tuple[str, str]] = set()
+    for transition in transitions:
+        if not isinstance(transition.run_id, str) or not transition.run_id:
+            continue
+        metadata = transition.metadata_json if isinstance(transition.metadata_json, dict) else {}
+        artifact_ids = metadata.get("artifact_ids")
+        if not isinstance(artifact_ids, list):
+            continue
+        for raw_artifact_id in artifact_ids:
+            if not isinstance(raw_artifact_id, str) or not raw_artifact_id:
+                continue
+            key = (transition.session_id, raw_artifact_id)
+            prior = producer_by_artifact.get(key)
+            if prior is not None and prior != transition.run_id:
+                conflicting_artifacts.add(key)
+            else:
+                producer_by_artifact[key] = transition.run_id
+
+    producer_run_ids = set(producer_by_artifact.values())
+    if not producer_run_ids:
+        return []
+    producer_runs = (
+        await db.execute(
+            select(WorkflowRun, StudioWorkflow, StudioProject)
+            .join(StudioWorkflow, StudioWorkflow.id == WorkflowRun.workflow_id)
+            .join(StudioProject, StudioProject.id == StudioWorkflow.project_id)
+            .where(
+                WorkflowRun.id.in_(producer_run_ids),
+                StudioProject.id == scope.project_id,
+                StudioProject.workspace_id == scope.workspace_id,
+                StudioProject.archived.is_(False),
+                StudioWorkflow.archived.is_(False),
+            )
+        )
+    ).all()
+    producer_by_id = {
+        run.id: (run, workflow, project)
+        for run, workflow, project in producer_runs
+    }
+
+    result: list[_ArtifactRow] = []
+    for artifact, session, _creator_run, _creator_workflow, _creator_project in rows:
+        key = (session.id, artifact.artifact_id)
+        if key in conflicting_artifacts:
+            continue
+        producer_id = producer_by_artifact.get(key)
+        producer = producer_by_id.get(producer_id or "")
+        if producer is None:
+            continue
+        run, workflow, project = producer
+        if scope.workflow_id is not None and run.workflow_id != scope.workflow_id:
+            continue
+        if scope.run_id is not None and run.id != scope.run_id:
+            continue
+        candidate = _ArtifactRow(
+            artifact=artifact,
+            session=session,
+            run=run,
+            workflow=workflow,
+            project=project,
+        )
+        if artifact_id is not None and artifact_id not in {
+            artifact.artifact_id,
+            _artifact_public_id(candidate),
+        }:
+            continue
+        result.append(candidate)
+    return sorted(result, key=lambda row: (row.artifact.created_at, row.artifact.id), reverse=True)
+
+
+async def _evidence_rows(
+    db: AsyncSession,
+    *,
+    scope: ProjectArtifactScope,
+) -> list[_EvidenceRow]:
+    query = (
+        select(WorkflowRun, StudioWorkflow, StudioProject)
+        .join(StudioWorkflow, StudioWorkflow.id == WorkflowRun.workflow_id)
+        .join(StudioProject, StudioProject.id == StudioWorkflow.project_id)
+        .where(
+            StudioProject.id == scope.project_id,
+            StudioProject.workspace_id == scope.workspace_id,
+            StudioProject.archived.is_(False),
+            StudioWorkflow.archived.is_(False),
+        )
+    )
+    if scope.workflow_id is not None:
+        query = query.where(WorkflowRun.workflow_id == scope.workflow_id)
+    if scope.run_id is not None:
+        query = query.where(WorkflowRun.id == scope.run_id)
+
+    result: list[_EvidenceRow] = []
+    for run, workflow, project in (await db.execute(query)).all():
+        try:
+            projection = WorkflowRunProjection.model_validate(run.projection)
+            batches = list_evidence_batches(projection, limit=100_000).batches
+        except (TypeError, ValueError):
+            continue
+        for batch in batches:
+            detail = get_evidence_batch(projection, batch.batchId)
+            if detail is not None:
+                result.append(
+                    _EvidenceRow(
+                        batch=batch,
+                        detail=detail,
+                        run=run,
+                        workflow=workflow,
+                        project=project,
+                    )
+                )
+    return sorted(
+        result,
+        key=lambda row: (row.run.updated_at, row.batch.batchId),
+        reverse=True,
+    )
 
 
 def _payload_string(payload: dict[str, Any], *keys: str) -> str | None:
@@ -195,33 +318,39 @@ def _artifact_media_type(artifact: IntelligenceArtifact) -> str:
     return "application/json"
 
 
+def _row_key(row: _ArtifactRow) -> tuple[str, str]:
+    return row.session.id, row.artifact.artifact_id
+
+
+def _artifact_public_id(row: _ArtifactRow) -> str:
+    return f"{row.session.id}:{row.artifact.artifact_id}"
+
+
 def _conversation_candidates(row: _ArtifactRow) -> set[str]:
     candidates: set[str] = set()
-    for envelope in (row.artifact.provenance, row.run.request):
-        if not isinstance(envelope, dict):
-            continue
-        for key in ("conversation_id", "conversationId"):
-            value = envelope.get(key)
-            if isinstance(value, str) and value.strip():
-                candidates.add(value.strip())
+    provenance = row.artifact.provenance
+    if isinstance(provenance, dict):
+        provenance_run_id = provenance.get("run_id") or provenance.get("runId")
+        if provenance_run_id in {None, row.run.id}:
+            for key in ("conversation_id", "conversationId"):
+                value = provenance.get(key)
+                if isinstance(value, str) and value.strip():
+                    candidates.add(value.strip())
     return candidates
 
 
 def _conversation_matches(
     conversation: AgentConversation,
     *,
-    scope: ProjectArtifactScope,
+    row: _ArtifactRow,
     studio_workspace_id: str,
 ) -> bool:
     binding = conversation.context_binding if isinstance(conversation.context_binding, dict) else {}
-    if binding.get("project_id") != scope.project_id:
+    if binding.get("project_id") != row.project.id:
         return False
-    if scope.workflow_id is not None and binding.get("workflow_id") not in {
-        None,
-        scope.workflow_id,
-    }:
+    if binding.get("workflow_id") not in {None, row.workflow.id}:
         return False
-    if scope.run_id is not None and binding.get("run_id") not in {None, scope.run_id}:
+    if binding.get("run_id") not in {None, row.run.id}:
         return False
     if binding.get("studio_workspace_id") not in {None, studio_workspace_id}:
         return False
@@ -232,10 +361,9 @@ async def _trusted_conversations(
     db: AsyncSession,
     rows: list[_ArtifactRow],
     *,
-    scope: ProjectArtifactScope,
     studio_workspace_id: str,
     conversation_workspace_id: str,
-) -> dict[str, str]:
+) -> dict[tuple[str, str], str | None]:
     candidates = {candidate for row in rows for candidate in _conversation_candidates(row)}
     if not candidates:
         return {}
@@ -249,15 +377,23 @@ async def _trusted_conversations(
             )
         ).all()
     )
-    return {
-        conversation.id: conversation.id
-        for conversation in conversations
-        if _conversation_matches(
-            conversation,
-            scope=scope,
-            studio_workspace_id=studio_workspace_id,
+    conversation_by_id = {conversation.id: conversation for conversation in conversations}
+    trusted: dict[tuple[str, str], str | None] = {}
+    for row in rows:
+        valid = sorted(
+            candidate
+            for candidate in _conversation_candidates(row)
+            if candidate in conversation_by_id
+            and _conversation_matches(
+                conversation_by_id[candidate],
+                row=row,
+                studio_workspace_id=studio_workspace_id,
+            )
         )
-    }
+        # A row with competing valid conversation provenance is ambiguous.  Do
+        # not select by set/database order or claim ownership we cannot prove.
+        trusted[_row_key(row)] = valid[0] if len(valid) == 1 else None
+    return trusted
 
 
 def _summary(
@@ -268,7 +404,7 @@ def _summary(
     artifact = row.artifact
     provenance = artifact.provenance if isinstance(artifact.provenance, dict) else {}
     return ProjectArtifactSummary(
-        id=artifact.artifact_id,
+        id=_artifact_public_id(row),
         artifact_id=artifact.artifact_id,
         title=_artifact_title(artifact),
         media_type=_artifact_media_type(artifact),
@@ -284,6 +420,66 @@ def _summary(
         simulated=artifact.simulated,
         created_at=artifact.created_at,
         updated_at=artifact.updated_at,
+    )
+
+
+def _evidence_payload(row: _EvidenceRow) -> dict[str, Any]:
+    return row.detail.model_dump(mode="json", by_alias=True)
+
+
+def _evidence_id(row: _EvidenceRow) -> str:
+    return f"evidence-batch:{row.batch.batchId}"
+
+
+def _evidence_summary(row: _EvidenceRow) -> ProjectArtifactSummary:
+    payload = _evidence_payload(row)
+    content_hash = sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode(
+            "utf-8"
+        )
+    ).hexdigest()
+    return ProjectArtifactSummary(
+        id=_evidence_id(row),
+        artifact_id=_evidence_id(row),
+        title=f"Evidence batch {row.batch.batchId}",
+        media_type="application/json",
+        kind="evidence_batch",
+        content_hash=content_hash,
+        workspace_id=row.project.workspace_id,
+        project_id=row.project.id,
+        workflow_id=row.workflow.id,
+        run_id=row.run.id,
+        session_id=None,
+        conversation_id=None,
+        source="workflow_run_projection",
+        simulated=False,
+        created_at=row.run.created_at,
+        updated_at=row.run.updated_at,
+    )
+
+
+def _evidence_detail(row: _EvidenceRow) -> ProjectArtifactDetail:
+    payload = _evidence_payload(row)
+    if _content_size(payload) > MAX_ARTIFACT_PAYLOAD_BYTES:
+        raise ProjectArtifactError(ProjectArtifactErrorCode.CONTENT_TOO_LARGE)
+    provenance = {
+        "source": "workflow_run_projection",
+        "workflow_id": row.workflow.id,
+        "run_id": row.run.id,
+        "batch_id": row.batch.batchId,
+        "manifest_uri": row.batch.manifestUri,
+        "odp_ref": row.batch.odpRef,
+    }
+    summary = _evidence_summary(row)
+    return ProjectArtifactDetail(
+        **summary.model_dump(),
+        schema_version="workflow.evidence-batch.v1",
+        content=payload,
+        payload=payload,
+        provenance=provenance,
+        grounding_artifact_ids=[],
+        algorithm_version="workflow-run-projection-v1",
+        seed=None,
     )
 
 
@@ -333,31 +529,35 @@ async def list_project_artifacts(
     limit: int = 100,
     offset: int = 0,
     conversation_workspace_id: str | None = None,
+    studio_workspace_id: str | None = None,
 ) -> list[ProjectArtifactSummary]:
     if offset < 0 or not 1 <= limit <= 100:
         raise ValueError("artifact_query_bounds_invalid")
-    rows = await _rows(db, scope=scope, limit=limit, offset=offset)
+    intelligence_rows = await _rows(db, scope=scope)
+    evidence_rows = await _evidence_rows(db, scope=scope)
+    combined: list[tuple[datetime, str, _ArtifactLike]] = [
+        (row.artifact.created_at, row.artifact.id, row) for row in intelligence_rows
+    ] + [
+        (row.run.updated_at, _evidence_id(row), row) for row in evidence_rows
+    ]
+    combined.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    page = [item[2] for item in combined[offset : offset + limit]]
+    page_intelligence_rows = [row for row in page if isinstance(row, _ArtifactRow)]
     conversations = await _trusted_conversations(
         db,
-        rows,
-        scope=scope,
-        studio_workspace_id=scope.workspace_id,
+        page_intelligence_rows,
+        studio_workspace_id=studio_workspace_id or scope.workspace_id,
         conversation_workspace_id=conversation_workspace_id or scope.workspace_id,
     )
-    return [
-        _summary(
-            row,
-            conversation_id=next(
-                (
-                    candidate
-                    for candidate in _conversation_candidates(row)
-                    if candidate in conversations
-                ),
-                None,
-            ),
-        )
-        for row in rows
-    ]
+    summaries: list[ProjectArtifactSummary] = []
+    for row in page:
+        if isinstance(row, _ArtifactRow):
+            summaries.append(
+                _summary(row, conversation_id=conversations.get(_row_key(row)))
+            )
+        else:
+            summaries.append(_evidence_summary(row))
+    return summaries
 
 
 async def get_project_artifact(
@@ -366,28 +566,31 @@ async def get_project_artifact(
     scope: ProjectArtifactScope,
     artifact_id: str,
     conversation_workspace_id: str | None = None,
+    studio_workspace_id: str | None = None,
 ) -> ProjectArtifactDetail:
     rows = await _rows(db, scope=scope, artifact_id=artifact_id)
-    if not rows:
+    evidence_rows = [
+        row
+        for row in await _evidence_rows(db, scope=scope)
+        if _evidence_id(row) == artifact_id
+    ]
+    if len(rows) + len(evidence_rows) == 0:
         raise ProjectArtifactError(ProjectArtifactErrorCode.ARTIFACT_NOT_FOUND)
-    if len(rows) > 1:
+    if len(rows) + len(evidence_rows) > 1:
         # The domain key is only unique inside a native session.  Do not choose
         # one row and accidentally expose another run when a caller omitted the
         # run scope.
         raise ProjectArtifactError(ProjectArtifactErrorCode.ARTIFACT_SCOPE_REQUIRED)
+    if evidence_rows:
+        return _evidence_detail(evidence_rows[0])
     row = rows[0]
     conversations = await _trusted_conversations(
         db,
         [row],
-        scope=scope,
-        studio_workspace_id=scope.workspace_id,
+        studio_workspace_id=studio_workspace_id or scope.workspace_id,
         conversation_workspace_id=conversation_workspace_id or scope.workspace_id,
     )
-    conversation_id = next(
-        (candidate for candidate in _conversation_candidates(row) if candidate in conversations),
-        None,
-    )
-    return _detail(row, conversation_id=conversation_id)
+    return _detail(row, conversation_id=conversations.get(_row_key(row)))
 
 
 __all__ = [
