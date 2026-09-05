@@ -69,6 +69,17 @@ type DataLayer = 'merged' | 'normalized' | 'raw' | 'enrichment'
 type SortField = 'created_at' | 'updated_at' | 'status' | 'source_id' | 'workflow_id' | 'workflow_run_id'
 type SortOrder = 'asc' | 'desc'
 type SortOption = `${SortField}:${SortOrder}`
+type RecordFilterInput = {
+  project_id: string
+  status?: string
+  search?: string
+  sort_by?: SortField
+  sort_order?: SortOrder
+  workflow_id?: string
+  workflow_run_id?: string
+  page?: number
+  limit?: number
+}
 type SavedView = {
   id: string
   name: string
@@ -192,17 +203,15 @@ function exportFileBase(projectName?: string) {
   return safeName.replace(/^-+|-+$/g, '') || 'project-data'
 }
 
-async function listAllRecords(filters: {
-  project_id: string
-  status?: string
-  search?: string
-  sort_by?: SortField
-  sort_order?: SortOrder
-}) {
+async function listAllRecords(filters: RecordFilterInput) {
   const allRecords: CollectedRecord[] = []
   let currentPage = 1
   while (true) {
-    const response = await listRecords({ ...filters, page: currentPage, limit: EXPORT_PAGE_SIZE })
+    const response = await listRecords({
+      ...filters,
+      page: currentPage,
+      limit: EXPORT_PAGE_SIZE,
+    } as Parameters<typeof listRecords>[0])
     allRecords.push(...response.data)
     if (!response.meta || currentPage >= response.meta.pages || response.data.length === 0) break
     currentPage += 1
@@ -275,7 +284,7 @@ function parseSavedView(value: unknown): SavedView | null {
   if (!value || typeof value !== 'object') return null
   const candidate = value as Partial<SavedView>
   const dataLayer = candidate.dataLayer ?? 'merged'
-  if (typeof candidate.id !== 'string' || typeof candidate.name !== 'string' || !['dataset', 'profile', 'quality', 'files'].includes(candidate.view ?? '') || typeof candidate.search !== 'string' || typeof candidate.status !== 'string' || !SORT_OPTIONS.some((option) => option.value === candidate.sortOption) || !DATA_LAYER_OPTIONS.some((option) => option.value === dataLayer) || (candidate.selectedColumns !== null && !Array.isArray(candidate.selectedColumns))) return null
+  if (typeof candidate.id !== 'string' || typeof candidate.name !== 'string' || !['dataset', 'profile', 'quality', 'files', 'artifacts'].includes(candidate.view ?? '') || typeof candidate.search !== 'string' || typeof candidate.status !== 'string' || !SORT_OPTIONS.some((option) => option.value === candidate.sortOption) || !DATA_LAYER_OPTIONS.some((option) => option.value === dataLayer) || (candidate.selectedColumns !== null && !Array.isArray(candidate.selectedColumns))) return null
   return { ...candidate, dataLayer } as SavedView
 }
 
@@ -307,7 +316,7 @@ export default function ProjectDataWorkbenchPage({ params }: { params: Promise<{
   const projectsQuery = useWorkspaceProjects(workspaceId)
   const workflowsQuery = useProjectWorkflows(workspaceId, projectId)
   const { sort_by, sort_order } = splitSortOption(sortOption)
-  const recordsQuery = useRecords({
+  const recordFilters: RecordFilterInput = {
     project_id: projectId,
     ...(status === 'all' ? {} : { status }),
     ...(search.trim() ? { search: search.trim() } : {}),
@@ -315,7 +324,10 @@ export default function ProjectDataWorkbenchPage({ params }: { params: Promise<{
     sort_order,
     page,
     limit: PAGE_SIZE,
-  })
+    ...(navigationContext.workflow ? { workflow_id: navigationContext.workflow } : {}),
+    ...(navigationContext.run ? { workflow_run_id: navigationContext.run } : {}),
+  }
+  const recordsQuery = useRecords(recordFilters as Parameters<typeof useRecords>[0])
   const project = projectsQuery.data?.find((candidate) => candidate.id === projectId)
   const workflows = workflowsQuery.data ?? []
   const records = useMemo(() => recordsQuery.data?.data ?? [], [recordsQuery.data?.data])
@@ -391,6 +403,8 @@ export default function ProjectDataWorkbenchPage({ params }: { params: Promise<{
       ...(search.trim() ? { search: search.trim() } : {}),
       sort_by,
       sort_order,
+      ...(navigationContext.workflow ? { workflow_id: navigationContext.workflow } : {}),
+      ...(navigationContext.run ? { workflow_run_id: navigationContext.run } : {}),
     }).then((allRecords) => {
       if (!cancelled) setAnalysisRecords(allRecords)
     }).catch((reason) => {
@@ -399,7 +413,7 @@ export default function ProjectDataWorkbenchPage({ params }: { params: Promise<{
       if (!cancelled) setAnalysisLoading(false)
     })
     return () => { cancelled = true }
-  }, [analysisView, projectId, search, sort_by, sort_order, status])
+  }, [analysisView, navigationContext.run, navigationContext.workflow, projectId, search, sort_by, sort_order, status])
 
   const loading = projectsQuery.isLoading || workflowsQuery.isLoading || recordsQuery.isLoading || (analysisView && analysisLoading)
   const error = projectsQuery.error || workflowsQuery.error || recordsQuery.error || (analysisView ? analysisError : null)
@@ -493,6 +507,8 @@ export default function ProjectDataWorkbenchPage({ params }: { params: Promise<{
         ...(search.trim() ? { search: search.trim() } : {}),
         sort_by,
         sort_order,
+        ...(navigationContext.workflow ? { workflow_id: navigationContext.workflow } : {}),
+        ...(navigationContext.run ? { workflow_run_id: navigationContext.run } : {}),
       }
       const allRecords = await listAllRecords(filters)
       const exportRecords = scope === 'selected' ? allRecords.filter((record) => selectedRecordIds.includes(record.id)) : allRecords
@@ -527,7 +543,7 @@ export default function ProjectDataWorkbenchPage({ params }: { params: Promise<{
     } finally {
       setExporting(null)
     }
-  }, [dataLayer, project, projectId, search, selectedRecordIds, sort_by, sort_order, status])
+  }, [dataLayer, navigationContext.run, navigationContext.workflow, project, projectId, search, selectedRecordIds, sort_by, sort_order, status])
 
   return (
     <PageContainer
@@ -555,7 +571,7 @@ export default function ProjectDataWorkbenchPage({ params }: { params: Promise<{
               <ViewButton active={view === 'dataset'} icon={Database} onClick={() => setView('dataset')}>数据集</ViewButton>
               <ViewButton active={view === 'profile'} icon={BarChart3} onClick={() => setView('profile')}>字段分析</ViewButton>
               <ViewButton active={view === 'quality'} icon={ShieldCheck} onClick={() => setView('quality')}>质量统计</ViewButton>
-              <ViewButton active={view === 'files'} icon={FileStack} onClick={() => setView('files')}>项目文件</ViewButton>
+              <ViewButton active={view === 'files'} icon={FileStack} onClick={() => setView('files')}>项目来源</ViewButton>
               <ViewButton active={view === 'artifacts'} icon={FileText} onClick={() => setView('artifacts')}>项目产物</ViewButton>
             </div>
             <div className="flex flex-wrap items-center gap-2">
@@ -716,7 +732,7 @@ function QualityStat({ label, value, hint }: { label: string; value: string; hin
 }
 
 function ProjectInputsView({ groups }: { groups: Array<[string, { count: number; updatedAt: string; statuses: Set<string> }]> }) {
-  return <div className="p-5"><div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="font-semibold">项目输入与处理批次</h2><p className="mt-1 text-xs text-muted-foreground">先用现有来源记录验证文件工作台结构；上传与解析引擎接线后仍沿用这里的项目上下文。</p></div><Button variant="outline" size="sm" disabled title="文件上传适配器尚未接入"><Upload className="size-4" />上传文件 · 接入中</Button></div><div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3">{groups.map(([sourceId, group]) => <article key={sourceId} className="rounded-lg border p-4"><div className="flex items-start justify-between gap-3"><span className="grid size-9 place-items-center rounded-md bg-muted"><FileStack className="size-4 text-muted-foreground" /></span><Badge variant="outline">{group.count} 条</Badge></div><h3 className="mt-4 truncate font-mono text-xs font-medium" title={sourceId}>{sourceId}</h3><p className="mt-1 text-[11px] text-muted-foreground">最近处理 {formatRelative(group.updatedAt)}</p><div className="mt-3 flex flex-wrap gap-1.5">{[...group.statuses].map((status) => <Badge key={status} variant={status === 'error' ? 'destructive' : 'secondary'}>{status}</Badge>)}</div></article>)}</div></div>
+  return <div className="p-5"><div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="font-semibold">项目来源与处理批次</h2><p className="mt-1 text-xs text-muted-foreground">按真实来源记录查看当前项目的处理批次；文件上传与解析引擎尚未接入。</p></div><Button variant="outline" size="sm" disabled title="文件上传适配器尚未接入"><Upload className="size-4" />上传文件 · 接入中</Button></div><div className="mt-5 grid gap-3 md:grid-cols-2 xl:grid-cols-3">{groups.map(([sourceId, group]) => <article key={sourceId} className="rounded-lg border p-4"><div className="flex items-start justify-between gap-3"><span className="grid size-9 place-items-center rounded-md bg-muted"><FileStack className="size-4 text-muted-foreground" /></span><Badge variant="outline">{group.count} 条</Badge></div><h3 className="mt-4 truncate font-mono text-xs font-medium" title={sourceId}>{sourceId}</h3><p className="mt-1 text-[11px] text-muted-foreground">最近处理 {formatRelative(group.updatedAt)}</p><div className="mt-3 flex flex-wrap gap-1.5">{[...group.statuses].map((status) => <Badge key={status} variant={status === 'error' ? 'destructive' : 'secondary'}>{status}</Badge>)}</div></article>)}</div></div>
 }
 
 function Summary({ label, value, icon: Icon }: { label: string; value: string; icon: typeof Database }) {

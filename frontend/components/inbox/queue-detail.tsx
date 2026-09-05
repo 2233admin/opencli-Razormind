@@ -6,6 +6,7 @@ import { useState, type ReactNode } from 'react'
 
 import AIApproval, { type AIApprovalOption } from '@/components/smoothui/ai-approval'
 import { InboxConversationThread, InboxConversationUnavailable } from '@/components/inbox/inbox-conversation-thread'
+import { ProjectArtifactsPanel } from '@/components/artifacts/project-artifacts-panel'
 import { StatusBadge } from '@/components/shell/status-badge'
 import { buttonVariants } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -247,6 +248,15 @@ export function ApprovalQueueDetail({ item }: { item: QueueDetailItem }) {
             />
           ) : <InboxConversationUnavailable reason={origin.unavailableReason} />}
 
+          {origin.project && !origin.unavailableReason ? (
+            <ProjectArtifactsPanel
+              workspaceId={origin.workspace ?? approval.workspace_id}
+              projectId={origin.project}
+              workflowId={origin.workflow}
+              runId={origin.run}
+            />
+          ) : null}
+
           {decisionError ? (
             <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">
               {decisionError}。决定尚未生效，请检查连接后重试。
@@ -324,6 +334,14 @@ export function ProposalQueueDetail({ item }: { item: QueueDetailItem }) {
               }}
             />
           ) : <InboxConversationUnavailable reason={origin.unavailableReason} />}
+          {origin.project && !origin.unavailableReason ? (
+            <ProjectArtifactsPanel
+              workspaceId={origin.workspace ?? proposal?.workspace_id ?? null}
+              projectId={origin.project}
+              workflowId={origin.workflow}
+              runId={origin.run}
+            />
+          ) : null}
         </div>
       </ScrollArea>
       <div className="border-t px-5 py-3 text-xs text-muted-foreground">请在原 Agent 会话中确认或调整此提案。</div>

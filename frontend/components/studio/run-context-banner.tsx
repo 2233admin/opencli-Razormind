@@ -13,5 +13,5 @@ export function RunContextBanner({ context, projectId }: { context: RunNavigatio
     ? buildRunUrl('operations', { ...context, project: projectId }, projectId)
     : null
   const agent = buildScopedAgentUrl(pathname, { ...context, project: projectId })
-  return <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/20 p-3 text-xs"><span>从 Run {context.run ?? '上下文'} 跳转；当前数据按项目展示，未按此运行筛选。{context.trace ? ` trace ${context.trace}` : ''}</span>{operations ? <Link className={cn(buttonVariants({ variant: 'outline', size: 'sm' }))} href={operations}>返回此运行 Trace</Link> : null}{agent ? <Link className={cn(buttonVariants({ variant: 'outline', size: 'sm' }))} href={agent}>讨论本次结果</Link> : null}</div>
+  return <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/20 p-3 text-xs"><span>{context.run ? `当前页面已按 Run ${context.run} 筛选。` : '当前页面使用项目范围，未提供具体运行。'}{context.trace ? ` trace ${context.trace}` : ''}</span>{operations ? <Link className={cn(buttonVariants({ variant: 'outline', size: 'sm' }))} href={operations}>返回此运行 Trace</Link> : null}{agent ? <Link className={cn(buttonVariants({ variant: 'outline', size: 'sm' }))} href={agent}>讨论本次结果</Link> : null}</div>
 }

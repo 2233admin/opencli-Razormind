@@ -11,8 +11,8 @@ import {
   ShieldAlert,
 } from 'lucide-react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
-import { useState } from 'react'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
+import { useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 
 import { InboxConversationThread, InboxConversationUnavailable } from '@/components/inbox/inbox-conversation-thread'
@@ -38,9 +38,9 @@ function shortId(value: string | null | undefined) {
 }
 
 function artifactKindLabel(kind: string) {
-  if (kind === 'evidence_batch') return 'Evidence batch'
-  if (kind === 'report') return 'Report'
-  return kind.replaceAll('_', ' ')
+  if (kind === 'evidence_batch') return '采集结果'
+  if (kind === 'report') return '分析报告'
+  return '项目产物'
 }
 
 function downloadText(filename: string, content: string, type: string) {
@@ -109,22 +109,39 @@ export function ProjectArtifactsPanel({
   workflowId,
   runId,
 }: ProjectArtifactsPanelProps) {
+  const pathname = usePathname()
   const router = useRouter()
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const searchParams = useSearchParams()
+  const selectedId = searchParams.get('artifact')
   const query = useQuery({
     queryKey: ['project-artifacts', workspaceId, projectId, workflowId ?? null, runId ?? null],
     queryFn: () => listProjectArtifacts(workspaceId!, projectId, { workflowId, runId, limit: 100 }),
     enabled: Boolean(workspaceId),
   })
+  const artifacts = query.data ?? []
+  const selected = artifacts.find((artifact) => artifact.id === selectedId) ?? null
   const detail = useQuery({
     queryKey: ['project-artifact', workspaceId, projectId, selectedId, workflowId ?? null, runId ?? null],
     queryFn: () => getProjectArtifact(workspaceId!, projectId, selectedId!, { workflowId, runId }),
-    enabled: Boolean(workspaceId && selectedId),
+    enabled: Boolean(workspaceId && selected),
   })
-  const artifacts = query.data ?? []
-  const selected = artifacts.find((artifact) => artifact.id === selectedId) ?? null
   const current = detail.data ?? null
   const preview = current ? reportPreview(current) : null
+
+  useEffect(() => {
+    if (selectedId && !selected) {
+      const params = new URLSearchParams(searchParams.toString())
+      params.delete('artifact')
+      router.replace(`${pathname}${params.toString() ? `?${params.toString()}` : ''}`, { scroll: false })
+    }
+  }, [pathname, router, searchParams, selected, selectedId])
+
+  function selectArtifact(id: string | null) {
+    const params = new URLSearchParams(searchParams.toString())
+    if (id) params.set('artifact', id)
+    else params.delete('artifact')
+    router.replace(`${pathname}${params.toString() ? `?${params.toString()}` : ''}`, { scroll: false })
+  }
 
   function openConversation(artifact: ProjectArtifactSummary) {
     if (!artifact.conversation_id) return
@@ -144,7 +161,7 @@ export function ProjectArtifactsPanel({
       <CardHeader className="border-b bg-muted/15 pb-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
-            <div className="flex items-center gap-2 text-xs text-muted-foreground"><FileText className="size-3.5 text-primary" aria-hidden />Persisted outputs</div>
+            <div className="flex items-center gap-2 text-xs text-muted-foreground"><FileText className="size-3.5 text-primary" aria-hidden />持久化产物</div>
             <CardTitle id="project-artifacts-title" className="mt-1 text-base">项目产物</CardTitle>
             <p className="mt-1 text-xs leading-5 text-muted-foreground">内容来自当前项目与运行的授权持久化输出；来源按服务端投影展示。</p>
           </div>
@@ -152,18 +169,18 @@ export function ProjectArtifactsPanel({
             <Button type="button" variant="outline" size="sm" onClick={() => void query.refetch()} disabled={!workspaceId || query.isFetching}>
               <RefreshCw className={cn('size-3.5', query.isFetching && 'animate-spin')} />刷新
             </Button>
-            <Button type="button" variant="outline" size="sm" onClick={() => exportArtifacts(artifacts, 'csv')} disabled={!artifacts.length}>
-              <Download className="size-3.5" />导出 CSV
+            <Button type="button" variant="outline" size="sm" onClick={() => exportArtifacts(artifacts, 'csv')} disabled={!artifacts.length} title="导出当前已加载的项目产物">
+              <Download className="size-3.5" />导出当前 CSV
             </Button>
-            <Button type="button" variant="outline" size="sm" onClick={() => exportArtifacts(artifacts, 'json')} disabled={!artifacts.length}>
-              <Copy className="size-3.5" />导出 JSON
+            <Button type="button" variant="outline" size="sm" onClick={() => exportArtifacts(artifacts, 'json')} disabled={!artifacts.length} title="导出当前已加载的项目产物">
+              <Copy className="size-3.5" />导出当前 JSON
             </Button>
           </div>
         </div>
         <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
           <span className="rounded-full border bg-background px-2 py-1">{workflowId ? `工作流 ${shortId(workflowId)}` : '全部工作流'}</span>
           <span className="rounded-full border bg-background px-2 py-1">{runId ? `运行 ${shortId(runId)}` : '全部运行'}</span>
-          <span>{artifacts.length} 个结果</span>
+          <span>{artifacts.length} 个已加载结果 · 导出当前显示{artifacts.length === 100 ? '（列表上限 100）' : ''}</span>
         </div>
       </CardHeader>
 
@@ -178,7 +195,7 @@ export function ProjectArtifactsPanel({
               <button
                 key={artifact.id}
                 type="button"
-                onClick={() => setSelectedId(artifact.id)}
+                onClick={() => selectArtifact(artifact.id)}
                 className="w-full rounded-lg border bg-background p-3 text-left transition-colors hover:border-primary/40 hover:bg-primary/[0.025] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 data-testid={`project-artifact-${artifact.id}`}
               >
@@ -204,7 +221,7 @@ export function ProjectArtifactsPanel({
         ) : null}
       </CardContent>
 
-      <Sheet open={Boolean(selectedId)} onOpenChange={(open) => !open && setSelectedId(null)}>
+      <Sheet open={Boolean(selectedId && selected)} onOpenChange={(open) => !open && selectArtifact(null)}>
         <SheetContent className="w-full overflow-y-auto sm:max-w-2xl" data-testid="project-artifact-detail">
           <SheetHeader>
             <SheetTitle>{selected?.title ?? '项目产物'}</SheetTitle>
