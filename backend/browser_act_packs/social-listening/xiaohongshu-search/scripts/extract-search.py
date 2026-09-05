@@ -5,7 +5,12 @@ import sys
 def main():
     sys.stdout.reconfigure(encoding='utf-8', newline='\n')
     parser = argparse.ArgumentParser()
-    parser.add_argument('--limit', type=int, default=20, help='max items to return from current feeds')
+    parser.add_argument(
+        '--limit',
+        type=int,
+        default=20,
+        help='max items to return from current feeds',
+    )
     args = parser.parse_args()
 
     js = f"""
@@ -14,7 +19,8 @@ def main():
     const unwrap = v => v?.value !== undefined ? v.value : v?._value !== undefined ? v._value : v;
     const feeds = unwrap(window.__INITIAL_STATE__?.search?.feeds);
     if (!feeds || !feeds.length) {{
-      return JSON.stringify({{ error: true, message: 'feeds not loaded or empty — verify page is a search result page and wait stable has completed' }});
+      return JSON.stringify({{ error: true, message: 'feeds not loaded or empty — '
+        + 'verify page is a search result page and wait stable has completed' }});
     }}
     const s = window.__INITIAL_STATE__?.search;
     const items = feeds.slice(0, {args.limit}).map(item => {{

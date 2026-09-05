@@ -15,7 +15,7 @@ same as real aggregation.py output today), the "would-be-healthy" tests below
 assert UNKNOWN unless the test explicitly fills in full coverage.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from backend.control.evaluator import evaluate
 from backend.control.measurements import SourceMeasurement
@@ -34,7 +34,7 @@ def _measurement(**overrides) -> SourceMeasurement:
         error_rate=0.0,
         duplicate_rate=0.0,
         cursor_advanced=False,
-        observed_at=datetime(2026, 7, 2, tzinfo=timezone.utc),
+        observed_at=datetime(2026, 7, 2, tzinfo=UTC),
     )
     kwargs.update(overrides)
     return SourceMeasurement(**kwargs)
@@ -128,13 +128,23 @@ class TestPRControl3StateBranches:
 
     def test_rate_limited_from_dominant_trend_even_without_this_runs_error_kind(self):
         m = _measurement(error_kinds={})
-        trend = {"window": 5, "zero_accepted_streak": 0, "avg_error_rate": 0.0, "rate_limited_runs": 3}
+        trend = {
+            "window": 5,
+            "zero_accepted_streak": 0,
+            "avg_error_rate": 0.0,
+            "rate_limited_runs": 3,
+        }
         assert evaluate(m, SourceObjective(), trend=trend) is SourceControlState.RATE_LIMITED
 
     def test_rate_limited_trend_not_dominant_does_not_trigger(self):
         # 2 of 5 is not a majority (2*2=4 is not > 5) -> falls through instead.
         m = _measurement(error_kinds={}, freshness_lag_seconds=1, source_ts_quality="source")
-        trend = {"window": 5, "zero_accepted_streak": 0, "avg_error_rate": 0.0, "rate_limited_runs": 2}
+        trend = {
+            "window": 5,
+            "zero_accepted_streak": 0,
+            "avg_error_rate": 0.0,
+            "rate_limited_runs": 2,
+        }
         result = evaluate(m, SourceObjective(), trend=trend)
         assert result is not SourceControlState.RATE_LIMITED
 
@@ -149,7 +159,10 @@ class TestPRControl3StateBranches:
     def test_blocked_by_odp_when_system_context_backpressured_and_available(self):
         m = _measurement()
         ctx = {"odp_backpressured": True, "available": True}
-        assert evaluate(m, SourceObjective(), system_context=ctx) is SourceControlState.BLOCKED_BY_ODP
+        assert (
+            evaluate(m, SourceObjective(), system_context=ctx)
+            is SourceControlState.BLOCKED_BY_ODP
+        )
 
     def test_not_blocked_by_odp_when_system_context_unavailable(self):
         # An unavailable ODP collector must never be treated as backpressured,
@@ -164,7 +177,10 @@ class TestPRControl3StateBranches:
     def test_blocked_by_odp_precedes_degraded(self):
         m = _measurement(error_rate=0.9)
         ctx = {"odp_backpressured": True, "available": True}
-        assert evaluate(m, SourceObjective(), system_context=ctx) is SourceControlState.BLOCKED_BY_ODP
+        assert (
+            evaluate(m, SourceObjective(), system_context=ctx)
+            is SourceControlState.BLOCKED_BY_ODP
+        )
 
     def test_legacy_backpressured_still_reachable_via_odp_pending(self):
         # PR-Control-2's per-measurement odp_pending signal is preserved
@@ -174,12 +190,27 @@ class TestPRControl3StateBranches:
 
     def test_dead_when_zero_streak_and_terminal_error(self):
         m = _measurement(accepted=0, error_kinds={"network": 1})
-        trend = {"window": 5, "zero_accepted_streak": 3, "avg_error_rate": 0.0, "rate_limited_runs": 0}
+        trend = {
+            "window": 5,
+            "zero_accepted_streak": 3,
+            "avg_error_rate": 0.0,
+            "rate_limited_runs": 0,
+        }
         assert evaluate(m, SourceObjective(), trend=trend) is SourceControlState.DEAD
 
     def test_not_dead_below_streak_threshold(self):
-        m = _measurement(accepted=0, error_kinds={"network": 1}, freshness_lag_seconds=1, source_ts_quality="source")
-        trend = {"window": 5, "zero_accepted_streak": 2, "avg_error_rate": 0.0, "rate_limited_runs": 0}
+        m = _measurement(
+            accepted=0,
+            error_kinds={"network": 1},
+            freshness_lag_seconds=1,
+            source_ts_quality="source",
+        )
+        trend = {
+            "window": 5,
+            "zero_accepted_streak": 2,
+            "avg_error_rate": 0.0,
+            "rate_limited_runs": 0,
+        }
         result = evaluate(m, SourceObjective(), trend=trend)
         assert result is not SourceControlState.DEAD
 
@@ -187,8 +218,18 @@ class TestPRControl3StateBranches:
         # A clean, error-free zero-accepted streak (e.g. a polling source with
         # nothing new every cycle) must not be flagged DEAD — that would
         # falsely alarm on a perfectly healthy polling source.
-        m = _measurement(accepted=0, error_kinds={}, freshness_lag_seconds=1, source_ts_quality="source")
-        trend = {"window": 5, "zero_accepted_streak": 5, "avg_error_rate": 0.0, "rate_limited_runs": 0}
+        m = _measurement(
+            accepted=0,
+            error_kinds={},
+            freshness_lag_seconds=1,
+            source_ts_quality="source",
+        )
+        trend = {
+            "window": 5,
+            "zero_accepted_streak": 5,
+            "avg_error_rate": 0.0,
+            "rate_limited_runs": 0,
+        }
         result = evaluate(m, SourceObjective(), trend=trend)
         assert result is not SourceControlState.DEAD
 
@@ -197,7 +238,12 @@ class TestPRControl3StateBranches:
         # measurement's coverage would otherwise gate a would-be HEALTHY down
         # to UNKNOWN.
         m = _measurement(accepted=0, error_kinds={"network": 1})
-        trend = {"window": 3, "zero_accepted_streak": 3, "avg_error_rate": 0.0, "rate_limited_runs": 0}
+        trend = {
+            "window": 3,
+            "zero_accepted_streak": 3,
+            "avg_error_rate": 0.0,
+            "rate_limited_runs": 0,
+        }
         assert evaluate(m, SourceObjective(), trend=trend) is SourceControlState.DEAD
 
     def test_rule_precedence_auth_beats_everything(self):
@@ -206,7 +252,12 @@ class TestPRControl3StateBranches:
             error_rate=0.9,
             accepted=0,
         )
-        trend = {"window": 5, "zero_accepted_streak": 5, "avg_error_rate": 0.9, "rate_limited_runs": 5}
+        trend = {
+            "window": 5,
+            "zero_accepted_streak": 5,
+            "avg_error_rate": 0.9,
+            "rate_limited_runs": 5,
+        }
         ctx = {"odp_backpressured": True, "available": True}
         result = evaluate(m, SourceObjective(), trend=trend, system_context=ctx)
         assert result is SourceControlState.AUTH_FAILED
@@ -221,7 +272,12 @@ class TestPRControl3StateBranches:
     def test_evaluate_never_mutates_its_inputs(self):
         m = _measurement(error_kinds={"rate_limited": 1})
         obj = SourceObjective()
-        trend = {"window": 5, "zero_accepted_streak": 0, "avg_error_rate": 0.0, "rate_limited_runs": 1}
+        trend = {
+            "window": 5,
+            "zero_accepted_streak": 0,
+            "avg_error_rate": 0.0,
+            "rate_limited_runs": 1,
+        }
         ctx = {"odp_backpressured": False, "available": True}
         m_copy = m.model_copy(deep=True)
         obj_copy = obj.model_copy(deep=True)

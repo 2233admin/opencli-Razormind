@@ -1,19 +1,23 @@
 import argparse
 import sys
 
+
 def main():
     sys.stdout.reconfigure(encoding='utf-8', newline='\n')
     parser = argparse.ArgumentParser()
-    parser.add_argument('shop_id')              # shop ID (for documentation only; page already loaded)
-    parser.add_argument('--page', default='1')  # current page number
-    args = parser.parse_args()
+    parser.add_argument(
+        "shop_id"
+    )  # shop ID (for documentation only; page already loaded)
+    parser.add_argument("--page", default="1")  # current page number
+    parser.parse_args()
 
-    js = f"""
+    js = """
     (function() {{
       try {{
         var cards = document.querySelectorAll('.item');
         if (!cards || cards.length === 0) {{
-          return JSON.stringify({{ error: true, message: 'No product cards found (.item). Page may not have loaded or shopId is invalid.' }});
+          return JSON.stringify({{ error: true, message: 'No product cards found '
+            + '(.item). Page may not have loaded or shopId is invalid.' }});
         }}
         var items = Array.from(cards).map(function(card) {{
           var link = card.querySelector('a[href*="id="]');
@@ -54,7 +58,9 @@ def main():
       }}
     }})()
     """
+    js = js.replace("{{", "{").replace("}}", "}")
     print(js)
+
 
 if __name__ == '__main__':
     main()

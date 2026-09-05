@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import NAMESPACE_URL, UUID, uuid5
@@ -8,7 +8,6 @@ from fastapi import HTTPException
 
 from backend.api.v1 import odp_reconciliation
 from backend.odp.query_client import OdpReconciliationDelegation
-
 
 SOURCE_ID = UUID("00000000-0000-0000-0000-000000000001")
 TASK_ID = UUID("00000000-0000-0000-0000-000000000002")
@@ -27,7 +26,7 @@ def delegation(mode="exact"):
         trace_id=TRACE_ID,
         allowed_source_ids=(SOURCE_ID,),
         allowed_modes=(mode,),
-        expires_at=datetime.now(timezone.utc) + timedelta(minutes=5),
+        expires_at=datetime.now(UTC) + timedelta(minutes=5),
     )
 
 

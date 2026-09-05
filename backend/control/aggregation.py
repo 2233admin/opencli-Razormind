@@ -41,8 +41,7 @@ from ``TaskRun.records_collected`` (which the runner sets to ``stored``) rather
 than returning ``None`` — a failed run is still evidence.
 """
 
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -126,7 +125,7 @@ def row_to_measurement(row: SourceMeasurementRow) -> SourceMeasurement:
 
 async def latest_measurement_row(
     session: AsyncSession, source_id: str
-) -> Optional[SourceMeasurementRow]:
+) -> SourceMeasurementRow | None:
     """Return the newest persisted ``source_measurements`` row for a source,
     or ``None`` when the source has never had one recorded.
 
@@ -146,7 +145,7 @@ async def latest_measurement_row(
 
 async def build_measurement(
     session: AsyncSession, source_id: str
-) -> Optional[SourceMeasurement]:
+) -> SourceMeasurement | None:
     """Build a :class:`SourceMeasurement` for a source, preferring the latest
     persisted ``source_measurements`` row (rich C1 signals) and falling back
     to the TaskRun/TaskRunEvent-derived path only when no such row exists yet.
@@ -164,7 +163,7 @@ async def build_measurement(
 
 async def build_trend(
     session: AsyncSession, source_id: str, *, window: int = 5
-) -> Optional[SourceTrend]:
+) -> SourceTrend | None:
     """Summarize the last ``window`` ``source_measurements`` rows for a source.
 
     Returns ``None`` when there is no persisted row at all for this source
@@ -194,7 +193,7 @@ async def build_trend(
 
 async def build_trend_with_fallback(
     session: AsyncSession, source_id: str, *, window: int = 5
-) -> Optional[SourceTrend]:
+) -> SourceTrend | None:
     """:func:`build_trend`, falling back to recent TaskRun/TaskRunEvent
     evidence when the source has NO ``source_measurements`` row at all
     (issue 06 — pre-measurement sources).
@@ -215,7 +214,7 @@ async def build_trend_with_fallback(
 
 def trend_from_rows(
     rows: list[SourceMeasurementRow],
-) -> Optional[SourceTrend]:
+) -> SourceTrend | None:
     """Summarize an already-fetched, newest-first row window into a
     :class:`SourceTrend`. Pure — no I/O; returns ``None`` for an empty window.
 
@@ -235,7 +234,7 @@ def trend_from_rows(
 
 def _summarize_window(
     entries: list[tuple[int, float, dict[str, int]]], *, provenance: str
-) -> Optional[SourceTrend]:
+) -> SourceTrend | None:
     """The one streak/avg/count summary over a newest-first window of
     ``(accepted, error_rate, error_kinds)`` readings. Pure — no I/O; returns
     ``None`` for an empty window.
@@ -290,7 +289,7 @@ async def _recent_runs(
 
 async def _build_measurement_from_task_events(
     session: AsyncSession, source_id: str
-) -> Optional[SourceMeasurement]:
+) -> SourceMeasurement | None:
     """PR-Control-2 fallback path: derive a measurement from TaskRun +
     TaskRunEvent evidence when no ``source_measurements`` row exists yet."""
     runs = await _recent_runs(session, source_id, 1)
@@ -302,7 +301,7 @@ async def _build_measurement_from_task_events(
 
 async def _build_trend_from_run_history(
     session: AsyncSession, source_id: str, *, window: int = 5
-) -> Optional[SourceTrend]:
+) -> SourceTrend | None:
     """Issue 06: derive a fallback trend for a pre-measurement source from its
     recent TaskRun/TaskRunEvent window — the SAME evidence and per-run mapping
     :func:`_build_measurement_from_task_events` reads, widened from the latest
@@ -365,7 +364,7 @@ async def _measurement_from_run(
         fetch_latency_ms = int(latest_run.duration_ms or 0)
 
     observed_at = latest_run.finished_at or latest_run.created_at or datetime.now(
-        timezone.utc
+        datetime.UTC
     )
 
     return SourceMeasurement.derive(
@@ -399,7 +398,7 @@ async def _measurement_from_run(
 
 async def _collect_elapsed_ms(
     session: AsyncSession, run_id: str
-) -> Optional[int]:
+) -> int | None:
     """Return the ``collect`` step's elapsed_ms for a run, if recorded."""
     event = (
         await session.execute(

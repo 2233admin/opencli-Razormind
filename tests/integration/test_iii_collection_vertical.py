@@ -34,12 +34,23 @@ from backend.workflow.iii_collection_store import (
 )
 from tests.integration.iii_collection_test_support import (
     create_scoped_run as _create_scoped_run,
+)
+from tests.integration.iii_collection_test_support import (
     receipt_body as _receipt_body,
+)
+from tests.integration.iii_collection_test_support import (
     report_body as _report_body,
+)
+from tests.integration.iii_collection_test_support import (
     route as _route,
+)
+from tests.integration.iii_collection_test_support import (
     sign_receipt_body as _sign_receipt_body,
+)
+from tests.integration.iii_collection_test_support import (
     submit_body as _submit_body,
 )
+
 
 @pytest.mark.asyncio
 async def test_submit_commits_admin_ledger_before_iii_trigger(client, db_session, monkeypatch):
@@ -59,14 +70,22 @@ async def test_submit_commits_admin_ledger_before_iii_trigger(client, db_session
     async def fake_dispatch(db, *, command):
         attempt = (
             await db.execute(
-                select(IIICollectionAttemptV1).where(IIICollectionAttemptV1.command_id == command.id)
+                select(IIICollectionAttemptV1).where(
+                    IIICollectionAttemptV1.command_id == command.id
+                )
             )
         ).scalar_one()
         outbound = (
-            await db.execute(select(IIICollectionOutboundV1).where(IIICollectionOutboundV1.attempt_id == attempt.id))
+            await db.execute(
+                select(IIICollectionOutboundV1).where(
+                    IIICollectionOutboundV1.attempt_id == attempt.id
+                )
+            )
         ).scalar_one()
         event = (
-            await db.execute(select(WorkflowRunEvent).where(WorkflowRunEvent.run_id == command.run_id))
+            await db.execute(
+                select(WorkflowRunEvent).where(WorkflowRunEvent.run_id == command.run_id)
+            )
         ).scalar_one()
         assert commits == 1
         assert outbound.state == "pending"
@@ -120,7 +139,10 @@ async def test_pending_resume_reuses_same_attempt_and_precommit_failure_never_di
         assert function_id == "odp.collect::opencli_snapshot"
         captured.append(payload)
 
-    monkeypatch.setattr("backend.workflow.iii_collection_dispatch.invoke_iii_collection", fake_invoke)
+    monkeypatch.setattr(
+        "backend.workflow.iii_collection_dispatch.invoke_iii_collection",
+        fake_invoke,
+    )
     resumed = await dispatch_collection_attempt(db_session, command=submitted.command)
     assert resumed.state == "submitted_to_iii"
     assert len(captured) == 1
@@ -149,7 +171,9 @@ async def test_pending_resume_reuses_same_attempt_and_precommit_failure_never_di
 
 
 @pytest.mark.asyncio
-async def test_lifecycle_replay_conflict_unavailable_status_and_redaction(client, db_session, monkeypatch):
+async def test_lifecycle_replay_conflict_unavailable_status_and_redaction(
+    client, db_session, monkeypatch
+):
     scope = await _create_scoped_run(db_session)
     monkeypatch.setattr(
         "backend.api.v1.iii_collections.get_settings",
@@ -162,7 +186,10 @@ async def test_lifecycle_replay_conflict_unavailable_status_and_redaction(client
         assert function_id == "odp.collect::opencli_snapshot"
         raise IIIBridgeUnavailableError("offline")
 
-    monkeypatch.setattr("backend.workflow.iii_collection_dispatch.invoke_iii_collection", unavailable)
+    monkeypatch.setattr(
+        "backend.workflow.iii_collection_dispatch.invoke_iii_collection",
+        unavailable,
+    )
     submit_response = await client.post(_route(scope), json=_submit_body())
     assert submit_response.status_code == 202
     submit = submit_response.json()["data"]
@@ -295,7 +322,10 @@ async def test_cancellation_before_dispatch_never_invokes_iii(db_session, monkey
         nonlocal invoked
         invoked = True
 
-    monkeypatch.setattr("backend.workflow.iii_collection_dispatch.invoke_iii_collection", should_not_invoke)
+    monkeypatch.setattr(
+        "backend.workflow.iii_collection_dispatch.invoke_iii_collection",
+        should_not_invoke,
+    )
     outbound = await dispatch_collection_attempt(db_session, command=submitted.command)
     assert outbound.state == "cancelled"
     assert invoked is False
@@ -348,12 +378,16 @@ async def test_lifecycle_ingress_requires_bridge_token_and_rejects_scope_hash_co
         "backend.api.v1.iii_collections.get_settings",
         lambda: SimpleNamespace(iii_lifecycle_token=""),
     )
-    assert (await client.post("/api/v1/iii-collections/lifecycle", json=lifecycle)).status_code == 401
+    assert (
+        await client.post("/api/v1/iii-collections/lifecycle", json=lifecycle)
+    ).status_code == 401
     monkeypatch.setattr(
         "backend.api.v1.iii_collections.get_settings",
         lambda: SimpleNamespace(iii_lifecycle_token="bridge-token"),
     )
-    assert (await client.post("/api/v1/iii-collections/lifecycle", json=lifecycle)).status_code == 401
+    assert (
+        await client.post("/api/v1/iii-collections/lifecycle", json=lifecycle)
+    ).status_code == 401
     assert (
         await client.post(
             "/api/v1/iii-collections/lifecycle",
@@ -369,7 +403,12 @@ async def test_lifecycle_ingress_requires_bridge_token_and_rejects_scope_hash_co
         )
     ).status_code == 200
 
-    wrong_hash = {**lifecycle, "sequence": 2, "event_type": "collector_started", "payload_sha256": "0" * 64}
+    wrong_hash = {
+        **lifecycle,
+        "sequence": 2,
+        "event_type": "collector_started",
+        "payload_sha256": "0" * 64,
+    }
     assert (
         await client.post(
             "/api/v1/iii-collections/lifecycle",
@@ -669,10 +708,18 @@ async def test_real_odp_ingest_receipts_are_accepted_by_admin(client, db_session
     headers = {"x-iii-bridge-token": "bridge-token"}
     for receipt in (first_receipt, second_receipt):
         assert (
-            await client.post("/api/v1/iii-collections/ingress-receipts", json=receipt, headers=headers)
+            await client.post(
+                "/api/v1/iii-collections/ingress-receipts",
+                json=receipt,
+                headers=headers,
+            )
         ).status_code == 200
     assert (
-        await client.post("/api/v1/iii-collections/expected-key-reports", json=report, headers=headers)
+        await client.post(
+            "/api/v1/iii-collections/expected-key-reports",
+            json=report,
+            headers=headers,
+        )
     ).status_code == 200
     status = (await client.get(f"{_route(scope)}/{command.id}")).json()["data"]
     assert status["blockingStage"] == "reconciliation"

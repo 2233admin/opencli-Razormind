@@ -1,22 +1,36 @@
 import argparse
 import sys
 
+
 def main():
-    sys.stdout.reconfigure(encoding='utf-8', newline='\n')
-    parser = argparse.ArgumentParser(description='Combined X DM inbox scan: merge API (metadata, screen_name) + DOM (preview, unread, timestamp)')
-    args = parser.parse_args()
+    sys.stdout.reconfigure(encoding="utf-8", newline="\n")
+    parser = argparse.ArgumentParser(
+        description=(
+            "Combined X DM inbox scan: merge API (metadata, screen_name) + "
+            "DOM (preview, unread, timestamp)"
+        )
+    )
+    parser.parse_args()
 
     js = """
     (async () => {
       try {
-        const passcode = document.querySelector('input[pattern="[0-9]*"][maxlength="1"]');
-        if (passcode) return JSON.stringify({ error: true, message: 'passcode_required', hint: 'Page is on DM passcode screen; unlock first' });
+        const passcode = document.querySelector(
+          'input[pattern="[0-9]*"][maxlength="1"]'
+        );
+        if (passcode) return JSON.stringify({ error: true,
+          message: 'passcode_required', hint: 'Page is on DM passcode screen; unlock first' });
 
-        const myId = document.cookie.split('; ').find(c => c.startsWith('twid='))?.split('=')[1]?.replace(/^u%3D/, '').replace(/^u=/, '');
-        if (!myId) return JSON.stringify({ error: true, message: 'twid cookie missing - not logged in' });
+        const myId = document.cookie.split('; ')
+          .find(c => c.startsWith('twid='))?.split('=')[1]
+          ?.replace(/^u%3D/, '').replace(/^u=/, '');
+        if (!myId) return JSON.stringify({ error: true,
+          message: 'twid cookie missing - not logged in' });
 
-        const AUTH = 'Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA';
-        const csrf = document.cookie.split('; ').find(c => c.startsWith('ct0='))?.split('=')[1];
+        const AUTH = 'Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D' +
+          '1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA';
+        const csrf = document.cookie.split('; ')
+          .find(c => c.startsWith('ct0='))?.split('=')[1];
         const headers = {
           'authorization': AUTH,
           'x-csrf-token': csrf,
@@ -24,17 +38,26 @@ def main():
           'apollo-require-preflight': 'true'
         };
 
-        const apiUrl = 'https://api.x.com/graphql/eovtSNDuKOzRLKXV4yWcow/GetInitialXChatPageQuery?variables=' +
+        const apiUrl =
+          'https://api.x.com/graphql/eovtSNDuKOzRLKXV4yWcow/' +
+          'GetInitialXChatPageQuery?variables=' +
           encodeURIComponent(JSON.stringify({
             max_local_sequence_id: null,
-            query_settings: { conversation_event_limit: 200, inbox_conversation_event_limit: 5, inbox_conversation_limit: 20, user_event_limit: 500 },
+            query_settings: {
+              conversation_event_limit: 200,
+              inbox_conversation_event_limit: 5,
+              inbox_conversation_limit: 20,
+              user_event_limit: 500
+            },
             message_pull_version: null
           }));
         const r = await fetch(apiUrl, { credentials: 'include', headers });
-        if (!r.ok) return JSON.stringify({ error: true, message: 'inbox API HTTP ' + r.status });
+        if (!r.ok) return JSON.stringify({ error: true,
+          message: 'inbox API HTTP ' + r.status });
         const j = await r.json();
         const page = j?.data?.get_initial_chat_page;
-        if (!page) return JSON.stringify({ error: true, message: 'unexpected API response shape' });
+        if (!page) return JSON.stringify({ error: true,
+          message: 'unexpected API response shape' });
 
         const apiByConvId = {};
         (page.items || []).forEach(it => {
@@ -61,7 +84,9 @@ def main():
           };
         });
 
-        const items = document.querySelectorAll('[data-testid^="dm-conversation-item-"]');
+        const items = document.querySelectorAll(
+          '[data-testid^="dm-conversation-item-"]'
+        );
         const merged = [];
         items.forEach(el => {
           const testid = el.getAttribute('data-testid');
@@ -87,7 +112,9 @@ def main():
             preview = texts[3];
           }
 
-          const unread = !!el.querySelector('svg[data-icon="icon-circle-fill"].text-primary');
+          const unread = !!el.querySelector(
+            'svg[data-icon="icon-circle-fill"].text-primary'
+          );
 
           merged.push({
             conversation_id: convId,
@@ -116,15 +143,20 @@ def main():
           count: merged.length,
           unread_count: merged.filter(m => m.unread).length,
           items: merged,
-          next_cursor: isEnd ? null : { cursor_id: cursor.cursor_id, graph_snapshot_id: cursor.graph_snapshot_id },
+          next_cursor: isEnd ? null : {
+            cursor_id: cursor.cursor_id,
+            graph_snapshot_id: cursor.graph_snapshot_id
+          },
           message_requests_count: page.message_requests_count
         });
       } catch(e) {
-        return JSON.stringify({ error: true, message: e.message, stack: (e.stack||'').slice(0, 300) });
+        return JSON.stringify({ error: true, message: e.message,
+          stack: (e.stack||'').slice(0, 300) });
       }
     })()
     """
     print(js)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()

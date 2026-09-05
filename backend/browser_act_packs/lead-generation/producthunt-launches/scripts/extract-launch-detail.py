@@ -5,7 +5,7 @@ import sys
 def main():
     sys.stdout.reconfigure(encoding='utf-8', newline='\n')
     parser = argparse.ArgumentParser()
-    args = parser.parse_args()
+    parser.parse_args()
 
     js = """
     (()=>{
@@ -27,7 +27,9 @@ def main():
         const imgs = Array.from(document.querySelectorAll('img[src*="ph-files.imgix.net"]'));
         const images = imgs.map(i => i.src).filter(s => s.includes('fit=max'));
 
-        const upvoteBtn = Array.from(document.querySelectorAll('button')).find(b => /upvote\\s*\\d+/i.test(b.textContent));
+        const upvoteBtn = Array.from(document.querySelectorAll('button')).find(
+          b => /upvote\\s*\\d+/i.test(b.textContent)
+        );
         const upvotes = upvoteBtn ? parseInt(upvoteBtn.textContent.match(/\\d+/)?.[0]) || 0 : 0;
 
         const timeEls = Array.from(document.querySelectorAll('time'));

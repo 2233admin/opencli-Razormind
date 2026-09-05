@@ -5,8 +5,8 @@ Revises: k8l9m0n1o2p3
 Create Date: 2026-08-29
 """
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 revision = "a8b9c0d1e2f3"
 down_revision = "k8l9m0n1o2p3"
@@ -46,16 +46,24 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("run_id", "idempotency_key", name="uq_iii_collection_command_run_key"),
     )
-    op.create_index("ix_iii_collection_commands_workspace_id", "iii_collection_commands", ["workspace_id"])
-    op.create_index("ix_iii_collection_commands_project_id", "iii_collection_commands", ["project_id"])
-    op.create_index("ix_iii_collection_commands_workflow_id", "iii_collection_commands", ["workflow_id"])
+    op.create_index(
+        "ix_iii_collection_commands_workspace_id", "iii_collection_commands", ["workspace_id"]
+    )
+    op.create_index(
+        "ix_iii_collection_commands_project_id", "iii_collection_commands", ["project_id"]
+    )
+    op.create_index(
+        "ix_iii_collection_commands_workflow_id", "iii_collection_commands", ["workflow_id"]
+    )
     op.create_index(
         "ix_iii_collection_commands_studio_workflow_version_id",
         "iii_collection_commands",
         ["studio_workflow_version_id"],
     )
     op.create_index("ix_iii_collection_commands_run_id", "iii_collection_commands", ["run_id"])
-    op.create_index("ix_iii_collection_commands_payload_sha256", "iii_collection_commands", ["payload_sha256"])
+    op.create_index(
+        "ix_iii_collection_commands_payload_sha256", "iii_collection_commands", ["payload_sha256"]
+    )
     op.create_index("ix_iii_collection_commands_trace_id", "iii_collection_commands", ["trace_id"])
     op.create_index(
         "ix_iii_collection_commands_scope",
@@ -73,12 +81,18 @@ def upgrade() -> None:
         sa.Column("attempt_number", sa.Integer(), nullable=False),
         sa.Column("task_id", sa.String(length=36), nullable=False),
         sa.Column("trace_id", sa.String(length=255), nullable=False),
-        sa.ForeignKeyConstraint(["command_id"], ["iii_collection_commands.id"], ondelete="RESTRICT"),
+        sa.ForeignKeyConstraint(
+            ["command_id"], ["iii_collection_commands.id"], ondelete="RESTRICT"
+        ),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("command_id", "attempt_number", name="uq_iii_collection_attempt_number"),
+        sa.UniqueConstraint(
+            "command_id", "attempt_number", name="uq_iii_collection_attempt_number"
+        ),
         sa.UniqueConstraint("task_id"),
     )
-    op.create_index("ix_iii_collection_attempts_command_id", "iii_collection_attempts", ["command_id"])
+    op.create_index(
+        "ix_iii_collection_attempts_command_id", "iii_collection_attempts", ["command_id"]
+    )
     op.create_index("ix_iii_collection_attempts_task_id", "iii_collection_attempts", ["task_id"])
     op.create_index("ix_iii_collection_attempts_trace_id", "iii_collection_attempts", ["trace_id"])
 
@@ -95,12 +109,18 @@ def upgrade() -> None:
         sa.Column("cancelled_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("cancel_requested_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("last_error", sa.Text(), nullable=True),
-        sa.ForeignKeyConstraint(["attempt_id"], ["iii_collection_attempts.id"], ondelete="RESTRICT"),
+        sa.ForeignKeyConstraint(
+            ["attempt_id"], ["iii_collection_attempts.id"], ondelete="RESTRICT"
+        ),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("attempt_id"),
     )
     op.create_index("ix_iii_collection_outbox_attempt_id", "iii_collection_outbox", ["attempt_id"])
-    op.create_index("ix_iii_collection_outbox_delivery", "iii_collection_outbox", ["state", "available_at"])
+    op.create_index(
+        "ix_iii_collection_outbox_delivery",
+        "iii_collection_outbox",
+        ["state", "available_at"],
+    )
 
     op.create_table(
         "iii_collection_lifecycle_observations",
@@ -115,18 +135,26 @@ def upgrade() -> None:
         sa.Column("payload_sha256", sa.String(length=64), nullable=False),
         sa.Column("canonical_content_hash", sa.String(length=64), nullable=False),
         sa.Column("details", sa.JSON(), nullable=False),
-        sa.ForeignKeyConstraint(["attempt_id"], ["iii_collection_attempts.id"], ondelete="RESTRICT"),
-        sa.ForeignKeyConstraint(["command_id"], ["iii_collection_commands.id"], ondelete="RESTRICT"),
+        sa.ForeignKeyConstraint(
+            ["attempt_id"], ["iii_collection_attempts.id"], ondelete="RESTRICT"
+        ),
+        sa.ForeignKeyConstraint(
+            ["command_id"], ["iii_collection_commands.id"], ondelete="RESTRICT"
+        ),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint(
             "command_id", "attempt_id", "sequence", name="uq_iii_collection_lifecycle_replay"
         ),
     )
     op.create_index(
-        "ix_iii_collection_lifecycle_command_id", "iii_collection_lifecycle_observations", ["command_id"]
+        "ix_iii_collection_lifecycle_command_id",
+        "iii_collection_lifecycle_observations",
+        ["command_id"],
     )
     op.create_index(
-        "ix_iii_collection_lifecycle_attempt_id", "iii_collection_lifecycle_observations", ["attempt_id"]
+        "ix_iii_collection_lifecycle_attempt_id",
+        "iii_collection_lifecycle_observations",
+        ["attempt_id"],
     )
     op.create_index(
         "ix_iii_collection_lifecycle_attempt",

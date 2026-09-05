@@ -1,5 +1,3 @@
-from typing import Optional
-
 from sqlalchemy import Boolean, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -27,18 +25,18 @@ class ModelProvider(TimestampMixin):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     # claude | openai | local
     provider_type: Mapped[str] = mapped_column(String(50), nullable=False, default="openai")
-    base_url: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    base_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
     # DB column is still named "api_key" (no migration-visible rename) but is
     # ciphertext-only; use the `api_key` property below to read/write plaintext.
-    _api_key_encrypted: Mapped[Optional[str]] = mapped_column(
+    _api_key_encrypted: Mapped[str | None] = mapped_column(
         "api_key", Text, nullable=True
     )
-    default_model: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    default_model: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
     @property
-    def api_key(self) -> Optional[str]:
+    def api_key(self) -> str | None:
         """Decrypt the stored ciphertext back to the plaintext API key.
 
         None/empty passthrough (no key configured — nothing to decrypt).
@@ -59,7 +57,7 @@ class ModelProvider(TimestampMixin):
             return value
 
     @api_key.setter
-    def api_key(self, value: Optional[str]) -> None:
+    def api_key(self, value: str | None) -> None:
         """Encrypt on write. None/empty stored as-is (nothing to encrypt)."""
         if not value:
             self._api_key_encrypted = value

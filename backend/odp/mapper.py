@@ -12,7 +12,7 @@ through it.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from backend.odp.schemas import IngestMode, RecordEvent
@@ -33,11 +33,11 @@ def _source_ts(normalized: dict[str, Any]) -> str:
         if published:
             ts = datetime.fromisoformat(published.replace("Z", "+00:00"))
             if ts.tzinfo is None:
-                ts = ts.replace(tzinfo=timezone.utc)
+                ts = ts.replace(tzinfo=UTC)
         else:
-            ts = datetime.now(timezone.utc)
+            ts = datetime.now(UTC)
     except ValueError:
-        ts = datetime.now(timezone.utc)
+        ts = datetime.now(UTC)
     return ts.isoformat().replace("+00:00", "Z")
 
 

@@ -128,6 +128,8 @@ select = ["E", "F", "I", "N", "W", "UP"]
 python_version = "3.13"
 strict = false
 ignore_missing_imports = true
+explicit_package_bases = true
+exclude = ["^_bmad-output/", "^backend/browser_act_packs/", "^iii/workers/"]
 
 [tool.vercel]
 entrypoint = "backend.main:app"

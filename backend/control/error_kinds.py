@@ -14,12 +14,12 @@ table below. v1 records exactly one terminal error per run (see
 extension noted there, not implemented here.
 """
 
-from enum import Enum
+from enum import StrEnum
 
 from backend.pipeline import error_taxonomy
 
 
-class ErrorKind(str, Enum):
+class ErrorKind(StrEnum):
     """Coarse, control-facing failure category. Deliberately smaller than the
     exception-class-name vocabulary in ``error_taxonomy`` — that module answers
     "retry or not"; this one answers "what should the controller DO about it"

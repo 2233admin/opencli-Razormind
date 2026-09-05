@@ -17,14 +17,25 @@ class DeliveryExecution(TimestampMixin):
     __table_args__ = (
         UniqueConstraint("decision_id", name="uq_delivery_execution_decision"),
         UniqueConstraint("execution_binding_hash", name="uq_delivery_execution_binding"),
-        Index("ix_delivery_execution_scope", "workspace_id", "project_id", "workflow_id", "run_id", "id"),
+        Index(
+            "ix_delivery_execution_scope",
+            "workspace_id",
+            "project_id",
+            "workflow_id",
+            "run_id",
+            "id",
+        ),
     )
 
     decision_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("delivery_authorization_decisions.id", ondelete="RESTRICT"), nullable=False
+        String(36),
+        ForeignKey("delivery_authorization_decisions.id", ondelete="RESTRICT"),
+        nullable=False,
     )
     target_revision_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("delivery_target_revisions.id", ondelete="RESTRICT"), nullable=False
+        String(36),
+        ForeignKey("delivery_target_revisions.id", ondelete="RESTRICT"),
+        nullable=False,
     )
     workspace_id: Mapped[str] = mapped_column(String(36), nullable=False)
     project_id: Mapped[str] = mapped_column(String(36), nullable=False)
@@ -38,10 +49,18 @@ class DeliveryExecution(TimestampMixin):
     state: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
     next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     lease_token: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    lease_acquired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    send_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    reserved_attempt_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    cancel_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    lease_acquired_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    send_started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    reserved_attempt_number: Mapped[int | None] = mapped_column(
+        Integer, nullable=True
+    )
+    cancel_requested_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     final_outcome: Mapped[str | None] = mapped_column(String(16), nullable=True)
     final_result_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     final_reconciliation_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
@@ -52,7 +71,9 @@ class DeliveryExecutionResult(TimestampMixin):
 
     __tablename__ = "delivery_execution_results"
     __table_args__ = (
-        UniqueConstraint("execution_id", "attempt_number", name="uq_delivery_execution_result_attempt"),
+        UniqueConstraint(
+            "execution_id", "attempt_number", name="uq_delivery_execution_result_attempt"
+        ),
         Index("ix_delivery_execution_result_execution", "execution_id", "attempt_number"),
     )
 
@@ -113,7 +134,9 @@ class ControlledReceiverNonce(TimestampMixin):
 
     __tablename__ = "controlled_receiver_nonces"
     __table_args__ = (
-        UniqueConstraint("receiver_identity", "key_id", "nonce", name="uq_controlled_receiver_nonce"),
+        UniqueConstraint(
+            "receiver_identity", "key_id", "nonce", name="uq_controlled_receiver_nonce"
+        ),
     )
 
     receiver_identity: Mapped[str] = mapped_column(String(255), nullable=False)

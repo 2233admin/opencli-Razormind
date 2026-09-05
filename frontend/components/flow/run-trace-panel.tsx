@@ -13,20 +13,23 @@ import {
   type WorkflowOpenCLIHDATraceResponse,
 } from "@/lib/workflow/backend-opencli-hda-trace"
 import {
+  continueWorkflowResearch,
   fetchWorkflowEvidenceBatchDetail,
   fetchWorkflowEvidenceBatchProjection,
   fetchWorkflowEvidenceBatches,
+  fetchWorkspaceWorkflowEvidenceBatchDetail,
+  fetchWorkspaceWorkflowEvidenceBatchProjection,
+  fetchWorkspaceWorkflowEvidenceBatches,
   fetchWorkflowResearchLedger,
   buildWorkflowRunInputTemplate,
   continueWorkflowResearch,
   getWorkflowRunFileInput,
   parseWorkflowRunInput,
+  replayWorkspaceWorkflowRunTrace,
   replayWorkflowRunEventStream,
   resumeGaojixingWorkflowRun,
+  startWorkspaceWorkflowRun,
   startWorkflowRun,
-  type WorkflowEvidenceBatchDetail,
-  type WorkflowEvidenceBatchProjection,
-  type WorkflowEvidenceBatchSummary,
   type WorkflowNodeRunEvent,
   type WorkflowResearchLedgerResponse,
   type WorkflowRunProjection,
@@ -42,16 +45,26 @@ import {
   findNativeIntelligenceWorkflowPackageNodeId,
   type NativeIntelligencePreviewEvidence,
 } from "@/lib/workflow/native-intelligence-preview"
-import { formatNativeIntelligenceResultPreview } from "@/lib/workflow/native-intelligence-result-preview"
 import { applyRuntimeNodePatches, buildRuntimeNodePatches } from "@/lib/workflow/runtime-bridge"
 import type { WorkflowProject } from "@/lib/workflow/schema"
+import {
+  dispatchRunPanelExtensions,
+  type RunPanelExtension,
+  type RunPanelScope,
+} from "@/lib/workflow/run-panel-extensions"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
 import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { cn } from "@/lib/utils"
+import {
+  EvidenceBatchWorkbench,
+  ResearchLedgerWorkbench,
+  type EvidenceBatchState,
+} from "./run-trace-research-workbenches"
+import { RealRunProjection, RunEventCard } from "./run-trace-projection"
+import { MetricGrid, readRecord, SectionCaption } from "./run-trace-primitives"
 
 type RealRunState =
   | { status: "idle"; projection: null; events: WorkflowNodeRunEvent[]; error: null }
@@ -66,28 +79,7 @@ type BackendPreviewState =
   | { status: "blocked"; compile: WorkflowCompileResponse; trace: WorkflowOpenCLIHDATraceResponse | null; native: NativeIntelligencePreviewEvidence | null; error: null }
   | { status: "error"; compile: WorkflowCompileResponse | null; trace: WorkflowOpenCLIHDATraceResponse | null; native: NativeIntelligencePreviewEvidence | null; error: string }
 
-type EvidenceBatchState = {
-  status: "idle" | "loading" | "ready" | "error"
-  projection: WorkflowEvidenceBatchProjection | null
-  batches: WorkflowEvidenceBatchSummary[]
-  detail: WorkflowEvidenceBatchDetail | null
-  selectedBatchId: string | null
-  error: string | null
-}
 
-const INSPECTABLE_NATIVE_ACTIONS = new Set([
-  "simulation.timeline",
-  "simulation.stats",
-  "interviews.history",
-  "report.progress",
-  "report.read",
-  "report.ask",
-  "report.answers",
-])
-
-function SectionCaption({ children }: { children: React.ReactNode }) {
-  return <p className="font-mono text-[9px] uppercase tracking-[0.2em] text-muted-foreground/70">{children}</p>
-}
 
 const RUN_STATUS_LABELS: Record<WorkflowRunStatus, string> = {
   queued: "排队中",
@@ -100,7 +92,15 @@ const RUN_STATUS_LABELS: Record<WorkflowRunStatus, string> = {
   failed: "失败",
 }
 
-export function RunTracePanel({ runRequestId = 0 }: { runRequestId?: number }) {
+export function RunTracePanel({
+  runRequestId = 0,
+  extensions = [],
+  scope = null,
+}: {
+  runRequestId?: number
+  extensions?: readonly RunPanelExtension[]
+  scope?: RunPanelScope | null
+}) {
   const runButtonRef = useRef<HTMLButtonElement>(null)
   const questionBankInputRef = useRef<HTMLInputElement>(null)
   const runMonitorAbortRef = useRef<AbortController | null>(null)
@@ -114,6 +114,10 @@ export function RunTracePanel({ runRequestId = 0 }: { runRequestId?: number }) {
   const applyWorkflowRunProjection = useFlowStore((state) => state.applyWorkflowRunProjection)
   const applyWorkflowEvidenceBatchProjection = useFlowStore((state) => state.applyWorkflowEvidenceBatchProjection)
   const [runState, setRunState] = useState<RealRunState>({ status: "idle", projection: null, events: [], error: null })
+  const extensionAuthorization = (() => {
+    const token = getApiAuthToken()
+    return token ? `Bearer ${token}` : null
+  })()
   const [backendState, setBackendState] = useState<BackendPreviewState>({ status: "idle", compile: null, trace: null, native: null, error: null })
   const [evidenceState, setEvidenceState] = useState<EvidenceBatchState>({
     status: "idle",
@@ -241,6 +245,9 @@ export function RunTracePanel({ runRequestId = 0 }: { runRequestId?: number }) {
     const submittedQuestionBankFile = questionBankFile
     setRunState((current) => ({ status: "running", projection: current.projection, events: current.events, error: null }))
     try {
+      if (scope && sourceOutputs) {
+        throw new Error("已发布的 Studio workflow 不支持导入 source outputs")
+      }
       const token = getApiAuthToken()
       const authorization = token ? `Bearer ${token}` : null
       const started = await startWorkflowRun(workflowProject, {
@@ -330,10 +337,15 @@ export function RunTracePanel({ runRequestId = 0 }: { runRequestId?: number }) {
   const loadEvidenceBatchResults = async (runId: string, authorization: string | null) => {
     setEvidenceState((current) => ({ ...current, status: "loading", error: null, detail: null, selectedBatchId: null }))
     try {
-      const [batchList, projection] = await Promise.all([
-        fetchWorkflowEvidenceBatches(runId, { authorization }),
-        fetchWorkflowEvidenceBatchProjection(runId, { authorization }),
-      ])
+      const [batchList, projection] = await (scope
+        ? Promise.all([
+            fetchWorkspaceWorkflowEvidenceBatches(scope, runId, { authorization }),
+            fetchWorkspaceWorkflowEvidenceBatchProjection(scope, runId, { authorization }),
+          ])
+        : Promise.all([
+            fetchWorkflowEvidenceBatches(runId, { authorization }),
+            fetchWorkflowEvidenceBatchProjection(runId, { authorization }),
+          ]))
       applyWorkflowEvidenceBatchProjection(projection, batchList.batches)
       setEvidenceState({
         status: "ready",
@@ -368,9 +380,13 @@ export function RunTracePanel({ runRequestId = 0 }: { runRequestId?: number }) {
     setEvidenceState((current) => ({ ...current, status: "loading", selectedBatchId: batchId, detail: null, error: null }))
     try {
       const token = getApiAuthToken()
-      const detail = await fetchWorkflowEvidenceBatchDetail(projection.runId, batchId, {
-        authorization: token ? `Bearer ${token}` : null,
-      })
+      const detail = scope
+        ? await fetchWorkspaceWorkflowEvidenceBatchDetail(scope, projection.runId, batchId, {
+            authorization: token ? `Bearer ${token}` : null,
+          })
+        : await fetchWorkflowEvidenceBatchDetail(projection.runId, batchId, {
+            authorization: token ? `Bearer ${token}` : null,
+          })
       setEvidenceState((current) => ({ ...current, status: "ready", detail, error: null }))
     } catch (error) {
       setEvidenceState((current) => ({
@@ -714,13 +730,43 @@ export function RunTracePanel({ runRequestId = 0 }: { runRequestId?: number }) {
               <div className="space-y-2">
                 <SectionCaption>SSE Events</SectionCaption>
                 <div className="space-y-2">
-                  {latestEvents.map((event) => (
-                    <RunEventCard key={event.id} event={event} />
-                  ))}
+                  {latestEvents.map((event) => <RunEventCard key={event.id} event={event} />)}
                 </div>
               </div>
             </>
           ) : null}
+          {dispatchRunPanelExtensions(extensions, {
+            runId: projection?.runId ?? null,
+            projection,
+            scope,
+            authorization: extensionAuthorization,
+            runStatus: runState.status,
+            lifecycle: {
+              onError: (message) => setRunState((current) => ({
+                status: "error",
+                projection: current.projection,
+                events: current.events,
+                error: message,
+              })),
+            },
+          }).map(({ key, Component }) => (
+            <Component
+              key={key}
+              runId={projection?.runId ?? null}
+              projection={projection}
+              authorization={extensionAuthorization}
+              scope={scope}
+              runStatus={runState.status}
+              lifecycle={{
+                onError: (message) => setRunState((current) => ({
+                  status: "error",
+                  projection: current.projection,
+                  events: current.events,
+                  error: message,
+                })),
+              }}
+            />
+          ))}
 
           {researchLedger ? (
             <>
@@ -769,403 +815,20 @@ export function RunTracePanel({ runRequestId = 0 }: { runRequestId?: number }) {
 }
 
 type OutputInputNode = { id: string; label: string }
-
 function collectOutputInputNodes(project: WorkflowProject): OutputInputNode[] {
-  const inputNodes: OutputInputNode[] = []
-  for (const node of project.nodes) {
-    if (canReceiveImportedOutput(node)) inputNodes.push({ id: node.id, label: nodeLabel(node) })
-    for (const internalNode of node.internals?.nodes ?? []) {
-      const parsed = readWorkflowProjectNode(internalNode)
-      if (parsed && canReceiveImportedOutput(parsed)) {
-        inputNodes.push({ id: `${node.id}::${parsed.id}`, label: `${nodeLabel(node)} / ${nodeLabel(parsed)}` })
-      }
-    }
-  }
-  return inputNodes
+  return project.nodes.filter(canReceiveImportedOutput).map((node) => ({ id: node.id, label: nodeLabel(node) }))
 }
 
 function canReceiveImportedOutput(node: WorkflowProject["nodes"][number]): boolean {
   return node.kind === "source" || node.capability === "fetch" || Array.isArray(node.params.sources)
 }
 
-function readWorkflowProjectNode(value: unknown): WorkflowProject["nodes"][number] | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null
-  const candidate = value as Record<string, unknown>
-  return typeof candidate.id === "string" && typeof candidate.kind === "string" && typeof candidate.capability === "string"
-    && candidate.params && typeof candidate.params === "object" && !Array.isArray(candidate.params)
-    ? candidate as WorkflowProject["nodes"][number]
-    : null
-}
 
 function nodeLabel(node: WorkflowProject["nodes"][number]): string {
   const label = node.ui?.label
   return typeof label === "string" && label.trim() ? label : node.id
 }
 
-function ResearchLedgerWorkbench({
-  ledger,
-  allowSourceOutputs,
-  sourceOutputs,
-  onSourceOutputsChange,
-  onContinue,
-  continuing,
-  error,
-}: {
-  ledger: WorkflowResearchLedgerResponse
-  allowSourceOutputs: boolean
-  sourceOutputs: string
-  onSourceOutputsChange: (value: string) => void
-  onContinue: () => void
-  continuing: boolean
-  error: string | null
-}) {
-  const latest = ledger.entries.at(-1)
-  const canContinue = allowSourceOutputs && latest?.researchStatus === "needs_evidence"
-    && Boolean(latest.revisionId && latest.proposal?.proposalId)
-  return (
-    <div className="space-y-3" aria-label="Research revision ledger">
-      <div className="flex items-center justify-between gap-2">
-        <SectionCaption>Research Ledger</SectionCaption>
-        <Badge variant="outline" className="font-mono text-[9px] uppercase">
-          {latest?.researchStatus ?? "running"}
-        </Badge>
-      </div>
-      <div className="space-y-1.5">
-        {ledger.entries.map((entry) => (
-          <div key={entry.runId} className="rounded-md border bg-card p-2.5">
-            <div className="flex items-center justify-between gap-2 font-mono text-[10px]">
-              <span>iteration {entry.iteration}</span>
-              <span className="uppercase text-muted-foreground">{entry.decision ?? "pending"}</span>
-            </div>
-            <p className="mt-1 truncate font-mono text-[9px] text-muted-foreground">
-              {entry.revisionId ?? entry.runId}
-            </p>
-            {entry.gaps.length ? (
-              <p className="mt-1 text-[10px] text-[#d97706]">gaps: {entry.gaps.join(", ")}</p>
-            ) : null}
-            {entry.gateReasons.length ? (
-              <p className="mt-1 text-[10px] text-destructive">
-                gate: {entry.gateReasons.join(", ")}
-              </p>
-            ) : null}
-          </div>
-        ))}
-      </div>
-      {latest?.evidenceRefs.length ? (
-        <div className="space-y-1.5">
-          <SectionCaption>Evidence refs</SectionCaption>
-          {latest.evidenceRefs.slice(0, 4).map((reference, index) => {
-            const evidenceId = typeof reference.evidenceId === "string" ? reference.evidenceId : `evidence-${index + 1}`
-            const url = typeof reference.url === "string" ? reference.url : null
-            const manifest = typeof reference.manifestUri === "string" ? reference.manifestUri : null
-            return (
-              <div key={`${evidenceId}-${index}`} className="rounded-md border bg-card px-2.5 py-2">
-                {url ? (
-                  <a className="block truncate font-mono text-[10px] underline-offset-2 hover:underline" href={url} target="_blank" rel="noreferrer">
-                    {evidenceId}
-                  </a>
-                ) : (
-                  <p className="truncate font-mono text-[10px]">{evidenceId}</p>
-                )}
-                {manifest ? (
-                  <p className="mt-1 truncate font-mono text-[9px] text-muted-foreground">{manifest}</p>
-                ) : null}
-              </div>
-            )
-          })}
-        </div>
-      ) : null}
-      {canContinue ? (
-        <div className="space-y-2 rounded-md border border-[#d97706]/30 bg-[#d97706]/5 p-2.5">
-          <p className="text-[10px] leading-relaxed text-muted-foreground">
-            Paste approved source outputs for the existing source node IDs. The server starts one
-            immutable child Run and advances the bounded budget.
-          </p>
-          <Textarea
-            value={sourceOutputs}
-            onChange={(event) => onSourceOutputsChange(event.target.value)}
-            className="min-h-24 font-mono text-[10px]"
-            aria-label="Research continuation source outputs JSON"
-          />
-          <Button size="sm" className="w-full" onClick={onContinue} disabled={continuing}>
-            {continuing ? <Loader2 className="size-3.5 animate-spin" /> : <Play className="size-3.5" />}
-            Continue research
-          </Button>
-          {error ? <p className="text-[10px] text-destructive">{error}</p> : null}
-        </div>
-      ) : null}
-    </div>
-  )
-}
-
-function EvidenceBatchWorkbench({
-  state,
-  onSelectBatch,
-}: {
-  state: EvidenceBatchState
-  onSelectBatch: (batchId: string) => void
-}) {
-  const projection = state.projection
-  const batches = state.batches
-  const recordCount = batches.reduce((sum, batch) => sum + batch.recordCount, 0)
-  const partialCount = projection?.summaries.filter((summary) => summary.status === "partial").length ?? 0
-  const blockedCount = projection?.nodes.filter((node) => node.status === "blocked" || node.status === "failed").length ?? 0
-  return (
-    <div className="space-y-3" aria-label="EvidenceBatch results">
-      <div className="flex items-center justify-between gap-2">
-        <SectionCaption>Result Workbench</SectionCaption>
-        {state.status === "loading" ? <Loader2 className="size-3 animate-spin text-muted-foreground" /> : null}
-      </div>
-
-      {projection ? (
-        <MetricGrid
-          title="EvidenceBatch Projection"
-          metrics={[
-            { key: "status", label: "Status", value: projection.status, tone: projection.status === "completed" ? "good" : "warn" },
-            { key: "batches", label: "Batches", value: `${batches.length}`, tone: batches.length > 0 ? "good" : "neutral" },
-            { key: "records", label: "Records", value: `${recordCount}`, tone: recordCount > 0 ? "good" : "neutral" },
-            { key: "partial", label: "Partial", value: `${partialCount}`, tone: partialCount === 0 ? "good" : "warn" },
-            { key: "missing", label: "Missing", value: `${projection.missingSources.length}`, tone: projection.missingSources.length === 0 ? "good" : "warn" },
-            { key: "blocked", label: "Blocked", value: `${blockedCount}`, tone: blockedCount === 0 ? "good" : "warn" },
-          ]}
-        />
-      ) : null}
-
-      {state.error ? (
-        <div className="rounded-md border border-[#d97706]/30 bg-[#d97706]/10 p-2.5 text-[11px] leading-relaxed text-[#d97706]">
-          {state.error}
-        </div>
-      ) : null}
-
-      {projection?.missingSources.length ? (
-        <div className="space-y-1.5">
-          {projection.missingSources.slice(0, 4).map((source) => (
-            <div
-              key={`${source.nodeId}-${source.sourceGroup ?? "source"}`}
-              className="rounded-md border border-[#d97706]/25 bg-[#d97706]/10 p-2.5"
-            >
-              <div className="flex items-center justify-between gap-2 font-mono text-[10px]">
-                <span className="min-w-0 truncate text-[#d97706]">{source.nodeId}</span>
-                <span className="shrink-0 uppercase text-muted-foreground">{source.status}</span>
-              </div>
-              <p className="mt-1 line-clamp-2 text-[10px] leading-relaxed text-muted-foreground">
-                {source.reasons[0]?.message ?? `Missing source ${source.sourceGroup ?? "output"}`}
-              </p>
-            </div>
-          ))}
-        </div>
-      ) : null}
-
-      {batches.length > 0 ? (
-        <div className="space-y-1.5">
-          {batches.map((batch) => (
-            <button
-              key={batch.batchId}
-              type="button"
-              onClick={() => onSelectBatch(batch.batchId)}
-              className={cn(
-                "block w-full rounded-md border bg-card p-2.5 text-left transition-colors hover:border-foreground/30",
-                state.selectedBatchId === batch.batchId && "border-foreground/40 bg-accent/40",
-              )}
-            >
-              <div className="flex items-center justify-between gap-2">
-                <span className="flex min-w-0 items-center gap-1.5 font-mono text-[10px]">
-                  <Boxes className="size-3 shrink-0 text-muted-foreground" />
-                  <span className="truncate">{batch.batchId}</span>
-                </span>
-                <span className={cn(
-                  "shrink-0 font-mono text-[9px] uppercase",
-                  batch.status === "completed" ? "text-[#2f9e44]" : "text-[#d97706]",
-                )}>
-                  {batch.status}
-                </span>
-              </div>
-              <p className="mt-1 truncate font-mono text-[10px] text-muted-foreground">
-                {batch.nodeId} · {batch.sourceGroup ?? "ungrouped"} · {batch.recordCount} records
-              </p>
-              {batch.manifestUri || batch.odpRef ? (
-                <p className="mt-1 truncate font-mono text-[9px] text-muted-foreground/80">
-                  {batch.manifestUri ?? batch.odpRef}
-                </p>
-              ) : null}
-            </button>
-          ))}
-        </div>
-      ) : state.status === "ready" ? (
-        <div className="rounded-md border border-dashed p-3 text-center text-xs text-muted-foreground">
-          no EvidenceBatch output
-        </div>
-      ) : null}
-
-      {state.detail ? <EvidenceBatchDetailCard detail={state.detail} /> : null}
-    </div>
-  )
-}
-
-function EvidenceBatchDetailCard({ detail }: { detail: WorkflowEvidenceBatchDetail }) {
-  return (
-    <div className="rounded-md border bg-card p-3">
-      <div className="flex items-center justify-between gap-2">
-        <SectionCaption>Batch Detail</SectionCaption>
-        <Badge variant="outline" className="font-mono text-[9px] uppercase">{detail.sourceCoverage.status}</Badge>
-      </div>
-      <div className="mt-2 grid grid-cols-2 gap-2 font-mono text-[10px] text-muted-foreground">
-        <span>{detail.itemCount} items</span>
-        <span className="text-right">{detail.recordCount} records</span>
-      </div>
-      <p className="mt-2 line-clamp-2 font-mono text-[9px] leading-relaxed text-muted-foreground">
-        source {detail.sourceCoverage.sourceGroup ?? "ungrouped"} · {detail.sourceCoverage.batchCount} batches
-      </p>
-      {detail.manifestUri || detail.odpRef ? (
-        <p className="mt-1 truncate font-mono text-[9px] text-muted-foreground/80">
-          {detail.manifestUri ?? detail.odpRef}
-        </p>
-      ) : null}
-    </div>
-  )
-}
-
-function RealRunProjection({
-  projection,
-  eventCount,
-  blockedCount,
-  batchCount,
-  itemCount,
-}: {
-  projection: WorkflowRunProjection
-  eventCount: number
-  blockedCount: number
-  batchCount: number
-  itemCount: number
-}) {
-  return (
-    <div className="space-y-3">
-      <MetricGrid
-        title="Run Projection"
-        metrics={[
-          { key: "status", label: "Status", value: projection.status, tone: projection.status === "completed" ? "good" : projection.status === "failed" || projection.status === "blocked" ? "warn" : "neutral" },
-          { key: "events", label: "Events", value: `${eventCount || projection.eventCount}`, tone: eventCount > 0 ? "good" : "neutral" },
-          { key: "nodes", label: "Nodes", value: `${projection.nodeStates.length}`, tone: projection.nodeStates.length > 0 ? "good" : "neutral" },
-          { key: "blocked", label: "Blocked", value: `${blockedCount}`, tone: blockedCount === 0 ? "good" : "warn" },
-          { key: "batches", label: "Batches", value: `${batchCount}`, tone: batchCount > 0 ? "good" : "neutral" },
-          { key: "items", label: "Items", value: `${itemCount}`, tone: itemCount > 0 ? "good" : "neutral" },
-        ]}
-      />
-      <div className="rounded-md border bg-card p-3">
-        <div className="flex items-center justify-between gap-2 font-mono text-[10px]">
-          <span className="min-w-0 truncate text-foreground">run {projection.runId}</span>
-          <Badge variant={projection.valid ? "secondary" : "outline"} className="font-mono text-[9px] uppercase">
-            {projection.valid ? "valid" : "invalid"}
-          </Badge>
-        </div>
-        <p className="mt-1 truncate font-mono text-[10px] text-muted-foreground">trace {projection.traceId}</p>
-      </div>
-      <div className="space-y-1.5">
-        {projection.nodeStates.map((node) => (
-          <div key={node.nodeId} className="rounded-md border bg-card px-2.5 py-2">
-            <div className="flex items-center justify-between gap-2 font-mono text-[10px]">
-              <span className="min-w-0 truncate text-foreground">{node.nodeId}</span>
-              <span className={cn("shrink-0 uppercase", node.status === "completed" ? "text-[#2f9e44]" : node.status === "blocked" || node.status === "failed" ? "text-destructive" : "text-muted-foreground")}>
-                {node.status}
-              </span>
-            </div>
-            <p className="mt-1 truncate font-mono text-[10px] text-muted-foreground">
-              {node.eventCount} events · {node.batches.length} batches
-            </p>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-function RunEventCard({ event }: { event: WorkflowNodeRunEvent }) {
-  const itemCount = event.batch?.itemCount ?? 0
-  const sample = Array.isArray(event.details.sampleOutputs)
-    ? readRecord(event.details.sampleOutputs[0])
-    : null
-  const native = sample?.action ? sample : event.details
-  const nativeAction = typeof native.action === "string" ? native.action : null
-  const domainState = typeof native.state === "string"
-    ? native.state
-    : typeof native.domainState === "string"
-      ? native.domainState
-      : null
-  const sessionId = typeof native.sessionId === "string" ? native.sessionId : null
-  const command = typeof native.command === "string" ? native.command : null
-  const artifactIds = Array.isArray(native.artifactIds)
-    ? native.artifactIds.filter((value): value is string => typeof value === "string")
-    : []
-  const provenance = readRecord(native.provenance)
-  const nativeResult = native.result
-  const result = readRecord(native.result)
-  const artifacts = Array.isArray(result?.artifacts)
-    ? result.artifacts.map(readRecord).filter((value): value is Record<string, unknown> => Boolean(value))
-    : []
-  const simulated = artifacts.some((artifact) => artifact.simulated === true)
-  const groundingIds = artifacts.flatMap((artifact) =>
-    Array.isArray(artifact.groundingArtifactIds)
-      ? artifact.groundingArtifactIds.filter(
-          (value): value is string => typeof value === "string",
-        )
-      : [],
-  )
-  const nativeResultPreview =
-    nativeAction && INSPECTABLE_NATIVE_ACTIONS.has(nativeAction) && nativeResult !== undefined
-      ? formatNativeIntelligenceResultPreview(nativeResult)
-      : null
-  return (
-    <div className="rounded-md border bg-card p-2.5">
-      <div className="flex items-center justify-between gap-2">
-        <div className="min-w-0 font-mono text-[11px]">
-          <span className="text-muted-foreground">{event.sequence}</span>
-          <span className="mx-1.5 text-muted-foreground/50">/</span>
-          <span>{event.eventType}</span>
-        </div>
-        <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
-          {itemCount} items
-        </span>
-      </div>
-      <p className="mt-1 truncate font-mono text-[10px] text-muted-foreground">{event.nodeId}</p>
-      {event.message ?? event.blockReason?.message ? (
-        <p className="mt-1.5 line-clamp-2 break-all font-mono text-[10px] leading-relaxed text-muted-foreground/80">
-          {event.message ?? event.blockReason?.message}
-        </p>
-      ) : null}
-      {nativeAction || command || domainState || sessionId || artifactIds.length ? (
-        <div className="mt-2 rounded-sm border bg-background/70 p-2 font-mono text-[9px] text-muted-foreground">
-          <div className="flex flex-wrap gap-x-2 gap-y-1">
-            {nativeAction ? <span>action {nativeAction}</span> : null}
-            {command ? <span>transition {command}</span> : null}
-            {domainState ? <span>state {domainState}</span> : null}
-            {provenance?.credentialFree === true ? <span>credential-free</span> : null}
-            {provenance?.offline === true ? <span>offline</span> : null}
-            {simulated ? <span>simulated</span> : null}
-          </div>
-          {sessionId ? <p className="mt-1 truncate">session {sessionId}</p> : null}
-          {artifactIds.length ? (
-            <p className="mt-1 truncate" title={artifactIds.join(", ")}>
-              artifacts {artifactIds.join(", ")}
-            </p>
-          ) : null}
-          {groundingIds.length ? (
-            <p className="mt-1 truncate" title={groundingIds.join(", ")}>
-              grounding {groundingIds.join(", ")}
-            </p>
-          ) : null}
-          {nativeResultPreview ? (
-            <div className="mt-2">
-              <p className="mb-1 uppercase">result</p>
-              <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-all rounded-sm border bg-card p-2 text-[9px] leading-relaxed text-foreground">
-                {nativeResultPreview}
-              </pre>
-            </div>
-          ) : null}
-        </div>
-      ) : null}
-    </div>
-  )
-}
 
 function BackendRuntimePreview({
   status,
@@ -1320,33 +983,4 @@ function RuntimeErrorList({ errors }: { errors: Array<{ code: string; message: s
       ))}
     </div>
   )
-}
-
-function MetricGrid({ title, metrics }: { title: string; metrics: { key: string; label: string; value: string; tone: string }[] }) {
-  return (
-    <div className="space-y-2">
-      <SectionCaption>{title}</SectionCaption>
-      <div className="grid grid-cols-3 gap-2">
-        {metrics.map((metric) => (
-          <div key={metric.key} className="rounded-md border bg-card p-2">
-            <p className="truncate text-[10px] text-muted-foreground">{metric.label}</p>
-            <p
-              className={cn(
-                "mt-1 font-mono text-sm",
-                metric.tone === "good" && "text-[#2f9e44]",
-                metric.tone === "warn" && "text-[#d97706]",
-              )}
-            >
-              {metric.value}
-            </p>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-function readRecord(value: unknown): Record<string, unknown> | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return null
-  return value as Record<string, unknown>
 }

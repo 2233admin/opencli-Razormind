@@ -64,7 +64,7 @@ async def run_pack_script(
 
     try:
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-    except asyncio.TimeoutError as exc:
+    except TimeoutError as exc:
         # wait_for only cancels communicate() -- the child itself keeps
         # running until explicitly killed (mirrors cli.py's _run exactly, so
         # a timed-out pack script is never orphaned).

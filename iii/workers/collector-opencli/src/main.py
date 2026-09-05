@@ -11,10 +11,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from iii import InitOptions, register_worker
-from iii_observability import Logger
 import httpx
+from iii_observability import Logger
 
+from iii import InitOptions, register_worker
 
 # /app/worker/src/main.py → parents[2] == /app (schedule-bootstrap uses parents[3])
 III_ROOT = Path(__file__).resolve().parents[2]
@@ -92,7 +92,12 @@ def _admin_collection_metadata(
     if payload.get("mode") is not None:
         canonical_payload["mode"] = payload["mode"]
     payload_sha256 = hashlib.sha256(
-        json.dumps(canonical_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+        json.dumps(
+            canonical_payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
     ).hexdigest()
     if metadata["payload_sha256"] != payload_sha256:
         raise ValueError("admin_collection payload hash does not match the executed payload")

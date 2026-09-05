@@ -5,7 +5,7 @@ tests/integration/test_control_actions_listing_api.py's style for the
 sibling control_actions listing.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -16,7 +16,7 @@ async def _seed_measurement(db_session, source_id: str, **overrides):
     kwargs = dict(
         source_id=source_id,
         run_id="run-1",
-        measured_at=datetime(2026, 7, 2, tzinfo=timezone.utc),
+        measured_at=datetime(2026, 7, 2, tzinfo=UTC),
         accepted=1,
         duplicates=0,
         rejected=0,
@@ -55,8 +55,8 @@ async def test_list_measurements_returns_rows_newest_first(client, db_session, s
     create_resp = await client.post("/api/v1/sources", json=sample_source_data)
     source_id = create_resp.json()["data"]["id"]
 
-    older = datetime(2026, 7, 1, tzinfo=timezone.utc)
-    newer = datetime(2026, 7, 2, tzinfo=timezone.utc)
+    older = datetime(2026, 7, 1, tzinfo=UTC)
+    newer = datetime(2026, 7, 2, tzinfo=UTC)
     await _seed_measurement(db_session, source_id, run_id="run-old", created_at=older)
     await _seed_measurement(db_session, source_id, run_id="run-new", created_at=newer)
     await db_session.commit()
@@ -71,7 +71,9 @@ async def test_list_measurements_returns_rows_newest_first(client, db_session, s
 
 
 @pytest.mark.asyncio
-async def test_list_measurements_only_returns_rows_for_this_source(client, db_session, sample_source_data):
+async def test_list_measurements_only_returns_rows_for_this_source(
+    client, db_session, sample_source_data
+):
     create_resp = await client.post("/api/v1/sources", json=sample_source_data)
     source_id = create_resp.json()["data"]["id"]
     await _seed_measurement(db_session, source_id, run_id="mine")

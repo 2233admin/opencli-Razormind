@@ -5,7 +5,7 @@ backend.schemas.provider.ModelProviderRead exposes only a boolean
 ``has_api_key`` and a masked ``api_key_preview`` instead.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 from backend.schemas.provider import ModelProviderRead, _mask_api_key
@@ -21,8 +21,8 @@ def _fake_provider(**overrides):
         default_model="gpt-4o-mini",
         notes=None,
         enabled=True,
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
     )
     base.update(overrides)
     return SimpleNamespace(**base)

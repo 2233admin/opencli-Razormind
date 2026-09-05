@@ -7,6 +7,12 @@ from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_serialize
 
 from backend.schemas import workflow as workflow_schemas
 from backend.schemas.common import UTCModel
+from backend.schemas.workflow_compile import WorkflowCompileError
+from backend.schemas.workflow_runtime import (
+    WorkflowRunProjection,
+    WorkflowRunStatus,
+    WorkflowRunTraceResponse,
+)
 
 ProjectAppType = Literal["chatbot", "agent", "chatflow", "workflow", "text-generator"]
 
@@ -113,11 +119,11 @@ class ProjectBootstrapRead(BaseModel):
     draft: DraftRead
 
 
-class ValidationRunRead(workflow_schemas.WorkflowRunProjection):
+class ValidationRunRead(WorkflowRunProjection):
     model_config = ConfigDict(populate_by_name=True)
     draft_revision: int = Field(alias="draftRevision")
     compile_version: str = Field(alias="compileVersion")
-    warnings: list[workflow_schemas.WorkflowCompileError] = Field(default_factory=list)
+    warnings: list[WorkflowCompileError] = Field(default_factory=list)
 
 
 class ProjectRuntimeLogRead(UTCModel):
@@ -126,7 +132,7 @@ class ProjectRuntimeLogRead(UTCModel):
     workflow_name: str
     workflow_version: int | None
     trace_id: str
-    status: workflow_schemas.WorkflowRunStatus
+    status: WorkflowRunStatus
     trigger: str
     response_mode: workflow_schemas.WorkflowRunResponseMode
     event_count: int
@@ -152,7 +158,7 @@ class ProjectRuntimeTraceRead(BaseModel):
     inputs: dict = Field(default_factory=dict)
     user: str | None = None
     response_mode: workflow_schemas.WorkflowRunResponseMode
-    trace: workflow_schemas.WorkflowRunTraceResponse
+    trace: WorkflowRunTraceResponse
 
 
 class PublishedWorkflowRunStart(BaseModel):

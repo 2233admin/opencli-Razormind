@@ -11,7 +11,9 @@ from backend.workflow.research_graph_v2 import (
 )
 
 
-def _event(*, sequence: int, action: str, event_id: str, manifest_hash: str = "a" * 64) -> WorkflowNodeRunEvent:
+def _event(
+    *, sequence: int, action: str, event_id: str, manifest_hash: str = "a" * 64
+) -> WorkflowNodeRunEvent:
     envelope = AuthorizedResearchGraphEventV2(
         version="v2",
         event_id=event_id,
@@ -78,8 +80,14 @@ def test_fold_requires_independent_reject_and_retract() -> None:
     self_reject = _event(sequence=2, action="reject", event_id="self-reject")
     self_retract = _event(sequence=2, action="retract", event_id="self-retract")
 
-    assert fold_authorized_research_graph_events([proposed, self_reject]).claims["claim-1"].state == "proposed"
-    assert fold_authorized_research_graph_events([proposed, self_retract]).claims["claim-1"].state == "proposed"
+    assert (
+        fold_authorized_research_graph_events([proposed, self_reject]).claims["claim-1"].state
+        == "proposed"
+    )
+    assert (
+        fold_authorized_research_graph_events([proposed, self_retract]).claims["claim-1"].state
+        == "proposed"
+    )
 
 
 def test_exact_pinned_reference_fails_closed_on_mismatch() -> None:
@@ -171,7 +179,9 @@ def test_late_manifest_is_explicitly_superseded_and_blocks_prior_pin() -> None:
     verified.details["authorizedResearchGraphV2"]["actor"]["actorId"] = "actor-2"
     pinned = _event(sequence=3, action="pin", event_id="pin")
     pinned.details["authorizedResearchGraphV2"]["actor"]["actorId"] = "actor-2"
-    superseded = _event(sequence=4, action="supersede", event_id="supersede", manifest_hash="b" * 64)
+    superseded = _event(
+        sequence=4, action="supersede", event_id="supersede", manifest_hash="b" * 64
+    )
 
     folded = fold_authorized_research_graph_events([proposed, verified, pinned, superseded])
 

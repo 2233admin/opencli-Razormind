@@ -50,6 +50,8 @@ import {
   WorkflowFloatingPanels,
   WorkflowToast,
 } from "./workflow-editor-overlays"
+import { createDefaultRunPanelExtensions } from "./default-run-panel-extensions"
+import type { RunPanelExtension, RunPanelScope } from "@/lib/workflow/run-panel-extensions"
 import { WorkflowMotionRuntime } from "./workflow-motion-runtime"
 import type { CanvasPoint } from "./workflow-canvas-geometry"
 import { WorkflowWorkbenchPanel, type WorkflowWorkbenchMode } from "./workflow-workbench-panel"
@@ -127,6 +129,8 @@ type WorkflowCanvasSurfaceProps = {
   onReconnectEnd: NonNullable<ReactFlowProps<WorkflowNode, WorkflowEdge>["onReconnectEnd"]>
   onReconnectStart: NonNullable<ReactFlowProps<WorkflowNode, WorkflowEdge>["onReconnectStart"]>
   onProfileChange: FlowState["updateWorkflowProfile"]
+  runPanelExtensions?: readonly RunPanelExtension[]
+  runPanelScope?: RunPanelScope | null
   primitiveMenuGroups: PrimitiveMenuGroup[]
   projectSettingsOpen: boolean
   runTraceOpen: boolean
@@ -346,7 +350,6 @@ export function WorkflowCanvasSurface(props: WorkflowCanvasSurfaceProps) {
         onTestRun={props.onTestRun}
         wrapperElement={props.wrapperRef.current}
       />
-
       <WorkflowFloatingPanels
         nodeManagementOpen={props.nodeManagementOpen}
         onCloseNodeManagement={() => props.setNodeManagementOpen(false)}
@@ -356,6 +359,8 @@ export function WorkflowCanvasSurface(props: WorkflowCanvasSurfaceProps) {
         runRequestId={props.runRequestId}
         settingsOpen={props.settingsOpen}
         workflowProfile={props.workflowProfile}
+        scope={props.runPanelScope}
+        runPanelExtensions={props.runPanelExtensions ?? createDefaultRunPanelExtensions()}
       />
 
       {props.workbenchMode ? (

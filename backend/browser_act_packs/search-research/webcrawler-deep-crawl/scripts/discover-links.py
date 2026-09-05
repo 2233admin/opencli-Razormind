@@ -4,11 +4,26 @@ import sys
 
 
 def main():
-    sys.stdout.reconfigure(encoding='utf-8', newline='\n')
-    parser = argparse.ArgumentParser(description="Extract outbound links from current page DOM, scoped to start URL prefix")
-    parser.add_argument('start_url', help="Crawl scope: only links under this URL prefix are kept")
-    parser.add_argument('--include-globs', default='[]', help='JSON array of glob patterns; if provided, link must match one to be kept')
-    parser.add_argument('--exclude-globs', default='[]', help='JSON array of glob patterns; matching links are dropped')
+    sys.stdout.reconfigure(encoding="utf-8", newline="\n")
+    parser = argparse.ArgumentParser(
+        description=(
+            "Extract outbound links from current page DOM, "
+            "scoped to start URL prefix"
+        )
+    )
+    parser.add_argument(
+        "start_url", help="Crawl scope: only links under this URL prefix are kept"
+    )
+    parser.add_argument(
+        "--include-globs",
+        default="[]",
+        help="JSON array of glob patterns; if provided, link must match one to be kept",
+    )
+    parser.add_argument(
+        "--exclude-globs",
+        default="[]",
+        help="JSON array of glob patterns; matching links are dropped",
+    )
     args = parser.parse_args()
 
     include_globs = json.loads(args.include_globs)
@@ -42,7 +57,11 @@ def main():
         // Normalize start URL: drop fragment, ensure scope prefix
         let scopeUrl;
         try {{ scopeUrl = new URL(startUrl); }} catch(e) {{
-          return JSON.stringify({{ error: true, message: 'Invalid start_url: ' + e.message, links: [] }});
+          return JSON.stringify({{
+            error: true,
+            message: 'Invalid start_url: ' + e.message,
+            links: []
+          }});
         }}
         const scopeBase = scopeUrl.origin + scopeUrl.pathname.replace(/\\/[^\\/]*$/, '/');
 
@@ -56,11 +75,18 @@ def main():
           // Drop fragments and tracking
           href = href.split('#')[0];
           if (!href || seen.has(href)) continue;
-          // Scope check: must be under the start URL's directory or origin (depending on user's intent)
+          // Scope check: must be under the start URL's directory or origin
+          // (depending on the user's intent).
           if (!href.startsWith(scopeUrl.origin)) continue;
-          if (!href.startsWith(scopeBase) && href !== scopeUrl.origin + scopeUrl.pathname) continue;
+          const isStartPage = href === scopeUrl.origin + scopeUrl.pathname;
+          if (!href.startsWith(scopeBase) && !isStartPage) continue;
           // Drop binary / asset extensions
-          if (/\\.(png|jpg|jpeg|gif|svg|webp|ico|mp4|mp3|webm|woff2?|ttf|css|js|json|xml|zip|tar\\.gz)$/i.test(href)) continue;
+          const assetPattern = new RegExp(
+            '\\\\.(png|jpg|jpeg|gif|svg|webp|ico|mp4|mp3|webm|woff2?|ttf|'
+            + 'css|js|json|xml|zip|tar\\\\.gz)$',
+            'i'
+          );
+          if (assetPattern.test(href)) continue;
           // Exclude globs
           if (excludeRes.some(re => re.test(href))) continue;
           // Include globs (if specified)
@@ -85,5 +111,5 @@ def main():
     print(js)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

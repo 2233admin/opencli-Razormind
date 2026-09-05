@@ -218,7 +218,7 @@ async def test_timeout_kills_process_and_raises(monkeypatch):
     proc.wait = AsyncMock()
     with (
         patch("asyncio.create_subprocess_exec", return_value=proc),
-        patch("asyncio.wait_for", side_effect=asyncio.TimeoutError()),
+        patch("asyncio.wait_for", side_effect=TimeoutError()),
     ):
         with pytest.raises(cli.BrowserActError, match="timed out"):
             await cli.version()

@@ -173,7 +173,9 @@ async def test_store_credential_source_not_found(client):
 
 
 @pytest.mark.asyncio
-async def test_delete_source_cascades_credentials(client, db_engine, sample_source_data, monkeypatch):
+async def test_delete_source_cascades_credentials(
+    client, db_engine, sample_source_data, monkeypatch
+):
     """Deleting a source must not orphan its encrypted credentials — there's no
     DB-level FK/cascade (AuthManager writes via a separate session), so
     delete_source() cleans up source_credentials itself."""
@@ -220,7 +222,10 @@ async def test_discover_feed_endpoint(client):
         "backend.api.v1.sources.source_service.discover_feeds",
         AsyncMock(return_value=[{"url": "https://example.com/feed.xml", "title": "Feed"}]),
     ):
-        response = await client.post("/api/v1/sources/discover-feed", json={"url": "https://example.com"})
+        response = await client.post(
+            "/api/v1/sources/discover-feed",
+            json={"url": "https://example.com"},
+        )
     assert response.status_code == 200
     assert response.json()["data"] == [{"url": "https://example.com/feed.xml", "title": "Feed"}]
 
@@ -355,7 +360,7 @@ async def test_control_state_with_run_evidence(client, db_session, sample_source
     monkeypatch.delenv("ODP_DATABASE_URL", raising=False)
     monkeypatch.delenv("ODP_INGEST_URL", raising=False)
 
-    from datetime import datetime, timezone
+    from datetime import UTC, datetime
 
     from backend.models.task import CollectionTask, TaskRun, TaskRunEvent
 
@@ -369,7 +374,7 @@ async def test_control_state_with_run_evidence(client, db_session, sample_source
     run = TaskRun(
         task_id=task.id,
         status="completed",
-        finished_at=datetime(2026, 7, 2, tzinfo=timezone.utc),
+        finished_at=datetime(2026, 7, 2, tzinfo=UTC),
         duration_ms=1000,
         records_collected=9,
     )
@@ -417,13 +422,15 @@ async def test_control_state_with_run_evidence(client, db_session, sample_source
 
 
 @pytest.mark.asyncio
-async def test_control_state_degraded_when_errors(client, db_session, sample_source_data, monkeypatch):
+async def test_control_state_degraded_when_errors(
+    client, db_session, sample_source_data, monkeypatch
+):
     monkeypatch.delenv("ODP_REDIS_URL", raising=False)
     monkeypatch.delenv("REDIS_URL", raising=False)
     monkeypatch.delenv("ODP_DATABASE_URL", raising=False)
     monkeypatch.delenv("ODP_INGEST_URL", raising=False)
 
-    from datetime import datetime, timezone
+    from datetime import UTC, datetime
 
     from backend.models.task import CollectionTask, TaskRun, TaskRunEvent
 
@@ -437,7 +444,7 @@ async def test_control_state_degraded_when_errors(client, db_session, sample_sou
     run = TaskRun(
         task_id=task.id,
         status="completed",
-        finished_at=datetime(2026, 7, 2, tzinfo=timezone.utc),
+        finished_at=datetime(2026, 7, 2, tzinfo=UTC),
         duration_ms=1000,
         records_collected=1,
     )
@@ -481,7 +488,7 @@ async def test_control_state_trend_fallback_for_pre_measurement_source(
     monkeypatch.delenv("ODP_DATABASE_URL", raising=False)
     monkeypatch.delenv("ODP_INGEST_URL", raising=False)
 
-    from datetime import datetime, timezone
+    from datetime import UTC, datetime
 
     from backend.models.task import CollectionTask, TaskRun, TaskRunEvent
 
@@ -497,8 +504,8 @@ async def test_control_state_trend_fallback_for_pre_measurement_source(
         run = TaskRun(
             task_id=task.id,
             status="completed",
-            created_at=datetime(2026, 7, day, tzinfo=timezone.utc),
-            finished_at=datetime(2026, 7, day, tzinfo=timezone.utc),
+            created_at=datetime(2026, 7, day, tzinfo=UTC),
+            finished_at=datetime(2026, 7, day, tzinfo=UTC),
             duration_ms=1000,
             records_collected=stored,
         )
@@ -542,14 +549,14 @@ async def test_control_state_trend_fallback_for_pre_measurement_source(
 
 
 async def _seed_measurement_row(session, source_id: str, **overrides):
-    from datetime import datetime, timezone
+    from datetime import UTC, datetime
 
     from backend.models.source_measurement import SourceMeasurement as SourceMeasurementRow
 
     kwargs = dict(
         source_id=source_id,
         run_id="row-run-1",
-        measured_at=datetime(2026, 7, 2, tzinfo=timezone.utc),
+        measured_at=datetime(2026, 7, 2, tzinfo=UTC),
         accepted=5,
         duplicates=0,
         rejected=0,
@@ -570,7 +577,9 @@ async def _seed_measurement_row(session, source_id: str, **overrides):
 
 
 @pytest.mark.asyncio
-async def test_control_state_pinned_contract_shape(client, db_session, sample_source_data, monkeypatch):
+async def test_control_state_pinned_contract_shape(
+    client, db_session, sample_source_data, monkeypatch
+):
     """Assert the exact top-level JSON shape the frontend agent builds
     against in parallel — every pinned key must be present."""
     monkeypatch.delenv("ODP_REDIS_URL", raising=False)
@@ -924,14 +933,14 @@ async def test_control_state_classification_flips_with_objective_override(
     create_resp = await client.post("/api/v1/sources", json=sample_source_data)
     source_id = create_resp.json()["data"]["id"]
 
-    from datetime import datetime, timezone
+    from datetime import UTC, datetime
 
     from backend.models.source_measurement import SourceMeasurement as SourceMeasurementRow
 
     row = SourceMeasurementRow(
         source_id=source_id,
         run_id="row-run-1",
-        measured_at=datetime(2026, 7, 2, tzinfo=timezone.utc),
+        measured_at=datetime(2026, 7, 2, tzinfo=UTC),
         accepted=97,
         duplicates=0,
         rejected=3,

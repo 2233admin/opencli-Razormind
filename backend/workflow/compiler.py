@@ -14,13 +14,13 @@ from backend.schemas.workflow import (
     WorkflowAdapterBinding,
     WorkflowAuthoringMetadata,
     WorkflowCompiledPlanPreview,
-    WorkflowCompileError,
     WorkflowCompileResponse,
     WorkflowProject,
     WorkflowProjectEdge,
     WorkflowProjectNode,
     WorkflowRuntimePreview,
 )
+from backend.schemas.workflow_compile import WorkflowCompileError
 from backend.workflow.data_operators import (
     list_data_operator_specs,
     resolve_data_operator,

@@ -1,7 +1,4 @@
-from typing import Optional
-
-from sqlalchemy import Boolean, Integer, String, Text, UniqueConstraint
-from sqlalchemy import JSON
+from sqlalchemy import JSON, Boolean, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from backend.models.base import TimestampMixin
@@ -23,8 +20,7 @@ class Skill(TimestampMixin):
     # Identity
     domain: Mapped[str] = mapped_column(String(100), nullable=False)
     capability: Mapped[str] = mapped_column(String(255), nullable=False)
-    name: Mapped[str] = mapped_column(String(255), nullable=False)
-    scope: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    scope: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Body
     skill_md: Mapped[str] = mapped_column(Text, nullable=False, default="")
@@ -33,9 +29,8 @@ class Skill(TimestampMixin):
     # anti_drift_boundaries, red_lines.
     elements: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
 
-    # Provenance + closed loop
-    source_trace: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    distill_model: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    source_trace: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    distill_model: Mapped[str | None] = mapped_column(String(255), nullable=True)
     evidence: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     # Full journey_trace_v1 of the most recent failing run (2026-07-01 addendum) —
     # self_eval/evidence only ever stored a trace_id + outcome summary, so a human

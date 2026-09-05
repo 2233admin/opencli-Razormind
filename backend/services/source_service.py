@@ -1,6 +1,6 @@
 import re
 import xml.etree.ElementTree as ET
-from typing import Any, Optional
+from typing import Any
 from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup
@@ -27,8 +27,8 @@ _MAX_REMOTE_OPML_BYTES = 2 * 1024 * 1024
 
 async def list_sources(
     session: AsyncSession,
-    enabled: Optional[bool] = None,
-    channel_type: Optional[str] = None,
+    enabled: bool | None = None,
+    channel_type: str | None = None,
     page: int = 1,
     limit: int = 20,
 ) -> tuple[list[DataSource], int]:
@@ -48,7 +48,7 @@ async def list_sources(
     return result.scalars().all(), total
 
 
-async def get_source(session: AsyncSession, source_id: str) -> Optional[DataSource]:
+async def get_source(session: AsyncSession, source_id: str) -> DataSource | None:
     result = await session.execute(
         select(DataSource).where(DataSource.id == source_id)
     )
@@ -75,7 +75,7 @@ async def update_source(
 
 
 async def set_objective_override(
-    session: AsyncSession, source: DataSource, override: Optional[dict[str, Any]]
+    session: AsyncSession, source: DataSource, override: dict[str, Any] | None
 ) -> DataSource:
     """Set, update, or clear (``override=None``) a source's per-source
     SourceObjective override (issue 02).
@@ -195,8 +195,14 @@ async def discover_feeds(url: str) -> list[dict[str, Any]]:
                 probe = await opened_client.get(probe_url)
             except Exception:
                 continue
-            content_type = probe.headers.get("content-type", "").split(";")[0].strip().lower()
-            if probe.status_code == 200 and content_type in _FEED_MIME_TYPES and probe_url not in seen:
+            content_type = (
+                probe.headers.get("content-type", "").split(";")[0].strip().lower()
+            )
+            if (
+                probe.status_code == 200
+                and content_type in _FEED_MIME_TYPES
+                and probe_url not in seen
+            ):
                 seen.add(probe_url)
                 candidates.append({"url": probe_url, "title": None})
 
@@ -283,7 +289,7 @@ async def bulk_import_rss(
     session: AsyncSession,
     entries: list[dict[str, str]],
     *,
-    catalog_url: Optional[str] = None,
+    catalog_url: str | None = None,
 ) -> tuple[list[DataSource], list[str]]:
     """Create one disabled channel_type="rss" DataSource per entry, deduped
     against BOTH already-stored sources and duplicates within the same OPML

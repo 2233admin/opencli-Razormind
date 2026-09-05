@@ -1,4 +1,4 @@
-from typing import Any, Optional
+from typing import Any
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -48,7 +48,7 @@ def validate_graph_dict(graph: dict[str, Any]) -> tuple[PlanGraph, PlanValidatio
 
 async def list_plans(
     session: AsyncSession,
-    draft: Optional[bool] = None,
+    draft: bool | None = None,
     page: int = 1,
     limit: int = 20,
 ) -> tuple[list[Plan], int]:
@@ -65,7 +65,7 @@ async def list_plans(
     return result.scalars().all(), total
 
 
-async def get_plan(session: AsyncSession, plan_id: str) -> Optional[Plan]:
+async def get_plan(session: AsyncSession, plan_id: str) -> Plan | None:
     result = await session.execute(select(Plan).where(Plan.id == plan_id))
     return result.scalar_one_or_none()
 
@@ -109,8 +109,8 @@ async def update_plan(
     session: AsyncSession,
     plan: Plan,
     data: PlanUpdate,
-    draft: Optional[bool] = None,
-    runnable: Optional[bool] = None,
+    draft: bool | None = None,
+    runnable: bool | None = None,
 ) -> Plan:
     """Apply only the fields the caller set. When ``graph`` is part of the
     update, ``version`` increments and the caller-supplied ``draft``/

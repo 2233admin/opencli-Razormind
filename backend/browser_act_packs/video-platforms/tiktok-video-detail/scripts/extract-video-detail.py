@@ -7,12 +7,19 @@ def main():
     js = r"""(function() {
   try {
     var el = document.getElementById('__UNIVERSAL_DATA_FOR_REHYDRATION__');
-    if (!el) return JSON.stringify({error: true, message: '__UNIVERSAL_DATA_FOR_REHYDRATION__ not found — ensure you are on a TikTok video page'});
+    if (!el) return JSON.stringify({
+      error: true,
+      message: '__UNIVERSAL_DATA_FOR_REHYDRATION__ not found — '
+        + 'ensure you are on a TikTok video page'
+    });
     var d = JSON.parse(el.textContent);
     var scope = d['__DEFAULT_SCOPE__'];
     if (!scope) return JSON.stringify({error: true, message: '__DEFAULT_SCOPE__ not found'});
     var vd = scope['webapp.video-detail'];
-    if (!vd || !vd.itemInfo) return JSON.stringify({error: true, message: 'webapp.video-detail or itemInfo not found'});
+    if (!vd || !vd.itemInfo) return JSON.stringify({
+      error: true,
+      message: 'webapp.video-detail or itemInfo not found'
+    });
     var item = vd.itemInfo.itemStruct;
     if (!item) return JSON.stringify({error: true, message: 'itemStruct not found'});
     var author = item.author || {};
@@ -21,12 +28,15 @@ def main():
     var stats = item.stats || {};
     var video = item.video || {};
     var music = item.music || {};
+    var createTimeISO = item.createTime
+      ? new Date(parseInt(item.createTime) * 1000).toISOString()
+      : null;
     return JSON.stringify({
       id: item.id,
       text: item.desc,
       textLanguage: item.textLanguage,
       createTime: item.createTime,
-      createTimeISO: item.createTime ? new Date(parseInt(item.createTime) * 1000).toISOString() : null,
+      createTimeISO: createTimeISO,
       isAd: item.isAd || false,
       isPinned: item.isPinned || false,
       isSponsored: item.isSponsored || false,
@@ -70,10 +80,25 @@ def main():
       playCount: parseInt(statsV2.playCount || stats.playCount || 0),
       collectCount: parseInt(statsV2.collectCount || stats.collectCount || 0),
       commentCount: parseInt(statsV2.commentCount || stats.commentCount || 0),
-      hashtags: (item.textExtra || []).filter(function(t) { return t.hashtagName; }).map(function(t) { return {id: t.hashtagId, name: t.hashtagName}; }),
-      mentions: (item.textExtra || []).filter(function(t) { return t.userId; }).map(function(t) { return {id: t.userId, name: t.userUniqueId}; }),
-      effectStickers: (item.effectStickers || []).map(function(s) { return {ID: s.ID, name: s.name}; }),
-      slideshowImageLinks: (item.imagePost && item.imagePost.images || []).map(function(img) { return {tiktokLink: img.imageURL && img.imageURL.urlList && img.imageURL.urlList[0] || ''}; })
+      hashtags: (item.textExtra || [])
+        .filter(function(t) { return t.hashtagName; })
+        .map(function(t) {
+          return {id: t.hashtagId, name: t.hashtagName};
+        }),
+      mentions: (item.textExtra || [])
+        .filter(function(t) { return t.userId; })
+        .map(function(t) {
+          return {id: t.userId, name: t.userUniqueId};
+        }),
+      effectStickers: (item.effectStickers || [])
+        .map(function(s) { return {ID: s.ID, name: s.name}; }),
+      slideshowImageLinks: (item.imagePost && item.imagePost.images || [])
+        .map(function(img) {
+          return {
+            tiktokLink: img.imageURL && img.imageURL.urlList
+              && img.imageURL.urlList[0] || ''
+          };
+        })
     });
   } catch(e) {
     return JSON.stringify({error: true, message: e.message});

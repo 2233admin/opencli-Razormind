@@ -6,7 +6,7 @@ Deterministic via explicit ``now``: every test pins ``now`` and backdates
 timing.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import select
@@ -15,7 +15,7 @@ from backend.control.outcomes import evaluate_pending_outcomes
 from backend.models.control_action import ControlActionRecord
 from backend.models.source_measurement import SourceMeasurement as SourceMeasurementRow
 
-NOW = datetime(2026, 7, 2, 12, 0, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 7, 2, 12, 0, 0, tzinfo=UTC)
 MIN_AGE = 3600
 STALE_AFTER = 86400
 
@@ -135,7 +135,7 @@ async def test_ripe_row_past_stale_window_with_no_evidence_is_insufficient_data(
     assert row.outcome == "insufficient_data"
     # SQLite round-trips tz-aware DateTime columns as naive (see
     # backend.control.ledger.ensure_utc) — compare naive-vs-aware safely.
-    assert row.evaluated_at.replace(tzinfo=timezone.utc) == NOW
+    assert row.evaluated_at.replace(tzinfo=UTC) == NOW
     assert row.outcome_detail["post_measurements"] == 0
 
 
@@ -174,7 +174,7 @@ async def test_recovered_when_post_state_differs(db_session):
     assert row.outcome == "recovered"
     assert row.outcome_detail["post_state"] == "unknown"
     assert row.outcome_detail["post_measurements"] == 1
-    assert row.evaluated_at.replace(tzinfo=timezone.utc) == NOW
+    assert row.evaluated_at.replace(tzinfo=UTC) == NOW
 
 
 @pytest.mark.asyncio

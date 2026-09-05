@@ -5,7 +5,7 @@ bounded backoff on CronSchedule step expressions, pause (+TTL) and its
 inverse (resume), require_review flagging, and auto_resume_expired_pauses.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -14,7 +14,7 @@ from backend.control.models import ControlAction
 from backend.models.schedule import CronSchedule
 from backend.models.source import DataSource
 
-NOW = datetime(2026, 7, 2, 12, 0, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 7, 2, 12, 0, 0, tzinfo=UTC)
 
 
 async def _make_source(session, **overrides) -> DataSource:
@@ -29,7 +29,9 @@ async def _make_source(session, **overrides) -> DataSource:
     return source
 
 
-async def _make_schedule(session, source_id: str, cron_expression: str, enabled=True) -> CronSchedule:
+async def _make_schedule(
+    session, source_id: str, cron_expression: str, enabled=True
+) -> CronSchedule:
     sched = CronSchedule(
         source_id=source_id,
         name="test schedule",

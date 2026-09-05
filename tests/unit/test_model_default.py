@@ -100,14 +100,14 @@ def test_model_default_put_rejects_invalid_role():
 
 
 def test_model_default_read_from_attributes():
-    from datetime import datetime, timezone
+    from datetime import UTC, datetime
 
     class _Row:
         id = "md-1"
         role = "chat"
         candidates = [{"provider_id": "p1", "model_id": "m1"}]
-        created_at = datetime.now(timezone.utc)
-        updated_at = datetime.now(timezone.utc)
+        created_at = datetime.now(UTC)
+        updated_at = datetime.now(UTC)
 
     read = ModelDefaultRead.model_validate(_Row())
     assert read.role == "chat"

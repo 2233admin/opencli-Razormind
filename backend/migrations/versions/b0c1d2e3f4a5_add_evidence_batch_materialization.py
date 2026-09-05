@@ -5,8 +5,8 @@ Revises: a9b0c1d2e3f4
 Create Date: 2026-08-30
 """
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 revision = "b0c1d2e3f4a5"
 down_revision = "a9b0c1d2e3f4"
@@ -51,17 +51,48 @@ def upgrade() -> None:
         sa.Column("finalization_reason", sa.String(length=256), nullable=False),
         sa.Column("finalized_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("manifest_hash", sa.String(length=64), nullable=False),
-        sa.ForeignKeyConstraint(["attempt_id"], ["iii_collection_attempts.id"], ondelete="RESTRICT"),
-        sa.ForeignKeyConstraint(["command_id"], ["iii_collection_commands.id"], ondelete="RESTRICT"),
+        sa.ForeignKeyConstraint(
+            ["attempt_id"], ["iii_collection_attempts.id"], ondelete="RESTRICT"
+        ),
+        sa.ForeignKeyConstraint(
+            ["command_id"], ["iii_collection_commands.id"], ondelete="RESTRICT"
+        ),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("command_id", "attempt_id", "reconciliation_revision", name="uq_evidence_batch_materialization_revision"),
-        sa.UniqueConstraint("manifest_hash", name="uq_evidence_batch_materialization_hash"),
+        sa.UniqueConstraint(
+            "command_id",
+            "attempt_id",
+            "reconciliation_revision",
+            name="uq_evidence_batch_materialization_revision",
+        ),
+        sa.UniqueConstraint(
+            "manifest_hash", name="uq_evidence_batch_materialization_hash"
+        ),
     )
-    op.create_index("ix_evidence_batch_materialization_manifests_batch_id", "evidence_batch_materialization_manifests", ["batch_id"])
-    op.create_index("ix_evidence_batch_materialization_manifests_command_id", "evidence_batch_materialization_manifests", ["command_id"])
-    op.create_index("ix_evidence_batch_materialization_manifests_attempt_id", "evidence_batch_materialization_manifests", ["attempt_id"])
-    op.create_index("ix_evidence_batch_materialization_status", "evidence_batch_materialization_manifests", ["materialization_status"])
-    op.create_index("ix_evidence_batch_materialization_scope", "evidence_batch_materialization_manifests", ["workspace_id", "project_id", "workflow_id", "run_id", "batch_id"])
+    op.create_index(
+        "ix_evidence_batch_materialization_manifests_batch_id",
+        "evidence_batch_materialization_manifests",
+        ["batch_id"],
+    )
+    op.create_index(
+        "ix_evidence_batch_materialization_manifests_command_id",
+        "evidence_batch_materialization_manifests",
+        ["command_id"],
+    )
+    op.create_index(
+        "ix_evidence_batch_materialization_manifests_attempt_id",
+        "evidence_batch_materialization_manifests",
+        ["attempt_id"],
+    )
+    op.create_index(
+        "ix_evidence_batch_materialization_status",
+        "evidence_batch_materialization_manifests",
+        ["materialization_status"],
+    )
+    op.create_index(
+        "ix_evidence_batch_materialization_scope",
+        "evidence_batch_materialization_manifests",
+        ["workspace_id", "project_id", "workflow_id", "run_id", "batch_id"],
+    )
     op.create_table(
         "evidence_batch_materialization_events",
         sa.Column("id", sa.String(length=36), nullable=False),
@@ -74,17 +105,45 @@ def upgrade() -> None:
         sa.Column("event_type", sa.String(length=32), nullable=False),
         sa.Column("materialization_status", sa.String(length=32), nullable=False),
         sa.Column("event_hash", sa.String(length=64), nullable=False),
-        sa.ForeignKeyConstraint(["attempt_id"], ["iii_collection_attempts.id"], ondelete="RESTRICT"),
-        sa.ForeignKeyConstraint(["command_id"], ["iii_collection_commands.id"], ondelete="RESTRICT"),
-        sa.ForeignKeyConstraint(["manifest_id"], ["evidence_batch_materialization_manifests.id"], ondelete="RESTRICT"),
+        sa.ForeignKeyConstraint(
+            ["attempt_id"], ["iii_collection_attempts.id"], ondelete="RESTRICT"
+        ),
+        sa.ForeignKeyConstraint(
+            ["command_id"], ["iii_collection_commands.id"], ondelete="RESTRICT"
+        ),
+        sa.ForeignKeyConstraint(
+            ["manifest_id"],
+            ["evidence_batch_materialization_manifests.id"],
+            ondelete="RESTRICT",
+        ),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("event_hash"),
-        sa.UniqueConstraint("manifest_id", "event_type", name="uq_evidence_batch_materialization_event_manifest"),
+        sa.UniqueConstraint(
+            "manifest_id",
+            "event_type",
+            name="uq_evidence_batch_materialization_event_manifest",
+        ),
     )
-    op.create_index("ix_evidence_batch_materialization_events_manifest_id", "evidence_batch_materialization_events", ["manifest_id"])
-    op.create_index("ix_evidence_batch_materialization_events_command_id", "evidence_batch_materialization_events", ["command_id"])
-    op.create_index("ix_evidence_batch_materialization_events_attempt_id", "evidence_batch_materialization_events", ["attempt_id"])
-    op.create_index("ix_evidence_batch_materialization_event_attempt", "evidence_batch_materialization_events", ["attempt_id", "reconciliation_revision"])
+    op.create_index(
+        "ix_evidence_batch_materialization_events_manifest_id",
+        "evidence_batch_materialization_events",
+        ["manifest_id"],
+    )
+    op.create_index(
+        "ix_evidence_batch_materialization_events_command_id",
+        "evidence_batch_materialization_events",
+        ["command_id"],
+    )
+    op.create_index(
+        "ix_evidence_batch_materialization_events_attempt_id",
+        "evidence_batch_materialization_events",
+        ["attempt_id"],
+    )
+    op.create_index(
+        "ix_evidence_batch_materialization_event_attempt",
+        "evidence_batch_materialization_events",
+        ["attempt_id", "reconciliation_revision"],
+    )
 
 
 def downgrade() -> None:

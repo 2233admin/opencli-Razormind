@@ -43,9 +43,9 @@ async def test_cursor_committed_after_durable_write(db_session):
 
     with (
         patch("backend.pipeline.collector.collect", return_value=cr),
-        patch("backend.pipeline.cursor_store.DBCursorStore") as DB,
+        patch("backend.pipeline.cursor_store.DBCursorStore") as db_cursor_store,
     ):
-        DB.return_value.save = save_mock
+        db_cursor_store.return_value.save = save_mock
         result = await run_pipeline(
             task.id, source, enable_ai=False, enable_notifications=False, sink=_ok_sink()
         )
@@ -64,9 +64,9 @@ async def test_cursor_not_committed_when_absent(db_session):
 
     with (
         patch("backend.pipeline.collector.collect", return_value=cr),
-        patch("backend.pipeline.cursor_store.DBCursorStore") as DB,
+        patch("backend.pipeline.cursor_store.DBCursorStore") as db_cursor_store,
     ):
-        DB.return_value.save = save_mock
+        db_cursor_store.return_value.save = save_mock
         await run_pipeline(
             task.id, source, enable_ai=False, enable_notifications=False, sink=_ok_sink()
         )
@@ -88,9 +88,9 @@ async def test_cursor_not_committed_when_sink_fails(db_session):
 
     with (
         patch("backend.pipeline.collector.collect", return_value=cr),
-        patch("backend.pipeline.cursor_store.DBCursorStore") as DB,
+        patch("backend.pipeline.cursor_store.DBCursorStore") as db_cursor_store,
     ):
-        DB.return_value.save = save_mock
+        db_cursor_store.return_value.save = save_mock
         result = await run_pipeline(
             task.id, source, enable_ai=False, enable_notifications=False, sink=failing
         )
@@ -120,10 +120,10 @@ async def test_cursor_save_failure_keeps_run_successful(db_session, caplog):
 
     with (
         patch("backend.pipeline.collector.collect", return_value=cr),
-        patch("backend.pipeline.cursor_store.DBCursorStore") as DB,
+        patch("backend.pipeline.cursor_store.DBCursorStore") as db_cursor_store,
         caplog.at_level(logging.ERROR),
     ):
-        DB.return_value.save = save_mock
+        db_cursor_store.return_value.save = save_mock
         result = await run_pipeline(
             task.id, source, enable_ai=False, enable_notifications=False, sink=_ok_sink()
         )
@@ -158,10 +158,10 @@ async def test_cursor_save_failure_emits_warning_event_when_run_id_present(db_se
 
     with (
         patch("backend.pipeline.collector.collect", return_value=cr),
-        patch("backend.pipeline.cursor_store.DBCursorStore") as DB,
+        patch("backend.pipeline.cursor_store.DBCursorStore") as db_cursor_store,
         patch("backend.pipeline.events.emit", new=fake_emit),
     ):
-        DB.return_value.save = save_mock
+        db_cursor_store.return_value.save = save_mock
         result = await run_pipeline(
             task.id, source, enable_ai=False, enable_notifications=False,
             sink=_ok_sink(), run_id="run-cursor-fail-1",

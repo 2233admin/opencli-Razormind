@@ -20,10 +20,15 @@ class DeliveryTarget(TimestampMixin):
     )
 
     workspace_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("studio_workspaces.id", ondelete="RESTRICT"), nullable=False, index=True
+        String(36),
+        ForeignKey("studio_workspaces.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
     )
     receiver_identity: Mapped[str] = mapped_column(String(255), nullable=False)
-    target_kind: Mapped[str] = mapped_column(String(64), nullable=False, default="controlled-receiver-v1")
+    target_kind: Mapped[str] = mapped_column(
+        String(64), nullable=False, default="controlled-receiver-v1"
+    )
 
 
 class DeliveryTargetRevision(TimestampMixin):
@@ -42,7 +47,10 @@ class DeliveryTargetRevision(TimestampMixin):
     )
 
     target_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("delivery_targets.id", ondelete="RESTRICT"), nullable=False, index=True
+        String(36),
+        ForeignKey("delivery_targets.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
     )
     revision: Mapped[int] = mapped_column(Integer, nullable=False)
     workspace_id: Mapped[str] = mapped_column(
@@ -123,7 +131,10 @@ class DeliveryAuthorizationDecisionV1(TimestampMixin):
     operation_id: Mapped[str] = mapped_column(String(255), nullable=False)
     idempotency_key: Mapped[str] = mapped_column(String(255), nullable=False)
     target_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("delivery_targets.id", ondelete="RESTRICT"), nullable=False, index=True
+        String(36),
+        ForeignKey("delivery_targets.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
     )
     target_revision_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("delivery_target_revisions.id", ondelete="RESTRICT"), nullable=False

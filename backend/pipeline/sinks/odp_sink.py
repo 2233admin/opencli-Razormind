@@ -11,7 +11,7 @@ guarantee than ``LegacyDbSink``'s inserted row — see ``SinkResult``.
 
 from __future__ import annotations
 
-from typing import Sequence
+from collections.abc import Sequence
 
 from backend.pipeline.sinks.base import RunContext, SinkResult
 

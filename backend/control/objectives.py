@@ -4,7 +4,7 @@ See docs/CONTROL_THEORY_ARCHITECTURE.md §4. Pure data contract only — no
 evaluator/policy logic lives here (that's future PR-Control-3).
 """
 
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
@@ -18,10 +18,10 @@ class SourceObjective(BaseModel):
 
     max_error_rate: float = 0.05
     max_duplicate_rate: float = 0.50
-    max_freshness_lag_seconds: Optional[int] = None
+    max_freshness_lag_seconds: int | None = None
     max_run_latency_ms: int = 30_000
     max_pending: int = 1000
-    min_accepted_per_run: Optional[int] = None
+    min_accepted_per_run: int | None = None
 
 
 class SourceObjectiveOverride(BaseModel):
@@ -37,15 +37,15 @@ class SourceObjectiveOverride(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    max_error_rate: Optional[float] = None
-    max_duplicate_rate: Optional[float] = None
-    max_freshness_lag_seconds: Optional[int] = None
-    max_run_latency_ms: Optional[int] = None
-    max_pending: Optional[int] = None
-    min_accepted_per_run: Optional[int] = None
+    max_error_rate: float | None = None
+    max_duplicate_rate: float | None = None
+    max_freshness_lag_seconds: int | None = None
+    max_run_latency_ms: int | None = None
+    max_pending: int | None = None
+    min_accepted_per_run: int | None = None
 
 
-def resolve_objective(override: Optional[dict[str, Any]]) -> SourceObjective:
+def resolve_objective(override: dict[str, Any] | None) -> SourceObjective:
     """Merge a source's stored objective-override dict over the default
     ``SourceObjective()`` and return the resolved objective.
 

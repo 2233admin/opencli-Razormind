@@ -1,9 +1,9 @@
 """Tests for error paths in notifier_dispatch."""
 
 import logging
+from unittest.mock import AsyncMock, patch
 
 import pytest
-from unittest.mock import AsyncMock, patch
 
 from backend.pipeline.notifier_dispatch import dispatch_notifications
 

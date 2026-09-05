@@ -1,9 +1,9 @@
 """Unit tests for ai_processor pipeline step."""
 
 import logging
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 
 from backend.pipeline.ai_processor import process_with_ai
 from backend.processors.base import ProcessingResult
@@ -167,8 +167,12 @@ async def test_process_with_ai_provider_id_resolves(db_session):
     }
 
     with (
-        patch("backend.database.AsyncSessionLocal", return_value=_session_cm(db_session)),
-        patch("backend.pipeline.ai_processor.get_processor", return_value=mock_processor) as mock_get,
+        patch(
+            "backend.database.AsyncSessionLocal", return_value=_session_cm(db_session)
+        ),
+        patch(
+            "backend.pipeline.ai_processor.get_processor", return_value=mock_processor
+        ) as mock_get,
     ):
         await process_with_ai(records, ai_config, source_id="src-provider")
 
@@ -268,8 +272,12 @@ async def test_process_with_ai_provider_id_not_found_falls_back(db_session, capl
     original = dict(ai_config)
 
     with (
-        patch("backend.database.AsyncSessionLocal", return_value=_session_cm(db_session)),
-        patch("backend.pipeline.ai_processor.get_processor", return_value=mock_processor) as mock_get,
+        patch(
+            "backend.database.AsyncSessionLocal", return_value=_session_cm(db_session)
+        ),
+        patch(
+            "backend.pipeline.ai_processor.get_processor", return_value=mock_processor
+        ) as mock_get,
         caplog.at_level(logging.WARNING),
     ):
         await process_with_ai(records, ai_config, source_id="src-missing")

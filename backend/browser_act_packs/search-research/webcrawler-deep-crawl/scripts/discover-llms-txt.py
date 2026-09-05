@@ -4,7 +4,9 @@ import sys
 
 def main():
     sys.stdout.reconfigure(encoding='utf-8', newline='\n')
-    parser = argparse.ArgumentParser(description="Discover URLs from /llms.txt (LLM-friendly site index)")
+    parser = argparse.ArgumentParser(
+        description="Discover URLs from /llms.txt (LLM-friendly site index)"
+    )
     parser.add_argument('origin', help="Site origin, e.g. https://example.com")
     args = parser.parse_args()
 
@@ -15,7 +17,11 @@ def main():
         const url = origin + '/llms.txt';
         const resp = await fetch(url, {{ credentials: 'include' }});
         if (!resp.ok) {{
-          return JSON.stringify({{ error: true, message: 'llms.txt not available (HTTP ' + resp.status + ')', urls: [] }});
+          return JSON.stringify({{
+            error: true,
+            message: 'llms.txt not available (HTTP ' + resp.status + ')',
+            urls: []
+          }});
         }}
         const text = await resp.text();
         const urlRegex = /https?:\\/\\/[^\\s<>"'\\)]+/g;
@@ -27,7 +33,9 @@ def main():
           if (u.endsWith('.md')) u = u.slice(0, -3);
           if (!seen.has(u)) {{ seen.add(u); urls.push(u); }}
         }}
-        return JSON.stringify({{ error: false, source: 'llms.txt', count: urls.length, urls: urls }});
+        return JSON.stringify({{
+          error: false, source: 'llms.txt', count: urls.length, urls: urls
+        }});
       }} catch(e) {{
         return JSON.stringify({{ error: true, message: e.message, urls: [] }});
       }}

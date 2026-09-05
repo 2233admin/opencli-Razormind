@@ -4,7 +4,7 @@ math. Uses the in-memory sqlite db_session fixture — source_measurements is
 registered in backend/models/__init__.py so conftest's create_all provisions it.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import select
@@ -123,8 +123,8 @@ async def test_freshness_quality_invalid_value_falls_back_to_missing(db_session)
 
 @pytest.mark.asyncio
 async def test_freshness_source_quality_persists_lag_and_timestamps(db_session):
-    ts = datetime(2026, 7, 1, tzinfo=timezone.utc)
-    observed = datetime(2026, 7, 2, tzinfo=timezone.utc)
+    ts = datetime(2026, 7, 1, tzinfo=UTC)
+    observed = datetime(2026, 7, 2, tzinfo=UTC)
     row = await record_run_measurement(
         db_session, source_id="src-1", run_id="run-4",
         freshness=FreshnessInfo(

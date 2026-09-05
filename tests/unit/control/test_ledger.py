@@ -4,7 +4,7 @@ Uses the in-memory sqlite db_session fixture — control_actions is registered
 in backend/models/__init__.py so conftest's create_all provisions it.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import select
@@ -27,7 +27,7 @@ def _measurement(**overrides) -> SourceMeasurement:
         duplicate_rate=0.0,
         cursor_advanced=False,
         error_kinds={"auth_failed": 1},
-        observed_at=datetime(2026, 7, 2, tzinfo=timezone.utc),
+        observed_at=datetime(2026, 7, 2, tzinfo=UTC),
     )
     kwargs.update(overrides)
     return SourceMeasurement(**kwargs)
@@ -175,7 +175,7 @@ async def test_dedup_writes_when_outside_window(db_session):
     # Backdate created_at past the dedup window (TimestampMixin sets it to
     # "now" on construction — override directly, same idiom as the
     # integration tests' backdating of created_at for outcome-eval fixtures).
-    stale.created_at = datetime.now(timezone.utc) - timedelta(seconds=1200)
+    stale.created_at = datetime.now(UTC) - timedelta(seconds=1200)
     await db_session.commit()
 
     written = await record_advisory_actions(

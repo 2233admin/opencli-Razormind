@@ -1,6 +1,7 @@
 import argparse
 import sys
 
+
 def main():
     sys.stdout.reconfigure(encoding='utf-8', newline='\n')
     parser = argparse.ArgumentParser()
@@ -10,7 +11,9 @@ def main():
     js = f"""
     (async function() {{
       try {{
-        var r = await fetch('https://www.instagram.com/api/v1/users/web_profile_info/?username={args.username}', {{
+        var r = await fetch(
+          'https://www.instagram.com/api/v1/users/web_profile_info/?username={args.username}',
+          {{
           headers: {{
             'X-IG-App-ID': '936619743392459',
             'X-Requested-With': 'XMLHttpRequest'

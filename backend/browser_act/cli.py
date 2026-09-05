@@ -95,7 +95,7 @@ async def _run(
 
     try:
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-    except asyncio.TimeoutError as exc:
+    except TimeoutError as exc:
         # wait_for only cancels communicate() — the child itself keeps
         # running until explicitly killed. Mirrors cli_channel.py exactly so
         # a timed-out browser-act call never leaves an orphan process.

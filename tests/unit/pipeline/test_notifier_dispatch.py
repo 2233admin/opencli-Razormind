@@ -1,8 +1,9 @@
 """Unit tests for notifier_dispatch."""
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 from sqlalchemy import select
-from unittest.mock import AsyncMock, MagicMock, patch
 
 from backend.pipeline.notifier_dispatch import dispatch_notifications
 

@@ -1,7 +1,5 @@
 """Unit tests for schedule service."""
 
-import pytest
-
 from backend.services.schedule_service import validate_cron_expression
 
 

@@ -61,7 +61,10 @@ async def test_cookie_survives_detach_and_reattach(cdp_endpoint):
             ]
         )
         cookies_immediately_after = await context1.cookies("http://127.0.0.1/")
-        assert any(c["name"] == _COOKIE_NAME and c["value"] == probe_value for c in cookies_immediately_after)
+        assert any(
+            c["name"] == _COOKIE_NAME and c["value"] == probe_value
+            for c in cookies_immediately_after
+        )
     finally:
         await browser1.close()  # detach only — real browser keeps running
         await pw1.stop()

@@ -9,8 +9,9 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from iii import InitOptions, register_worker
 from iii_observability import Logger
+
+from iii import InitOptions, register_worker
 
 III_ROOT = Path(__file__).resolve().parents[2]
 if str(III_ROOT) not in sys.path:
@@ -164,4 +165,7 @@ worker.register_function(
     description="List channels for a guild_id",
 )
 
-print("collector-discord started — odp.collect::discord_snapshot, discord::{status,guilds,channels}")
+print(
+    "collector-discord started — "
+    "odp.collect::discord_snapshot, discord::{status,guilds,channels}"
+)

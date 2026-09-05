@@ -47,9 +47,7 @@ class ApiChannel(AbstractChannel):
 
     channel_type = "api"
 
-    async def collect(
-        self, config: dict[str, Any], parameters: dict[str, Any]
-    ) -> ChannelResult:
+    async def collect(self, config: dict[str, Any], parameters: dict[str, Any]) -> ChannelResult:
         """Thin wrapper around ``fetch()``: a bare ``FetchContext`` (no
         ``ctx.http``, so ``fetch()`` opens its own one-shot client; no
         ``ctx.source_id``, so auth always resolves via the legacy inline/env
@@ -108,7 +106,13 @@ class ApiChannel(AbstractChannel):
         # guarded_async_client (DNS-rebinding TOCTOU closure, AUDIT B3).
         if ctx.http is not None:
             response = await self._send(
-                ctx.http, method, url, query_params, request_body, headers, timeout
+                ctx.http,
+                method,
+                url,
+                query_params,
+                request_body,
+                headers,
+                timeout,
             )
         else:
             try:
@@ -203,7 +207,9 @@ class ApiChannel(AbstractChannel):
 
             creds = await AuthManager().resolve(source_id)
             headers = build_auth_header(
-                auth_type, creds, header_name=auth.get("header", "X-API-Key")
+                auth_type,
+                creds,
+                header_name=auth.get("header", "X-API-Key"),
             )
             if headers:
                 return headers
@@ -234,6 +240,7 @@ class ApiChannel(AbstractChannel):
             return {"Authorization": f"Bearer {token}"}
         if auth_type == "basic":
             import base64
+
             raw_pw = auth.get("password", "")
             user = _resolve_secrets(auth.get("username", ""))
             pw = _resolve_secrets(raw_pw)

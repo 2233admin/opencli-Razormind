@@ -47,7 +47,9 @@ class DeliveryExecutionReadV1(_Model):
     outcome: Literal["accepted", "rejected", "unknown"] | None = None
     attempt_count: int
     attempts: list[DeliveryExecutionAttemptEvidenceV1] = Field(max_length=3)
-    reconciliations: list[DeliveryExecutionReconciliationEvidenceV1] = Field(default_factory=list, max_length=10)
+    reconciliations: list[DeliveryExecutionReconciliationEvidenceV1] = Field(
+        default_factory=list, max_length=10
+    )
     created_at: datetime
     updated_at: datetime
 
@@ -57,7 +59,9 @@ class DeliveryExecutionListV1(_Model):
 
 
 Hash64 = Annotated[str, Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")]
-Identifier128 = Annotated[str, Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$")]
+Identifier128 = Annotated[
+    str, Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+]
 OperationId = Annotated[str, Field(min_length=1, max_length=255)]
 BodyClaimId = Annotated[str, Field(min_length=1, max_length=255)]
 
@@ -73,7 +77,7 @@ class DeliveryClaimManifestV1(_Model):
     manifest_hashes: list[Hash64] = Field(min_length=1, max_length=200)
 
     @model_validator(mode="after")
-    def distinct_claims_and_manifests(self) -> "DeliveryClaimManifestV1":
+    def distinct_claims_and_manifests(self) -> DeliveryClaimManifestV1:
         if len({claim.claim_id for claim in self.claims}) != len(self.claims):
             raise ValueError("Controlled receiver claims must be distinct")
         if len(set(self.manifest_hashes)) != len(self.manifest_hashes):

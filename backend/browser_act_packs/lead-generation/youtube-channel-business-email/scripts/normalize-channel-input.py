@@ -38,7 +38,10 @@ def normalize(raw: str) -> dict:
         custom_url_match = re.search(r"youtube\.com/(c|user)/([^/]+)", base)
         if custom_url_match:
             slug = custom_url_match.group(2)
-            return {"about_url": f"https://www.youtube.com/{custom_url_match.group(1)}/{slug}/about",
+            about_url = (
+                f"https://www.youtube.com/{custom_url_match.group(1)}/{slug}/about"
+            )
+            return {"about_url": about_url,
                     "input_type": "legacy_custom_url", "value": slug}
         if base.endswith("/about"):
             return {"about_url": base, "input_type": "raw_url", "value": base}
@@ -56,7 +59,10 @@ def normalize(raw: str) -> dict:
 def main():
     sys.stdout.reconfigure(encoding="utf-8", newline="\n")
     parser = argparse.ArgumentParser(
-        description="Normalize one channel input (handle, channel id, or full URL) into a canonical /about URL"
+        description=(
+            "Normalize one channel input (handle, channel id, or full URL) "
+            "into a canonical /about URL"
+        )
     )
     parser.add_argument("channel", help="Channel id (UCxxx), handle (@name), or URL")
     args = parser.parse_args()

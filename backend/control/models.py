@@ -5,13 +5,13 @@ encode. This module only defines pure data contracts; it is not wired into
 any runner, pipeline, or API in this PR.
 """
 
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 
-class SourceControlState(str, Enum):
+class SourceControlState(StrEnum):
     """Control-theoretic state of a data source (the "plant").
 
     Derived by an evaluator (future PR-Control-3) from a SourceMeasurement

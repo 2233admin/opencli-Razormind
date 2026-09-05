@@ -212,7 +212,7 @@ def test_provider_model_create_rejects_invalid_source():
 def test_provider_model_read_from_attributes(db_engine):
     # ProviderModelRead just needs from_attributes wiring; exercised via a
     # plain namespace rather than a DB round-trip (that's covered above).
-    from datetime import datetime, timezone
+    from datetime import UTC, datetime
 
     class _Row:
         id = "pm-1"
@@ -222,7 +222,7 @@ def test_provider_model_read_from_attributes(db_engine):
         capabilities = {"tools": True}
         source = "manual"
         enabled = True
-        created_at = datetime.now(timezone.utc)
+        created_at = datetime.now(UTC)
 
     read = ProviderModelRead.model_validate(_Row())
     assert read.id == "pm-1"

@@ -1,10 +1,11 @@
-import os
-import time
-import requests
-import json
-import sys
 import datetime
 import io
+import json
+import os
+import sys
+import time
+
+import requests
 
 # Force UTF-8 encoding for standard output and error streams
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
@@ -20,12 +21,14 @@ def run_business_contact_social_links_task(api_key, target):
     Starts a Business Contact or Social Links task and polls for completion.
     """
     headers = {"Authorization": f"Bearer {api_key}"}
-    
-    # Determine if target is a URL or a Company Name
-    # Simple heuristic: if it starts with http/https, contains www., or has a dot without spaces
+
+    # Simple heuristic: URLs start with http/https or www., or contain a
+    # dot without spaces.
     target_lower = target.strip().lower()
-    is_url = target_lower.startswith("http://") or target_lower.startswith("https://") or target_lower.startswith("www.") or ("." in target_lower and " " not in target_lower)
-    
+    is_url = (
+        target_lower.startswith(("http://", "https://", "www."))
+        or ("." in target_lower and " " not in target_lower)
+    )
     if is_url:
         # Use Social Links Scraper Template
         payload = {
@@ -34,7 +37,7 @@ def run_business_contact_social_links_task(api_key, target):
                 {"name": "Website_URL", "value": target}
             ]
         }
-        print(f"Detected URL. Using Social Links Scraper template.", flush=True)
+        print("Detected URL. Using Social Links Scraper template.", flush=True)
     else:
         # Use Google Business Contact Finder Template
         payload = {
@@ -43,7 +46,11 @@ def run_business_contact_social_links_task(api_key, target):
                 {"name": "Company_name", "value": target}
             ]
         }
-        print(f"Detected Company Name. Using Google Business Contact Finder template.", flush=True)
+        print(
+            "Detected Company Name. Using Google Business Contact Finder "
+            "template.",
+            flush=True,
+        )
 
     # 1. Start Task
     try:
@@ -60,7 +67,11 @@ def run_business_contact_social_links_task(api_key, target):
         if "Invalid authorization" in res_str:
             print("Error: Invalid authorization. Please check your BrowserAct API Key.", flush=True)
         elif "concurrent" in res_str.lower() or "too many running tasks" in res_str.lower():
-            print("Error: Concurrent task limit reached. Please upgrade your plan at https://www.browseract.com/reception/recharge", flush=True)
+            print(
+                "Error: Concurrent task limit reached. Please upgrade your plan at "
+                "https://www.browseract.com/reception/recharge",
+                flush=True,
+            )
         else:
             print(f"Error: Could not start task. Response: {res}", flush=True)
         return None
@@ -123,7 +134,11 @@ if __name__ == "__main__":
 
     if len(sys.argv) < 2:
         print("Usage: python business_contact_social_links.py <target>", flush=True)
-        print("target can be a Company Name (e.g., 'OpenAI') or a Website URL (e.g., 'https://www.rotorooter.com/')", flush=True)
+        print(
+            "target can be a Company Name (e.g., 'OpenAI') or a Website URL "
+            "(e.g., 'https://www.rotorooter.com/')",
+            flush=True,
+        )
         sys.exit(1)
 
     if not api_key:
@@ -131,7 +146,11 @@ if __name__ == "__main__":
         print("Please follow these steps:", flush=True)
         print("1. Go to: https://www.browseract.com/reception/integrations", flush=True)
         print("2. Copy your API Key.", flush=True)
-        print("3. Provide it to me or set it as an environment variable (BROWSERACT_API_KEY).", flush=True)
+        print(
+            "3. Provide it to me or set it as an environment variable "
+            "(BROWSERACT_API_KEY).",
+            flush=True,
+        )
         sys.exit(1)
 
     target = sys.argv[1]

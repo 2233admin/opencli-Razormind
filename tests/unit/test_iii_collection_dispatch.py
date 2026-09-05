@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import json
 from types import SimpleNamespace
 
@@ -61,7 +60,10 @@ async def test_invoke_iii_collection_uses_exact_cli_argv_env_and_json_envelope(m
             iii_trigger_timeout_seconds=3,
         ),
     )
-    monkeypatch.setattr("backend.workflow.iii_collection_dispatch.asyncio.create_subprocess_exec", create)
+    monkeypatch.setattr(
+        "backend.workflow.iii_collection_dispatch.asyncio.create_subprocess_exec",
+        create,
+    )
 
     payload = {"admin_collection": {"command_id": "command-1"}, "task_id": "task-1"}
     await invoke_iii_collection(payload, function_id="odp.collect::opencli_snapshot")
@@ -98,8 +100,13 @@ async def test_invoke_timeout_kills_process_and_preserves_unknown_outbox_semanti
             iii_trigger_timeout_seconds=1,
         ),
     )
-    monkeypatch.setattr("backend.workflow.iii_collection_dispatch.asyncio.create_subprocess_exec", create)
-    monkeypatch.setattr("backend.workflow.iii_collection_dispatch.asyncio.wait_for", timed_out)
+    monkeypatch.setattr(
+        "backend.workflow.iii_collection_dispatch.asyncio.create_subprocess_exec",
+        create,
+    )
+    monkeypatch.setattr(
+        "backend.workflow.iii_collection_dispatch.asyncio.wait_for", timed_out
+    )
 
     with pytest.raises(IIIBridgeUnavailableError, match="outcome is unknown"):
         await invoke_iii_collection({}, function_id="odp.collect::opencli_snapshot")

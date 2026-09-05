@@ -1,15 +1,12 @@
-from datetime import datetime, timezone
-from typing import Generic, TypeVar
+from datetime import UTC, datetime
 
 from pydantic import BaseModel
-
-T = TypeVar("T")
 
 
 def _utc_isoformat(v: datetime) -> str:
     if v.tzinfo is None:
-        v = v.replace(tzinfo=timezone.utc)
-    return v.astimezone(timezone.utc).isoformat()
+        v = v.replace(tzinfo=UTC)
+    return v.astimezone(UTC).isoformat()
 
 
 class UTCModel(BaseModel):
@@ -25,7 +22,7 @@ class PaginationMeta(BaseModel):
     pages: int
 
 
-class ApiResponse(BaseModel, Generic[T]):
+class ApiResponse[T](BaseModel):
     success: bool
     data: T | None = None
     error: str | None = None

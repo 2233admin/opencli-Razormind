@@ -38,7 +38,6 @@ from __future__ import annotations
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Optional
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -72,19 +71,19 @@ class PlanRunResult:
     plan_id: str
     source_id: str
     task_id: str
-    run_id: Optional[str]
+    run_id: str | None
     success: bool
     collected: int
     stored: int
     skipped: int
-    error: Optional[str]
+    error: str | None
     #: Multi-source (issue 04) only: one entry per source node, in graph
     #: order. Empty for a degenerate plan.
     source_results: list[SourceSegmentResult] = field(default_factory=list)
     #: Multi-source (issue 04) only: the shared segment's outcome. ``None``
     #: for a degenerate plan (there is no shared segment to run) or when a
     #: multi-source plan has no shared nodes at all.
-    shared_segment: Optional[SharedSegmentResult] = None
+    shared_segment: SharedSegmentResult | None = None
 
 
 @dataclass
@@ -95,14 +94,14 @@ class SourceSegmentResult:
     result."""
 
     node_id: str
-    source_id: Optional[str]
-    task_id: Optional[str]
-    run_id: Optional[str]
+    source_id: str | None
+    task_id: str | None
+    run_id: str | None
     success: bool
     collected: int
     stored: int
     skipped: int
-    error: Optional[str]
+    error: str | None
 
 
 @dataclass
@@ -115,8 +114,8 @@ class SharedSegmentResult:
     run_key: str
     success: bool
     #: The node_id where execution stopped, if any node failed.
-    failed_node_id: Optional[str]
-    error: Optional[str]
+    failed_node_id: str | None
+    error: str | None
     items_in: int
     stored: int
     skipped: int
@@ -142,9 +141,9 @@ async def run_plan_once(
     session: AsyncSession,
     plan: Plan,
     *,
-    parameters: Optional[dict] = None,
+    parameters: dict | None = None,
     priority: int = 5,
-    agent_id: Optional[str] = None,
+    agent_id: str | None = None,
 ) -> PlanRunResult:
     """Run ``plan`` once, synchronously, to completion.
 
@@ -231,7 +230,7 @@ async def _dispatch_source_segment(
     *,
     parameters: dict,
     priority: int,
-    agent_id: Optional[str],
+    agent_id: str | None,
 ) -> SourceSegmentResult:
     """Dispatch one source node through the existing channel/runner
     machinery. Never raises: any failure (missing source_id, dangling
@@ -306,9 +305,9 @@ async def _run_degenerate(
     session: AsyncSession,
     plan: Plan,
     node: PlanNode,
-    parameters: Optional[dict],
+    parameters: dict | None,
     priority: int,
-    agent_id: Optional[str],
+    agent_id: str | None,
 ) -> PlanRunResult:
     """issue 03's exact behavior: a single source-node failure RAISES
     (rather than being captured into a partial result) — a degenerate Plan
@@ -430,9 +429,9 @@ async def _run_shared_segments(
     plan: Plan,
     graph: PlanGraph,
     source_nodes: list[PlanNode],
-    parameters: Optional[dict],
+    parameters: dict | None,
     priority: int,
-    agent_id: Optional[str],
+    agent_id: str | None,
 ) -> PlanRunResult:
     params = parameters or {}
     run_key = str(uuid.uuid4())
@@ -503,7 +502,7 @@ async def _run_shared_segment_over_branches(
     start_node_ids: set[str],
     branches: list[list[ProvenancedItem]],
     params: dict,
-) -> Optional[SharedSegmentResult]:
+) -> SharedSegmentResult | None:
     """Shared plumbing for both the manual whole-plan run (``_run_shared_
     segments``, issue 04, one branch per source node run this pass) and the
     incremental dataflow-triggered run (``run_plan_shared_segment_
@@ -689,8 +688,8 @@ class IncrementalTriggerResult:
     source_node_id: str
     run_key: str
     success: bool
-    error: Optional[str]
-    shared_segment: Optional[SharedSegmentResult]
+    error: str | None
+    shared_segment: SharedSegmentResult | None
 
 
 async def run_plan_shared_segment_incremental(
@@ -700,7 +699,7 @@ async def run_plan_shared_segment_incremental(
     source_id: str,
     source_node_id: str,
     task_id: str,
-    parameters: Optional[dict] = None,
+    parameters: dict | None = None,
 ) -> IncrementalTriggerResult:
     """Run ``plan``'s downstream shared segment incrementally over JUST the
     records ``task_id`` (one source's one delivery) just stored — the

@@ -103,11 +103,15 @@ class OpenAIProcessor(AbstractProcessor):
                     response = await client.chat.completions.create(**kwargs)
                     text = response.choices[0].message.content or "{}"
                     usage = response.usage
-                    logger.info("openai resp [%d/%d] | prompt_tokens=%d completion_tokens=%d preview=%s",
-                                i + 1, len(records),
-                                usage.prompt_tokens if usage else -1,
-                                usage.completion_tokens if usage else -1,
-                                text[:200])
+                    logger.info(
+                        "openai resp [%d/%d] | prompt_tokens=%d "
+                        "completion_tokens=%d preview=%s",
+                        i + 1,
+                        len(records),
+                        usage.prompt_tokens if usage else -1,
+                        usage.completion_tokens if usage else -1,
+                        text[:200],
+                    )
                     try:
                         return json.loads(text)
                     except json.JSONDecodeError:

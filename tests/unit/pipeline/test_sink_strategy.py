@@ -112,7 +112,10 @@ async def test_run_pipeline_selects_sink_by_strategy(db_session):
     fake.write_batch = AsyncMock(return_value=SinkResult(accepted=1, records=[MagicMock()]))
 
     with (
-        patch("backend.pipeline.collector.collect", return_value=ChannelResult.ok([{"title": "x"}])),
+        patch(
+            "backend.pipeline.collector.collect",
+            return_value=ChannelResult.ok([{"title": "x"}]),
+        ),
         patch("backend.pipeline.sinks.strategy.select_sink", return_value=fake) as sel,
     ):
         result = await run_pipeline(
@@ -148,7 +151,10 @@ async def test_run_pipeline_injected_sink_overrides_strategy(db_session):
     injected.write_batch = AsyncMock(return_value=SinkResult(accepted=0, records=[]))
 
     with (
-        patch("backend.pipeline.collector.collect", return_value=ChannelResult.ok([{"title": "x"}])),
+        patch(
+            "backend.pipeline.collector.collect",
+            return_value=ChannelResult.ok([{"title": "x"}]),
+        ),
         patch("backend.pipeline.sinks.strategy.select_sink") as sel,
     ):
         await run_pipeline(

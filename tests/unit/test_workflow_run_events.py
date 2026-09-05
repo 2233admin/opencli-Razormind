@@ -8,7 +8,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from backend.database import Base
 from backend.models.workflow_run import WorkflowRun, WorkflowRunEvent
-from backend.schemas.workflow import WorkflowNodeRunEvent
+from backend.schemas.research_graph import WorkflowResearchGraphMutationRequest
+from backend.schemas.workflow_runtime import WorkflowNodeRunEvent
+from backend.workflow.research_graph_mutations import (
+    append_workflow_research_graph_mutation,
+)
 from backend.workflow.workflow_run_events import (
     WorkflowRunEventConflictError,
     _counter_reconciliation_statement,
@@ -119,9 +123,7 @@ async def test_append_is_idempotent_and_only_adds_the_unseen_suffix(
             events=first,
         )
         original_row_ids = (
-            await session.scalars(
-                select(WorkflowRunEvent.id).order_by(WorkflowRunEvent.sequence)
-            )
+            await session.scalars(select(WorkflowRunEvent.id).order_by(WorkflowRunEvent.sequence))
         ).all()
 
         replay = await append_workflow_run_events(
@@ -135,9 +137,7 @@ async def test_append_is_idempotent_and_only_adds_the_unseen_suffix(
             events=[*first, _event("event-3")],
         )
         persisted = (
-            await session.scalars(
-                select(WorkflowRunEvent).order_by(WorkflowRunEvent.sequence)
-            )
+            await session.scalars(select(WorkflowRunEvent).order_by(WorkflowRunEvent.sequence))
         ).all()
         run = await session.get(WorkflowRun, "run-event-spine")
 
@@ -214,9 +214,7 @@ async def test_two_transactions_reserve_disjoint_contiguous_ranges(
     reserved = await asyncio.gather(append("event-a"), append("event-b"))
     async with event_spine_sessions() as verification:
         rows = (
-            await verification.scalars(
-                select(WorkflowRunEvent).order_by(WorkflowRunEvent.sequence)
-            )
+            await verification.scalars(select(WorkflowRunEvent).order_by(WorkflowRunEvent.sequence))
         ).all()
         run = await verification.get(WorkflowRun, "run-event-spine")
     assert sorted(reserved) == [1, 2]
@@ -253,13 +251,9 @@ async def test_concurrent_same_event_and_payload_returns_one_persisted_event(
     assert first.events == second.events
     assert first.events[0].id == "event-replay"
     assert first.events[0].sequence == 1
-    assert sorted(
-        (len(first.appended_events), len(second.appended_events))
-    ) == [0, 1]
+    assert sorted((len(first.appended_events), len(second.appended_events))) == [0, 1]
     async with event_spine_sessions() as verification:
-        rows = (
-            await verification.scalars(select(WorkflowRunEvent))
-        ).all()
+        rows = (await verification.scalars(select(WorkflowRunEvent))).all()
         run = await verification.get(WorkflowRun, "run-event-spine")
     assert len(rows) == 1
     assert rows[0].event_id == "event-replay"
@@ -296,20 +290,14 @@ async def test_concurrent_same_event_with_different_payload_is_stable_conflict(
         timeout=10,
     )
 
-    conflicts = [
-        result
-        for result in results
-        if isinstance(result, WorkflowRunEventConflictError)
-    ]
+    conflicts = [result for result in results if isinstance(result, WorkflowRunEventConflictError)]
     successes = [result for result in results if not isinstance(result, Exception)]
     assert len(successes) == 1
     assert len(conflicts) == 1
     assert conflicts[0].code == "workflow_run_event_conflict"
     assert "different canonical payload" in str(conflicts[0])
     async with event_spine_sessions() as verification:
-        rows = (
-            await verification.scalars(select(WorkflowRunEvent))
-        ).all()
+        rows = (await verification.scalars(select(WorkflowRunEvent))).all()
         run = await verification.get(WorkflowRun, "run-event-spine")
     assert len(rows) == 1
     assert rows[0].event_id == "event-conflict"
@@ -345,3 +333,88 @@ def test_postgresql_allocator_lock_uses_a_namespaced_64_bit_hash():
     )
 
     assert "pg_advisory_xact_lock(hashtextextended('run-1', 22363277192072265))" in compiled
+
+
+@pytest.mark.asyncio
+async def test_graph_mutation_replays_and_rejects_stale_transcript_guards(
+    event_spine_sessions,
+):
+    def semantic_event(sequence: int, event_type: str, entity: dict) -> WorkflowNodeRunEvent:
+        event_id = f"semantic-{sequence}"
+        return WorkflowNodeRunEvent(
+            id=event_id,
+            sequence=sequence,
+            workflowId="workflow-event-spine",
+            workflowRunId="run-event-spine",
+            traceId="trace-run-event-spine",
+            nodeId="node-1",
+            eventType="partial",
+            createdAt="2026-08-29T00:00:00Z",
+            details={
+                "researchGraph": {
+                    "schemaVersion": 1,
+                    "eventId": event_id,
+                    "idempotencyKey": event_id,
+                    "eventType": event_type,
+                    "runId": "run-event-spine",
+                    "traceId": "trace-run-event-spine",
+                    "nodeId": "node-1",
+                    "revisionId": "rev-1",
+                    "lineage": {"source": "test"},
+                    "entity": entity,
+                }
+            },
+        )
+
+    request = WorkflowResearchGraphMutationRequest(
+        schemaVersion=1,
+        idempotencyKey="proposal-1",
+        expectedRevision="rev-1",
+        expectedSequence=2,
+        action="propose",
+        traceId="trace-run-event-spine",
+        nodeId="node-1",
+        revisionId="rev-1",
+        entity={"id": "claim-1", "kind": "claim", "evidenceIds": ["evidence-1"]},
+    )
+    async with event_spine_sessions() as session:
+        session.add(_run())
+        await session.flush()
+        await append_workflow_run_events(
+            session,
+            run_id="run-event-spine",
+            events=[
+                semantic_event(1, "source/recorded", {"id": "source-1", "kind": "source"}),
+                semantic_event(
+                    2,
+                    "evidence/linked",
+                    {"id": "evidence-1", "kind": "evidence", "sourceIds": ["source-1"]},
+                ),
+            ],
+        )
+        first = await append_workflow_research_graph_mutation(
+            session,
+            run_id="run-event-spine",
+            workflow_id="workflow-event-spine",
+            trace_id="trace-run-event-spine",
+            request=request,
+        )
+        replay = await append_workflow_research_graph_mutation(
+            session,
+            run_id="run-event-spine",
+            workflow_id="workflow-event-spine",
+            trace_id="trace-run-event-spine",
+            request=request,
+        )
+        assert first.events[0].id == replay.events[0].id == "proposal-1"
+        with pytest.raises(WorkflowRunEventConflictError, match="expectedSequence is stale"):
+            await append_workflow_research_graph_mutation(
+                session,
+                run_id="run-event-spine",
+                workflow_id="workflow-event-spine",
+                trace_id="trace-run-event-spine",
+                request=request.model_copy(
+                    update={"idempotencyKey": "proposal-stale"},
+                    deep=True,
+                ),
+            )

@@ -1,10 +1,11 @@
-import os
-import time
-import requests
-import json
-import sys
 import datetime
 import io
+import json
+import os
+import sys
+import time
+
+import requests
 
 # Force UTF-8 encoding for standard output and error streams
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
@@ -43,9 +44,16 @@ def run_single_video_task(api_key, target_url):
     if "id" not in res:
         res_str = str(res)
         if "Invalid authorization" in res_str:
-            print("Error: Invalid authorization. Please check your BrowserAct API Key.", flush=True)
+            print(
+                "Error: Invalid authorization. Please check your BrowserAct API Key.",
+                flush=True,
+            )
         elif "concurrent" in res_str.lower() or "too many running tasks" in res_str.lower():
-            print("Error: Concurrent task limit reached. Please upgrade your plan at https://www.browseract.com/reception/recharge", flush=True)
+            print(
+                "Error: Concurrent task limit reached. Please upgrade your plan at "
+                "https://www.browseract.com/reception/recharge",
+                flush=True,
+            )
         else:
             print(f"Error: Could not start task. Response: {res}", flush=True)
         return None
@@ -120,7 +128,11 @@ def run_batch_video_task(api_key, keywords, upload_date="This week", limit=3):
     }
 
     # 1. Start Task
-    print(f"[Batch Mode] Searching for '{keywords}' | Upload date: {upload_date} | Limit: {limit}", flush=True)
+    print(
+        f"[Batch Mode] Searching for '{keywords}' | Upload date: {upload_date} "
+        f"| Limit: {limit}",
+        flush=True,
+    )
     try:
         res = requests.post(
             f"{API_BASE_URL}/run-task-by-template",
@@ -135,7 +147,11 @@ def run_batch_video_task(api_key, keywords, upload_date="This week", limit=3):
         if "Invalid authorization" in res_str:
             print("Error: Invalid authorization. Please check your BrowserAct API Key.", flush=True)
         elif "concurrent" in res_str.lower() or "too many running tasks" in res_str.lower():
-            print("Error: Concurrent task limit reached. Please upgrade your plan at https://www.browseract.com/reception/recharge", flush=True)
+            print(
+                "Error: Concurrent task limit reached. Please upgrade your plan at "
+                "https://www.browseract.com/reception/recharge",
+                flush=True,
+            )
         else:
             print(f"Error: Could not start task. Response: {res}", flush=True)
         return None
@@ -197,8 +213,16 @@ def run_batch_video_task(api_key, keywords, upload_date="This week", limit=3):
 if __name__ == "__main__":
     if len(sys.argv) < 3:
         print("Usage:", flush=True)
-        print("  Single video:  python youtube_transcript_analysis_api.py single \"<YouTube_URL>\"", flush=True)
-        print("  Batch videos:  python youtube_transcript_analysis_api.py batch \"<keywords>\" [upload_date] [limit]", flush=True)
+        print(
+            "  Single video:  python youtube_transcript_analysis_api.py "
+            'single "<YouTube_URL>"',
+            flush=True,
+        )
+        print(
+            "  Batch videos:  python youtube_transcript_analysis_api.py "
+            'batch "<keywords>" [upload_date] [limit]',
+            flush=True,
+        )
         sys.exit(1)
 
     api_key = os.getenv("BROWSERACT_API_KEY")
@@ -207,7 +231,11 @@ if __name__ == "__main__":
         print("Please follow these steps:", flush=True)
         print("1. Go to: https://www.browseract.com/reception/integrations", flush=True)
         print("2. Copy your API Key.", flush=True)
-        print("3. Provide it to me or set it as an environment variable (BROWSERACT_API_KEY).", flush=True)
+        print(
+            "3. Provide it to me or set it as an environment variable "
+            "(BROWSERACT_API_KEY).",
+            flush=True,
+        )
         sys.exit(1)
 
     mode = sys.argv[1].lower()
@@ -221,7 +249,12 @@ if __name__ == "__main__":
             print("=" * 60, flush=True)
             print(result, flush=True)
             print("\n" + "=" * 60, flush=True)
-            print("EXTRACTION COMPLETE — Agent should now perform a concise, bullet-point 8-dimension analysis on the transcript without outputting the full raw text.", flush=True)
+            print(
+                "EXTRACTION COMPLETE — Agent should now perform a concise, "
+                "bullet-point 8-dimension analysis on the transcript without "
+                "outputting the full raw text.",
+                flush=True,
+            )
             print("=" * 60, flush=True)
 
     elif mode == "batch":
@@ -235,7 +268,12 @@ if __name__ == "__main__":
             print("=" * 60, flush=True)
             print(result, flush=True)
             print("\n" + "=" * 60, flush=True)
-            print("EXTRACTION COMPLETE — Agent should now perform a concise, bullet-point 8-dimension analysis on each transcript without outputting the full raw text.", flush=True)
+            print(
+                "EXTRACTION COMPLETE — Agent should now perform a concise, "
+                "bullet-point 8-dimension analysis on each transcript without "
+                "outputting the full raw text.",
+                flush=True,
+            )
             print("=" * 60, flush=True)
 
     else:

@@ -35,11 +35,6 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
 from backend.skills import actions
-from backend.skills.toolcall import (
-    _is_xml_tool_model,
-    _parse_tool_use,
-    _safe_json,
-)
 from backend.skills.prompt import (
     SKILL_TOOLS,
     SKILL_TOOLS_TEXT,
@@ -49,6 +44,11 @@ from backend.skills.risk import (
     AWAITING_CONFIRM,
     classify_action,
     should_run,
+)
+from backend.skills.toolcall import (
+    _is_xml_tool_model,
+    _parse_tool_use,
+    _safe_json,
 )
 
 # Max steps before the loop gives up without a `done` (ADR-0003 D6: "~20").

@@ -22,7 +22,6 @@ its eventual outcome judgment — a superset, hence the distinct name.
 """
 
 from datetime import datetime
-from typing import Optional
 
 from sqlalchemy import JSON, Boolean, DateTime, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
@@ -54,8 +53,8 @@ class ControlActionRecord(TimestampMixin):
     __tablename__ = "control_actions"
 
     source_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
-    run_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, index=True)
-    measurement_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, index=True)
+    run_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    measurement_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
 
     #: "advisory" in this PR; "automatic" reserved for PR-Control-4's actuator.
     mode: Mapped[str] = mapped_column(String(16), nullable=False)
@@ -64,7 +63,7 @@ class ControlActionRecord(TimestampMixin):
     state: Mapped[str] = mapped_column(String(32), nullable=False)
 
     action_type: Mapped[str] = mapped_column(String(64), nullable=False)
-    reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     payload: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
 
     #: Whether anything actually acted on this. Always False in this PR —
@@ -73,9 +72,9 @@ class ControlActionRecord(TimestampMixin):
     executed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     #: SourceMeasurement (pure contract) dump at decision time.
-    measurement_before: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    measurement_before: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
-    evaluated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    evaluated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     #: recovered | persisted | insufficient_data — see backend.control.outcomes.
-    outcome: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    outcome_detail: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    outcome: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    outcome_detail: Mapped[dict | None] = mapped_column(JSON, nullable=True)

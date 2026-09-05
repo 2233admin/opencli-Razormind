@@ -8,7 +8,7 @@ connection.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Any, Literal
 from uuid import NAMESPACE_URL, UUID, uuid5
 
@@ -27,7 +27,10 @@ from backend.odp.query_client import (
     post_reconciliation_query,
 )
 from backend.schemas.common import ApiResponse
-from backend.workflow.iii_collection_store import IIICollectionNotFoundError, get_scoped_command
+from backend.workflow.iii_collection_store import (
+    IIICollectionNotFoundError,
+    get_scoped_command,
+)
 
 router = APIRouter(tags=["odp-reconciliation"])
 
@@ -89,7 +92,7 @@ async def _ledger_delegation(
         trace_id=trace_id,
         allowed_source_ids=(source_id,),
         allowed_modes=(mode,),
-        expires_at=datetime.now(timezone.utc) + _DELEGATION_TTL,
+        expires_at=datetime.now(datetime.UTC) + _DELEGATION_TTL,
     )
 
 
@@ -119,7 +122,6 @@ async def reconcile_iii_collection_odp(
         # turn browser-supplied keys into an ODP predicate.
         raise HTTPException(status.HTTP_409_CONFLICT, "ODP reconciliation is unavailable")
 
-
     delegation = await _ledger_delegation(
         db,
         workspace_id=workspace_id,
@@ -139,6 +141,12 @@ async def reconcile_iii_collection_odp(
         )
         return ApiResponse.ok(await post_reconciliation_query(request))
     except OdpQueryRejected as exc:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "ODP reconciliation request was rejected") from exc
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "ODP reconciliation request was rejected",
+        ) from exc
     except OdpQueryUnavailable as exc:
-        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "ODP reconciliation is unavailable") from exc
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "ODP reconciliation is unavailable",
+        ) from exc

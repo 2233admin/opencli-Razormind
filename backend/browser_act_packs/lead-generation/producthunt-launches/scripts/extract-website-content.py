@@ -5,7 +5,7 @@ import sys
 def main():
     sys.stdout.reconfigure(encoding='utf-8', newline='\n')
     parser = argparse.ArgumentParser()
-    args = parser.parse_args()
+    parser.parse_args()
 
     js = """
     (()=>{
@@ -19,7 +19,11 @@ def main():
         const html = document.documentElement.innerHTML;
         const htmlEmails = html.match(emailRegex) || [];
         const combined = [...new Set([...allEmails, ...htmlEmails])];
-        const filtered = combined.filter(e => !e.includes('sentry') && !e.includes('webpack') && !e.includes('example.com'));
+        const filtered = combined.filter(
+          e => !e.includes('sentry') &&
+            !e.includes('webpack') &&
+            !e.includes('example.com')
+        );
         const email = filtered.length > 0 ? filtered[0] : null;
 
         const rawText = bodyText.replace(/\\s+/g, ' ').trim().slice(0, 5000);

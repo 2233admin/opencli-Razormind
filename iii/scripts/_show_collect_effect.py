@@ -70,7 +70,8 @@ def main() -> None:
         ing = r.get("ingest") or {}
         print(
             f"  {sid}: matched={r.get('messages_matched')} "
-            f"accepted={ing.get('accepted')} dup={ing.get('duplicates')} rejected={ing.get('rejected')}"
+            f"accepted={ing.get('accepted')} dup={ing.get('duplicates')} "
+            f"rejected={ing.get('rejected')}"
         )
 
     print("\n=== Message preview (discord-cli, channel-scoped recent) ===")

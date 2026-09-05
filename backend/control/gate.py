@@ -15,30 +15,29 @@ never itself executes anything — see ``backend.control.actuator`` for that.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
-from typing import Optional
+from datetime import datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.control import kill_switch
 from backend.control.ledger import ensure_utc
-from backend.control.report import bucket_by_state_action, tally
+from backend.control.report import tally
 from backend.models.control_action import ControlActionRecord
 
 
 @dataclass
 class GateResult:
     allowed: bool
-    blocked_by: Optional[str] = None
-    detail: Optional[dict] = None
+    blocked_by: str | None = None
+    detail: dict | None = None
 
     @classmethod
-    def allow(cls) -> "GateResult":
+    def allow(cls) -> GateResult:
         return cls(allowed=True)
 
     @classmethod
-    def block(cls, reason: str, **detail) -> "GateResult":
+    def block(cls, reason: str, **detail) -> GateResult:
         return cls(allowed=False, blocked_by=reason, detail=detail or None)
 
 

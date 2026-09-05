@@ -96,6 +96,20 @@ class Settings(BaseSettings):
     # instead). Env: LOCAL_MAX_CONCURRENT_PIPELINES.
     local_max_concurrent_pipelines: int = 8
 
+    # Comma-separated workflow adapter keys. Empty explicitly disables optional
+    # workflow plugins while preserving the generic event/runtime core.
+    workflow_plugins: str = "research-graph"
+
+    @property
+    def workflow_plugin_ids(self) -> tuple[str, ...]:
+        return tuple(
+            dict.fromkeys(
+                plugin.strip()
+                for plugin in self.workflow_plugins.split(",")
+                if plugin.strip()
+            )
+        )
+
     # Collection orchestrator:
     # admin — API内置 scheduler.py / Celery Beat 驱动定时采集（默认）
     # iii   — III engine + schedule-bootstrap 驱动 cron；API 仅保留 UI/手动任务
@@ -124,6 +138,10 @@ class Settings(BaseSettings):
     controlled_receiver_receipt_keys_json: str = "{}"
     controlled_receiver_inbound_keys_json: str = "{}"
     controlled_receiver_max_clock_skew_seconds: int = 300
+
+
+
+
 
     # Redis / Celery — only required when task_executor="celery"
     redis_url: str = "redis://localhost:6379/0"

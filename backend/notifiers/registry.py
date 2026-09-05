@@ -27,8 +27,8 @@ def _load_all_notifiers() -> None:
         dingtalk_notifier,
         email_notifier,
         feishu_notifier,
-        wecom_notifier,
         webhook_notifier,
+        wecom_notifier,
     )
 
 

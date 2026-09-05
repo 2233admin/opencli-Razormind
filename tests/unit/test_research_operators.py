@@ -5,6 +5,7 @@ import copy
 import pytest
 
 from backend.workflow.data_operators import execute_data_operator, list_data_operator_specs
+from backend.workflow.research_graph_lineage import build_research_operator_lineage_events
 
 
 def _evidence(
@@ -353,3 +354,45 @@ def test_publish_gate_rejects_stale_coverage_and_revision_artifacts() -> None:
 def test_research_operator_unknown_config_fails_closed() -> None:
     with pytest.raises(ValueError, match="Unsupported config"):
         _run("research.claim-project", [], {"invented": True})
+
+
+def test_automatic_graph_lineage_requires_complete_actual_provenance() -> None:
+    complete = {
+        "normalizedData": {
+            "claim": {
+                "claimId": "claim-1",
+                "statement": "Evidence-grounded claim.",
+                "evidenceRefs": [
+                    {
+                        "sourceId": "source-1",
+                        "evidenceId": "evidence-1",
+                        "itemKey": "item-1",
+                        "batchId": "batch-1",
+                        "runId": "run-1",
+                        "nodeId": "normalize-1",
+                        "manifestUri": "odp://manifest-1",
+                    }
+                ],
+            }
+        }
+    }
+    missing_source = copy.deepcopy(complete)
+    del missing_source["normalizedData"]["claim"]["evidenceRefs"][0]["sourceId"]
+
+    events = build_research_operator_lineage_events(
+        [complete, missing_source],
+        run_id="run-1",
+        workflow_id="workflow-1",
+        trace_id="trace-1",
+        node_id="claim-project",
+        sequence=3,
+    )
+
+    assert [
+        event.details["researchGraph"]["entity"]["kind"] for event in events
+    ] == ["source", "evidence", "claim"]
+    assert {event.details["researchGraph"]["entity"]["id"] for event in events} == {
+        "source:source-1",
+        "evidence:evidence-1",
+        "claim:claim-1",
+    }

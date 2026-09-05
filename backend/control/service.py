@@ -35,15 +35,19 @@ callable from the future Control Cycle too.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any, Optional
-
 import logging
+from dataclasses import dataclass, field
+from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.control import aggregation, evaluator
-from backend.control.coverage import SensorCoverage, compute_sensor_coverage, derive_confidence, missing_signals
+from backend.control.coverage import (
+    SensorCoverage,
+    compute_sensor_coverage,
+    derive_confidence,
+    missing_signals,
+)
 from backend.control.ledger import record_advisory_actions
 from backend.control.measurements import SourceMeasurement
 from backend.control.models import ControlAction, SourceControlState
@@ -79,18 +83,15 @@ class SourceDecision:
     advisory suggestions, and the coverage/confidence signals describing how
     much of that state to trust.
 
-    All fields are ``None``/empty in their "no evidence yet" shape when the
-    source has never produced a measurement — same degrade-to-null contract
-    the endpoint has always had (see ``SourceControlStateRead``'s docstring).
     """
+    measurement: SourceMeasurement | None
+    measurement_row_id: str | None
+    run_id: str | None
+    trend: TrendSummaryData | None
+    control_state: SourceControlState | None
+    confidence: str | None
+    coverage: SensorCoverage | None
 
-    measurement: Optional[SourceMeasurement]
-    measurement_row_id: Optional[str]
-    run_id: Optional[str]
-    trend: Optional[TrendSummaryData]
-    control_state: Optional[SourceControlState]
-    confidence: Optional[str]
-    coverage: Optional[SensorCoverage]
     missing_signals: list[str] = field(default_factory=list)
     suggested_actions: list[ControlAction] = field(default_factory=list)
     ledger_rows_written: int = 0

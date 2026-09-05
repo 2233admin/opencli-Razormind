@@ -100,7 +100,7 @@ async def commit_session(session: AsyncSession) -> None:
             logger.exception("After-commit callback failed; authoritative transaction is committed")
 
 
-async def get_db() -> AsyncGenerator[AsyncSession, None]:
+async def get_db() -> AsyncGenerator[AsyncSession]:
     async with AsyncSessionLocal() as session:
         try:
             yield session

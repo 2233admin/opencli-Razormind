@@ -164,7 +164,9 @@ async def test_sequential_failover_a_retryable_fails_b_succeeds(db_session: Asyn
         side_effect=[LlmAdapterError("connection reset", retryable=True), "b-result"]
     )
 
-    with patch("backend.llm.resolver.get_adapter", side_effect=lambda p: object()) as mock_get_adapter:
+    with patch(
+        "backend.llm.resolver.get_adapter", side_effect=lambda p: object()
+    ) as mock_get_adapter:
         result = await resolver.resolve_with_fallback(db_session, "chat", operation)
 
     assert result == "b-result"
@@ -305,7 +307,9 @@ async def test_cooldown_skip_within_window_then_retry_after_expiry(db_session: A
             raise LlmAdapterError("boom", retryable=True)
         return f"result-{model_id}"
 
-    with patch("backend.llm.resolver.get_adapter", side_effect=lambda p: object()) as mock_get_adapter:
+    with patch(
+        "backend.llm.resolver.get_adapter", side_effect=lambda p: object()
+    ) as mock_get_adapter:
         # First call: A fails (retryable), cooldown set, B succeeds.
         result1 = await resolver.resolve_with_fallback(db_session, "chat", operation)
         assert result1 == "result-model-b"
@@ -475,7 +479,7 @@ def test_classify_retryable_httpx_timeout_exception():
 
 
 def test_classify_retryable_asyncio_timeout_error():
-    assert classify_retryable(asyncio.TimeoutError()) is True
+    assert classify_retryable(TimeoutError()) is True
 
 
 def test_classify_retryable_generic_status_code_5xx_fallback():

@@ -514,7 +514,13 @@ export function WorkflowEditorSession({ forceStandalone = false }: WorkflowEdito
         </div>
       ) : (
         <ErrorBoundary label="WorkflowEditor">
-          <WorkflowEditor documentState={documentState} workspaceId={workspaceId} />
+          <WorkflowEditor
+            workspaceId={workspaceId}
+            documentState={documentState}
+            runPanelScope={workspaceId && projectId && workflowId
+              ? { workspaceId, projectId, workflowId }
+              : null}
+          />
         </ErrorBoundary>
       )}
       {workspaceId && projectId && workflowId ? (

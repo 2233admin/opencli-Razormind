@@ -10,4 +10,4 @@ The engineering skills use five canonical triage roles. This repository uses the
 | `ready-for-human` | `ready-for-human` | Requires human implementation or external authority |
 | `wontfix` | `wontfix` | Intentionally not planned |
 
-All label commands must explicitly target `2233admin/opencli-admin`.
+All label commands must explicitly target `1012839419a-alt/opencli-Razormind-gjx`.

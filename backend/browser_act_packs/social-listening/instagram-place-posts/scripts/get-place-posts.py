@@ -1,6 +1,7 @@
 import argparse
 import sys
 
+
 def main():
     sys.stdout.reconfigure(encoding='utf-8', newline='\n')
     parser = argparse.ArgumentParser()
@@ -15,11 +16,18 @@ def main():
     js = f"""
     (async function() {{
       try {{
-        var csrfToken = document.cookie.split('; ').find(function(c) {{ return c.startsWith('csrftoken='); }});
+        var csrfToken = document.cookie.split('; ').find(function(c) {{
+          return c.startsWith('csrftoken=');
+        }});
         var token = csrfToken ? csrfToken.split('=')[1] : '';
-        if (!token) return JSON.stringify({{ error: true, message: 'CSRF token not found; navigate to instagram.com first' }});
+        if (!token) return JSON.stringify({{
+          error: true,
+          message: 'CSRF token not found; navigate to instagram.com first'
+        }});
         var body = 'max_id={max_id_val}&tab={args.tab}&session_id={args.session_id}';
-        var r = await fetch('https://www.instagram.com/api/v1/locations/{args.location_id}/sections/', {{
+        var r = await fetch(
+          'https://www.instagram.com/api/v1/locations/{args.location_id}/sections/',
+          {{
           method: 'POST',
           headers: {{
             'X-IG-App-ID': '936619743392459',
@@ -31,7 +39,11 @@ def main():
         }});
         if (!r.ok) {{
           var errText = await r.text();
-          return JSON.stringify({{ error: true, message: 'HTTP ' + r.status, detail: errText.slice(0, 200) }});
+          return JSON.stringify({{
+            error: true,
+            message: 'HTTP ' + r.status,
+            detail: errText.slice(0, 200)
+          }});
         }}
         var data = await r.json();
         var items = [];
@@ -40,8 +52,9 @@ def main():
           if (!lc) return;
           var medias = [];
           if (lc.medias) medias = lc.medias;
-          else if (lc.fill_items) medias = lc.fill_items;
-          else if (lc.one_by_two_item && lc.one_by_two_item.clips) medias = lc.one_by_two_item.clips.items;
+          else if (
+            lc.one_by_two_item && lc.one_by_two_item.clips
+          ) medias = lc.one_by_two_item.clips.items;
           medias.forEach(function(item) {{
             var m = item.media;
             if (!m) return;
@@ -53,8 +66,14 @@ def main():
               like_count: m.like_count,
               comment_count: m.comment_count,
               caption: m.caption ? m.caption.text : null,
-              thumbnail_url: m.image_versions2 && m.image_versions2.candidates && m.image_versions2.candidates[0] ? m.image_versions2.candidates[0].url : null,
-              video_url: m.video_versions && m.video_versions[0] ? m.video_versions[0].url : null,
+              thumbnail_url: m.image_versions2
+                && m.image_versions2.candidates
+                && m.image_versions2.candidates[0]
+                ? m.image_versions2.candidates[0].url
+                : null,
+              video_url: m.video_versions && m.video_versions[0]
+                ? m.video_versions[0].url
+                : null,
               username: m.user ? m.user.username : null,
               user_id: m.user ? m.user.pk : null,
               location_name: m.location ? m.location.name : null

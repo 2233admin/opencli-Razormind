@@ -8,11 +8,11 @@ ODP request bodies never cross this seam.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime, timezone
-from hashlib import sha256
 import json
 import os
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from hashlib import sha256
 from typing import Any, Literal
 from uuid import UUID
 
@@ -34,12 +34,18 @@ class OdpQueryError(RuntimeError):
     """Redacted query-service failure safe to surface through Admin."""
 
 
-class OdpQueryUnavailable(OdpQueryError):
+class OdpQueryUnavailableError(OdpQueryError):
     """The read service cannot establish a reconciliation result."""
 
 
-class OdpQueryRejected(OdpQueryError):
+class OdpQueryRejectedError(OdpQueryError):
     """The read service rejected an invalid delegated request."""
+
+
+# Compatibility names for callers migrating to the PEP 8 ``Error`` suffix.
+OdpQueryUnavailable = OdpQueryUnavailableError
+OdpQueryRejected = OdpQueryRejectedError
+
 
 
 @dataclass(frozen=True)
@@ -97,8 +103,9 @@ class OdpReconciliationDelegation:
         ):
             raise OdpQueryRejected("ODP reconciliation request was rejected")
         expires_at = _rfc3339_utc(self.expires_at)
-        if self.expires_at.astimezone(timezone.utc) <= datetime.now(timezone.utc):
+        if self.expires_at.astimezone(UTC) <= datetime.now(UTC):
             raise OdpQueryRejected("ODP reconciliation request was rejected")
+
         scope = {
             "workspace_id": self.workspace_id,
             "project_id": self.project_id,
@@ -236,20 +243,33 @@ def _sanitize_reference(value: Any) -> dict[str, Any]:
         raise ValueError("invalid odp-query record reference")
     reference = {
         name: value[name]
-        for name in ("source_id", "event_id", "odp_record_id", "committed_at", "provider", "source_ts")
+        for name in (
+            "source_id",
+            "event_id",
+            "odp_record_id",
+            "committed_at",
+            "provider",
+            "source_ts",
+        )
     }
     if (
         not isinstance(reference["source_id"], str)
         or not isinstance(reference["event_id"], str)
         or not isinstance(reference["odp_record_id"], int)
-        or not all(isinstance(reference[name], str) for name in ("committed_at", "provider", "source_ts"))
+        or not all(
+            isinstance(reference[name], str)
+            for name in ("committed_at", "provider", "source_ts")
+        )
     ):
         raise ValueError("invalid odp-query record reference")
     return reference
 
 
 def _sanitize_result(value: Any) -> dict[str, Any]:
-    if not isinstance(value, dict) or value.get("classification") not in {"present", "dlq", "unknown"}:
+    if (
+        not isinstance(value, dict)
+        or value.get("classification") not in {"present", "dlq", "unknown"}
+    ):
         raise ValueError("invalid odp-query reconciliation result")
     if value.get("retention_state") != "unknown":
         raise ValueError("invalid odp-query reconciliation result")
@@ -298,7 +318,10 @@ def _validate_response_scope(response: dict[str, Any], request: dict[str, Any]) 
     }
     if actual != expected or len(response["results"]) != len(keys):
         raise ValueError("incomplete reconciliation results")
-    if any((record["source_id"], record["event_id"]) not in expected for record in response["records"]):
+    if any(
+        (record["source_id"], record["event_id"]) not in expected
+        for record in response["records"]
+    ):
         raise ValueError("out-of-scope odp-query record")
     for result in response["results"]:
         record = result.get("record")
@@ -312,7 +335,7 @@ def _validate_response_scope(response: dict[str, Any], request: dict[str, Any]) 
 def _rfc3339_utc(value: datetime) -> str:
     if value.tzinfo is None:
         raise OdpQueryRejected("ODP reconciliation request was rejected")
-    normalized = value.astimezone(timezone.utc)
+    normalized = value.astimezone(UTC)
     if normalized.microsecond:
         return normalized.isoformat(timespec="microseconds").replace("+00:00", "Z")
     return normalized.isoformat(timespec="seconds").replace("+00:00", "Z")

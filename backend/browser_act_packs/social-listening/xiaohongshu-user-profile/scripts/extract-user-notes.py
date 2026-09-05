@@ -5,7 +5,12 @@ import sys
 def main():
     sys.stdout.reconfigure(encoding='utf-8', newline='\n')
     parser = argparse.ArgumentParser()
-    parser.add_argument('--limit', type=int, default=30, help='max notes to return from current state')
+    parser.add_argument(
+        '--limit',
+        type=int,
+        default=30,
+        help='max notes to return from current state',
+    )
     args = parser.parse_args()
 
     js = f"""
@@ -14,7 +19,8 @@ def main():
     const unwrap = v => v?.value !== undefined ? v.value : v?._value !== undefined ? v._value : v;
     const notesRaw = unwrap(window.__INITIAL_STATE__?.user?.notes);
     if (!notesRaw) {{
-      return JSON.stringify({{ error: true, message: 'user.notes not found — verify page is a user profile page' }});
+      return JSON.stringify({{ error: true, message: 'user.notes not found — '
+        + 'verify page is a user profile page' }});
     }}
     // notes is an array; notes[0] is a numeric-keyed object map of loaded note items
     const notesMap = Array.isArray(notesRaw) ? notesRaw[0] : notesRaw;

@@ -19,7 +19,9 @@ def test_api_key_with_key_default_header():
 
 
 def test_api_key_custom_header_name():
-    assert build_auth_header("api_key", {"key": "k-1"}, header_name="X-Custom") == {"X-Custom": "k-1"}
+    assert build_auth_header(
+        "api_key", {"key": "k-1"}, header_name="X-Custom"
+    ) == {"X-Custom": "k-1"}
 
 
 def test_api_key_without_key_returns_empty():

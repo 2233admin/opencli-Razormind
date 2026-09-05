@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 import pytest
@@ -6,15 +6,14 @@ import pytest
 from backend.odp.query_client import (
     OdpQueryRejected,
     OdpQueryUnavailable,
-    OdpRecordKey,
     OdpReconciliationDelegation,
+    OdpRecordKey,
     build_attempt_page_request,
     build_dlq_request,
     build_exact_request,
     post_reconciliation_query,
     sanitize_query_response,
 )
-
 
 SOURCE_ID = UUID("00000000-0000-0000-0000-000000000001")
 TASK_ID = UUID("00000000-0000-0000-0000-000000000002")
@@ -32,7 +31,7 @@ def scope(*, modes=("exact", "attempt_page", "dlq")):
         task_id=TASK_ID,
         trace_id=TRACE_ID,
         allowed_source_ids=(SOURCE_ID,),
-        expires_at=datetime.now(timezone.utc) + timedelta(minutes=5),
+        expires_at=datetime.now(UTC) + timedelta(minutes=5),
         allowed_modes=modes,
     )
 

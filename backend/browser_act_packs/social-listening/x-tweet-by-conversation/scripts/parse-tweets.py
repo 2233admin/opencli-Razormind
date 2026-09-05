@@ -1,24 +1,36 @@
 import argparse
-import sys
 import json
 import re
+import sys
 
 
 def main():
     sys.stdout.reconfigure(encoding='utf-8', newline='\n')
     parser = argparse.ArgumentParser(
-        description='Parse a single GraphQL response body captured via `browser-act network request <id>` '
-                    'into a normalized tweet list with cursor. Pass --source to indicate which endpoint produced it.'
+        description=(
+            'Parse a single GraphQL response body captured via `browser-act network request <id>` '
+            'into a normalized tweet list with cursor. Pass --source to indicate which endpoint '
+            'produced it.'
+        )
     )
-    parser.add_argument('--json-file', required=True,
-                        help='Path to a file containing the raw output of `network request <id>` (may include header lines)')
-    parser.add_argument('--source', required=True,
-                        choices=['search', 'user_tweets', 'user_replies', 'user_media', 'list', 'tweet_detail'],
-                        help='Which GraphQL endpoint the response came from')
+    parser.add_argument(
+        '--json-file',
+        required=True,
+        help=(
+            'Path to a file containing the raw output of `network request <id>` '
+            '(may include header lines)'
+        ),
+    )
+    parser.add_argument(
+        '--source',
+        required=True,
+        choices=['search', 'user_tweets', 'user_replies', 'user_media', 'list', 'tweet_detail'],
+        help='Which GraphQL endpoint the response came from',
+    )
     args = parser.parse_args()
 
     try:
-        with open(args.json_file, 'r', encoding='utf-8') as f:
+        with open(args.json_file, encoding='utf-8') as f:
             text = f.read()
     except Exception as e:
         print(json.dumps({"error": True, "message": f"open failed: {e}"}))
@@ -52,8 +64,9 @@ def main():
 
 
 def _locate_body(text):
-    # The `network request <id>` output starts with key=value lines (request_id=, url=, status=, etc.)
-    # followed by an empty line then the body. Body always starts with {"data":...} for these GraphQL endpoints.
+    # The `network request <id>` output starts with key=value lines
+    # (request_id=, url=, status, etc.) followed by an empty line then the body.
+    # Body always starts with {"data":...} for these GraphQL endpoints.
     idx = text.find('{"data":')
     if idx >= 0:
         return text[idx:]
@@ -80,7 +93,9 @@ def _extract(data, source):
             else:
                 timeline_root = tl
         elif source == 'list':
-            timeline_root = ((d.get('list') or {}).get('tweets_timeline') or {}).get('timeline') or {}
+            timeline_root = (
+                ((d.get('list') or {}).get('tweets_timeline') or {}).get('timeline') or {}
+            )
         elif source == 'tweet_detail':
             timeline_root = d.get('threaded_conversation_with_injections_v2') or {}
         instructions = (timeline_root or {}).get('instructions') or []
@@ -117,7 +132,11 @@ def _extract(data, source):
             elif ct == 'bottom':
                 cursors['bottom'] = val
 
-        elif ctype == 'TimelineTimelineModule' or eid.startswith('conversationthread-') or eid.startswith('homeConversation-'):
+        elif (
+            ctype == 'TimelineTimelineModule'
+            or eid.startswith('conversationthread-')
+            or eid.startswith('homeConversation-')
+        ):
             for item in (content.get('items') or []):
                 ic = (item.get('item') or {}).get('itemContent') or {}
                 if ic.get('itemType') == 'TimelineTweet':
@@ -171,14 +190,22 @@ def _normalize_tweet(res):
         if m.get('video_info'):
             variants = m['video_info'].get('variants') or []
             item['video_variants'] = [
-                {"bitrate": v.get('bitrate'), "url": v.get('url'), "content_type": v.get('content_type')}
+                {
+                    "bitrate": v.get('bitrate'),
+                    "url": v.get('url'),
+                    "content_type": v.get('content_type'),
+                }
                 for v in variants
             ]
         media.append(item)
 
     entities = legacy.get('entities') or {}
     hashtags = [h.get('text') for h in (entities.get('hashtags') or []) if h.get('text')]
-    mentions = [u.get('screen_name') for u in (entities.get('user_mentions') or []) if u.get('screen_name')]
+    mentions = [
+        u.get('screen_name')
+        for u in (entities.get('user_mentions') or [])
+        if u.get('screen_name')
+    ]
     urls = [u.get('expanded_url') for u in (entities.get('urls') or []) if u.get('expanded_url')]
 
     views = (res.get('views') or {}).get('count')
@@ -213,8 +240,16 @@ def _normalize_tweet(res):
     return {
         "type": "tweet",
         "id": tweet_id,
-        "url": f"https://x.com/{screen_name}/status/{tweet_id}" if screen_name and tweet_id else None,
-        "twitter_url": f"https://twitter.com/{screen_name}/status/{tweet_id}" if screen_name and tweet_id else None,
+        "url": (
+            f"https://x.com/{screen_name}/status/{tweet_id}"
+            if screen_name and tweet_id
+            else None
+        ),
+        "twitter_url": (
+            f"https://twitter.com/{screen_name}/status/{tweet_id}"
+            if screen_name and tweet_id
+            else None
+        ),
         "text": full_text,
         "created_at": legacy.get('created_at'),
         "lang": legacy.get('lang'),

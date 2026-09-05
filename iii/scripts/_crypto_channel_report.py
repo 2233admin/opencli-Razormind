@@ -4,8 +4,6 @@ from __future__ import annotations
 import json
 import re
 import subprocess
-import sys
-from collections import Counter
 
 CRYPTO_KW = (
     "crypto",
@@ -75,7 +73,9 @@ def forward_score(msg: dict) -> bool:
 
 
 def main() -> None:
-    proc = subprocess.run(["discord", "stats", "--json"], capture_output=True, text=True, check=True)
+    proc = subprocess.run(
+        ["discord", "stats", "--json"], capture_output=True, text=True, check=True
+    )
     stats = json.loads(proc.stdout)
     channels = stats.get("data", {}).get("channels", [])
 
@@ -95,7 +95,9 @@ def main() -> None:
         print(f"{mc:>4}  {ch['channel_id']:<20}  {gid}/{cname}  {last}")
 
     # Sample recent messages for forward ratio on top channels
-    proc2 = subprocess.run(["discord", "recent", "--json", "-n", "500"], capture_output=True, text=True)
+    proc2 = subprocess.run(
+        ["discord", "recent", "--json", "-n", "500"], capture_output=True, text=True
+    )
     if proc2.returncode != 0:
         print("\n(recent sample skipped:", proc2.stderr.strip() or proc2.stdout[:200], ")")
         return

@@ -3,9 +3,7 @@
 import pytest
 
 from backend.models.source import DataSource
-from backend.models.task import CollectionTask
 from backend.schemas.source import DataSourceCreate, DataSourceUpdate
-from backend.schemas.task import TaskTriggerRequest
 from backend.services import record_service, source_service, task_service
 
 

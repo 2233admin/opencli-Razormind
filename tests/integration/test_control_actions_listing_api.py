@@ -4,7 +4,7 @@ control_actions Evidence Ledger. Read-only — no test here should observe a
 row mutate.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -51,10 +51,14 @@ async def test_list_control_actions_returns_rows_newest_first(client, db_session
     # Explicit, distinct created_at: two rows seeded back-to-back can land in
     # the same datetime tick (sqlite/Python resolution), which would make
     # "newest first" ordering flaky if left to insertion timing.
-    older = datetime(2026, 7, 1, tzinfo=timezone.utc)
-    newer = datetime(2026, 7, 2, tzinfo=timezone.utc)
-    await _seed_action(db_session, source_id="src-1", action_type="pause_source", created_at=older)
-    await _seed_action(db_session, source_id="src-1", action_type="require_auth_review", created_at=newer)
+    older = datetime(2026, 7, 1, tzinfo=UTC)
+    newer = datetime(2026, 7, 2, tzinfo=UTC)
+    await _seed_action(
+        db_session, source_id="src-1", action_type="pause_source", created_at=older
+    )
+    await _seed_action(
+        db_session, source_id="src-1", action_type="require_auth_review", created_at=newer
+    )
     await db_session.commit()
 
     response = await client.get("/api/v1/control/actions")
@@ -101,13 +105,13 @@ async def test_list_control_actions_filters_by_outcome_verdict(client, db_sessio
         db_session,
         source_id="src-1",
         outcome="recovered",
-        evaluated_at=datetime.now(timezone.utc),
+        evaluated_at=datetime.now(UTC),
     )
     await _seed_action(
         db_session,
         source_id="src-1",
         outcome="persisted",
-        evaluated_at=datetime.now(timezone.utc),
+        evaluated_at=datetime.now(UTC),
     )
     await db_session.commit()
 
@@ -127,7 +131,7 @@ async def test_list_control_actions_filters_by_outcome_pending(client, db_sessio
         db_session,
         source_id="src-1",
         outcome="recovered",
-        evaluated_at=datetime.now(timezone.utc),
+        evaluated_at=datetime.now(UTC),
     )
     await db_session.commit()
 
@@ -167,7 +171,7 @@ async def test_list_control_actions_combined_filters(client, db_session):
         source_id="src-1",
         mode="advisory",
         outcome="persisted",
-        evaluated_at=datetime.now(timezone.utc),
+        evaluated_at=datetime.now(UTC),
     )
     await _seed_action(
         db_session,
@@ -175,7 +179,7 @@ async def test_list_control_actions_combined_filters(client, db_session):
         mode="automatic",
         executed=True,
         outcome="persisted",
-        evaluated_at=datetime.now(timezone.utc),
+        evaluated_at=datetime.now(UTC),
     )
     await _seed_action(db_session, source_id="src-2", mode="advisory")
     await db_session.commit()

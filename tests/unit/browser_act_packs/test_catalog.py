@@ -4,7 +4,6 @@ import logging
 
 from backend.browser_act_packs.catalog import PackCatalog, PackInfo
 
-
 # ── scanning the real vendored tree ─────────────────────────────────────────
 
 def test_scans_vendored_packs_returns_plausible_count():

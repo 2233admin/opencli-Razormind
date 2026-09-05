@@ -530,7 +530,7 @@ async def test_fetch_no_source_id_skips_credential_store(channel, monkeypatch):
     )
 
     with patch("backend.auth.manager.AuthManager.resolve") as mock_resolve:
-        result = await channel.fetch(ctx)
+        await channel.fetch(ctx)
 
     mock_resolve.assert_not_called()
     assert http.calls[0][2]["headers"]["Authorization"] == "Bearer env-secret"
@@ -784,7 +784,9 @@ async def test_health_check_reachable_returns_true(channel):
     mock_client_ctx.__aexit__ = AsyncMock(return_value=False)
 
     with patch("httpx.AsyncClient", return_value=mock_client_ctx):
-        result = await channel.health_check({"base_url": "https://api.example.com", "endpoint": "/ping"})
+        result = await channel.health_check(
+            {"base_url": "https://api.example.com", "endpoint": "/ping"}
+        )
 
     assert result is True
     mock_client.head.assert_called_once()
@@ -866,7 +868,12 @@ async def test_fetch_cookie_auth_sends_synced_cookies(channel):
 
     with patch(
         "backend.auth.manager.AuthManager.resolve_cookies",
-        AsyncMock(return_value=[{"name": "session_id", "value": "abc"}, {"name": "csrf", "value": "xyz"}]),
+        AsyncMock(
+            return_value=[
+                {"name": "session_id", "value": "abc"},
+                {"name": "csrf", "value": "xyz"},
+            ]
+        ),
     ) as resolve_cookies:
         result = await channel.fetch(ctx)
 
@@ -881,7 +888,11 @@ async def test_fetch_cookie_auth_no_synced_cookies_sends_no_header(channel):
     response = _make_mock_response(json_data=[{"ok": True}])
     http = _FetchHttp(response)
     ctx = FetchContext(
-        config={"base_url": "https://api.example.com", "endpoint": "/secure", "auth": {"type": "cookie"}},
+        config={
+            "base_url": "https://api.example.com",
+            "endpoint": "/secure",
+            "auth": {"type": "cookie"},
+        },
         params={},
         http=http,
     )

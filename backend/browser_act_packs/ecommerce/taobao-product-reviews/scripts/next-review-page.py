@@ -1,5 +1,6 @@
 import sys
 
+
 def main():
     sys.stdout.reconfigure(encoding='utf-8', newline='\n')
 
@@ -7,7 +8,9 @@ def main():
     (function() {
       try {
         // Look for the next page button in the reviews/comments section
-        var allBtns = Array.from(document.querySelectorAll('button, a, div[class*="next"], div[class*="page"]'));
+        var allBtns = Array.from(document.querySelectorAll(
+          'button, a, div[class*="next"], div[class*="page"]'
+        ));
         var nextBtn = allBtns.find(function(el) {
           var text = el.textContent.trim();
           return text === '下一页' || text === '>' || text === '›';

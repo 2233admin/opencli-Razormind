@@ -14,7 +14,7 @@ is returned unchanged.
 from __future__ import annotations
 
 import logging
-from typing import Sequence
+from collections.abc import Sequence
 
 from backend.pipeline.sinks.base import ItemSink, RunContext, SinkResult
 from backend.pipeline.sinks.legacy_db_sink import LegacyDbSink

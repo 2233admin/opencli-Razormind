@@ -34,12 +34,15 @@ def main():
               var u = t.user || {};
 
               var media = [];
-              var rawMedia = (t.extended_entities && t.extended_entities.media) ? t.extended_entities.media : [];
+              var rawMedia = (t.extended_entities &&
+                t.extended_entities.media) ? t.extended_entities.media : [];
               for (var mi = 0; mi < rawMedia.length; mi++) {
                 var m = rawMedia[mi];
                 var variants = [];
                 if (m.video_info && m.video_info.variants) {
-                  var vs = m.video_info.variants.filter(function(v) { return v.content_type === 'video/mp4'; });
+                  var vs = v.video_info.variants.filter(function(v) {
+                    return v.content_type === 'video/mp4';
+                  });
                   vs.sort(function(a, b) { return (b.bitrate || 0) - (a.bitrate || 0); });
                   variants = vs.map(function(v) { return { bitrate: v.bitrate, url: v.url }; });
                 }
@@ -79,9 +82,15 @@ def main():
                 in_reply_to_tweet_id: t.in_reply_to_status_id_str || null,
                 in_reply_to_user: t.in_reply_to_screen_name || null,
                 conversation_id: t.conversation_id_str || null,
-                hashtags: (t.entities && t.entities.hashtags || []).map(function(h) { return h.text; }),
-                urls: (t.entities && t.entities.urls || []).map(function(eu) { return eu.expanded_url; }),
-                mentions: (t.entities && t.entities.user_mentions || []).map(function(mn) { return mn.screen_name; }),
+                hashtags: (
+                  t.entities && t.entities.hashtags || []
+                ).map(function(h) { return h.text; }),
+                urls: (
+                  t.entities && t.entities.urls || []
+                ).map(function(eu) { return eu.expanded_url; }),
+                mentions: (
+                  t.entities && t.entities.user_mentions || []
+                ).map(function(mn) { return mn.screen_name; }),
                 media: media,
                 source_name: t.source_name || null,
                 source_url: t.source_url || null

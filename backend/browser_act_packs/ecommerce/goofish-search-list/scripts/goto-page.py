@@ -1,6 +1,7 @@
 import argparse
 import sys
 
+
 def main():
     sys.stdout.reconfigure(encoding='utf-8', newline='\n')
     parser = argparse.ArgumentParser()
@@ -13,7 +14,10 @@ def main():
         var targetPage = {args.page};
         var pages = document.querySelectorAll('[class*="search-pagination-page-box"]');
         if (pages.length === 0) {{
-          return JSON.stringify({{ error: true, message: 'Pagination not found — results may be too few for multiple pages' }});
+          return JSON.stringify({{
+            error: true,
+            message: 'Pagination not found — results may be too few for multiple pages'
+          }});
         }}
         for (var i = 0; i < pages.length; i++) {{
           if (parseInt(pages[i].textContent.trim()) === targetPage) {{
@@ -21,7 +25,12 @@ def main():
             return JSON.stringify({{ ok: true, clicked_page: targetPage }});
           }}
         }}
-        return JSON.stringify({{ error: true, message: 'Page ' + targetPage + ' not found in pagination. Available pages: ' + Array.from(pages).map(function(p) {{ return p.textContent.trim(); }}).join(', ') }});
+        return JSON.stringify({{
+          error: true,
+          message: 'Page ' + targetPage
+            + ' not found in pagination. Available pages: '
+            + Array.from(pages).map(function(p) {{ return p.textContent.trim(); }}).join(', ')
+        }});
       }} catch(e) {{
         return JSON.stringify({{ error: true, message: e.message }});
       }}

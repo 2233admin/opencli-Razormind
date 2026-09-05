@@ -16,7 +16,10 @@ def main():
     const unwrap = v => v?.value !== undefined ? v.value : v?._value !== undefined ? v._value : v;
     const mapRaw = unwrap(window.__INITIAL_STATE__?.note?.noteDetailMap);
     if (!mapRaw) {{
-      return JSON.stringify({{ error: true, message: 'noteDetailMap not found — verify page is a note detail page' }});
+      return JSON.stringify({{
+        error: true,
+        message: 'noteDetailMap not found — verify page is a note detail page'
+      }});
     }}
     const detail = unwrap(mapRaw?.['{note_id}']);
     if (!detail) {{

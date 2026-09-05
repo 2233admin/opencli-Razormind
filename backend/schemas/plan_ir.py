@@ -14,7 +14,7 @@ only. Persistence (a ``plans`` table, issue 02) and execution (issues
 router writes to a database.
 """
 
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -66,7 +66,7 @@ class PlanNode(BaseModel):
     #: Free-form on purpose — issue 01 validates graph structure, not an
     #: enumerated node-type catalog (a later issue's Preset work owns that).
     type: str = Field(..., min_length=1)
-    label: Optional[str] = None
+    label: str | None = None
     params: dict[str, Any] = Field(default_factory=dict)
     #: Params that MUST be present (non-null) in ``params`` for this node to
     #: pass structural validation. Declared per-node so the validator can
@@ -76,7 +76,7 @@ class PlanNode(BaseModel):
     outputs: list[PlanPort] = Field(default_factory=list)
 
     # ── source-node entity reference (issue 01 acceptance criterion) ──────
-    source_id: Optional[str] = Field(
+    source_id: str | None = Field(
         None, description="References an existing DataSource. Source nodes only."
     )
     draft: bool = Field(
@@ -105,7 +105,7 @@ class PlanGraph(BaseModel):
     """
 
     ir_version: str = Field(default=PLAN_IR_VERSION)
-    name: Optional[str] = None
+    name: str | None = None
     #: True for a Plan projected from a Data Source's legacy config (the
     #: "degenerate single-node Plan", ADR-0009) or otherwise not yet an
     #: authored/persisted Plan. Projection responses always set this True.

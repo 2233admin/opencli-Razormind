@@ -10,11 +10,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.schemas.dify_compat import DifyInspection
 from backend.schemas.workflow import (
-    WorkflowCompileError,
     WorkflowCompileResponse,
     WorkflowProject,
     WorkflowProjectNode,
 )
+from backend.schemas.workflow_compile import WorkflowCompileError
 from backend.workflow.compiler import compile_workflow_project
 from backend.workflow.dify_grants import resolve_dify_ephemeral_grants
 from backend.workflow.dify_graphon_client import (

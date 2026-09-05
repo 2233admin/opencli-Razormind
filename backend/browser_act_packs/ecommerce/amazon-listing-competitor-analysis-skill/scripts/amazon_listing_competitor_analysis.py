@@ -1,10 +1,11 @@
-import os
-import time
-import requests
-import json
-import sys
 import datetime
 import io
+import json
+import os
+import sys
+import time
+
+import requests
 
 # Force UTF-8 encoding for standard output and error streams
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
@@ -25,12 +26,12 @@ def run_amazon_listing_competitor_analysis_task(api_key, asin, marketplace_url="
         "workflow_template_id": TEMPLATE_ID,
         "input_parameters": [
             {"name": "ASIN", "value": asin},
-            {"name": "Marketplace_url", "value": marketplace_url}
+            {"name": "Marketplace_url", "value": marketplace_url},
         ]
     }
 
     # 1. Start Task
-    print(f"Start Task", flush=True)
+    print("Start Task", flush=True)
     try:
         res = requests.post(
             f"{API_BASE_URL}/run-task-by-template",
@@ -43,9 +44,19 @@ def run_amazon_listing_competitor_analysis_task(api_key, asin, marketplace_url="
     if "id" not in res:
         res_str = str(res)
         if "Invalid authorization" in res_str:
-            print("Error: Invalid authorization. Please check your BrowserAct API Key.", flush=True)
-        elif "concurrent" in res_str.lower() or "too many running tasks" in res_str.lower():
-            print("Error: Concurrent task limit reached. Please upgrade your plan at https://www.browseract.com/reception/recharge", flush=True)
+            print(
+                "Error: Invalid authorization. Please check your BrowserAct API Key.",
+                flush=True,
+            )
+        elif (
+            "concurrent" in res_str.lower()
+            or "too many running tasks" in res_str.lower()
+        ):
+            print(
+                "Error: Concurrent task limit reached. Please upgrade your plan at "
+                "https://www.browseract.com/reception/recharge",
+                flush=True,
+            )
         else:
             print(f"Error: Could not start task. Response: {res}", flush=True)
         return None
@@ -106,7 +117,11 @@ def run_amazon_listing_competitor_analysis_task(api_key, asin, marketplace_url="
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python amazon_listing_competitor_analysis.py <asin> [marketplace_url]", flush=True)
+        print(
+            "Usage: python amazon_listing_competitor_analysis.py <asin> "
+            "[marketplace_url]",
+            flush=True,
+        )
         sys.exit(1)
 
     api_key = os.getenv("BROWSERACT_API_KEY")
@@ -115,7 +130,11 @@ if __name__ == "__main__":
         print("Please follow these steps:", flush=True)
         print("1. Go to: https://www.browseract.com/reception/integrations", flush=True)
         print("2. Copy your API Key.", flush=True)
-        print("3. Provide it to me or set it as an environment variable (BROWSERACT_API_KEY).", flush=True)
+        print(
+            "3. Provide it to me or set it as an environment variable "
+            "(BROWSERACT_API_KEY).",
+            flush=True,
+        )
         sys.exit(1)
 
     asin = sys.argv[1]

@@ -1,6 +1,7 @@
 import argparse
 import sys
 
+
 def main():
     sys.stdout.reconfigure(encoding='utf-8', newline='\n')
     parser = argparse.ArgumentParser()
@@ -16,7 +17,8 @@ def main():
           'x-restli-protocol-version': '2.0.0',
           'accept': 'application/vnd.linkedin.normalized+json+2.1'
         }};
-        const url = '/voyager/api/jobs/jobPostings/{args.job_id}?decorationId=com.linkedin.voyager.deco.jobs.web.shared.WebFullJobPosting-65';
+        const url = '/voyager/api/jobs/jobPostings/{args.job_id}?decorationId='
+          + 'com.linkedin.voyager.deco.jobs.web.shared.WebFullJobPosting-65';
         const res = await fetch(url, {{headers}});
         if (!res.ok) return JSON.stringify({{error: true, message: `HTTP ${{res.status}}`}});
         const data = await res.json();

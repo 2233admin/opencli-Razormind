@@ -36,7 +36,6 @@ from backend.security.controlled_receiver import (
     resolve_endpoint,
 )
 from backend.workflow.research_graph_v2 import (
-    ResearchGraphV2ConflictError,
     ResearchGraphV2Scope,
     lock_scoped_workflow_run,
     read_research_graph_v2,
@@ -154,7 +153,9 @@ def _target_read(revision: DeliveryTargetRevision, target: DeliveryTarget) -> De
 
 def _manifest_read(ref: ResearchGraphV2ManifestRef) -> DeliveryManifestReadV1:
     if ref.materialization_status not in {"completed", "partial"}:
-        raise DeliveryAuthorizationConflictError("Only evidence-bearing terminal manifests may authorize delivery")
+        raise DeliveryAuthorizationConflictError(
+            "Only evidence-bearing terminal manifests may authorize delivery"
+        )
     if not ref.record_refs:
         raise DeliveryAuthorizationConflictError(
             "Only manifests with materialized record evidence may authorize delivery"
@@ -217,16 +218,23 @@ async def configure_delivery_target(
     try:
         endpoint = resolve_endpoint(request.endpoint_identity, request.credential_reference)
     except ControlledReceiverSecurityError as exc:
-        raise DeliveryAuthorizationConflictError("Controlled receiver registry configuration is unavailable") from exc
+        raise DeliveryAuthorizationConflictError(
+            "Controlled receiver registry configuration is unavailable"
+        ) from exc
     if endpoint.receiver_identity != request.receiver_identity:
-        raise DeliveryAuthorizationConflictError("Controlled receiver identity does not match registry configuration")
+        raise DeliveryAuthorizationConflictError(
+            "Controlled receiver identity does not match registry configuration"
+        )
 
 
     target: DeliveryTarget | None = None
     if request.target_id:
         target = await db.scalar(
             select(DeliveryTarget)
-            .where(DeliveryTarget.id == request.target_id, DeliveryTarget.workspace_id == scope.workspace_id)
+            .where(
+                DeliveryTarget.id == request.target_id,
+                DeliveryTarget.workspace_id == scope.workspace_id,
+            )
             .with_for_update()
         )
         if target is None or target.receiver_identity != request.receiver_identity:
@@ -302,7 +310,9 @@ async def configure_delivery_target(
                 raise
         else:
             return _target_read(revision, target)
-    raise DeliveryAuthorizationConflictError("Concurrent delivery target revision allocation conflicted")
+    raise DeliveryAuthorizationConflictError(
+        "Concurrent delivery target revision allocation conflicted"
+    )
 
 
 async def get_delivery_target(
@@ -428,7 +438,8 @@ def _frozen_bindings(
         "payloadReference": "frozen-claim-manifest",
         "payloadHash": payload_hash,
         "sanctionedReferenceHashes": sorted(
-            [claim.content_hash for claim in claims] + [manifest.manifest_hash for manifest in manifests]
+            [claim.content_hash for claim in claims]
+            + [manifest.manifest_hash for manifest in manifests]
         ),
         "redactionProfileVersion": _REDACTION_PROFILE_VERSION,
     }
@@ -508,17 +519,27 @@ async def authorize_delivery(
                 "Pinned ResearchGraph V2 reference is absent, blocked, or stale"
             )
         selected.update(
-            {claim.claim_id: claim for claim in graph.claims if claim.claim_id in request.selected_claim_ids}
+            {
+                claim.claim_id: claim
+                for claim in graph.claims
+                if claim.claim_id in request.selected_claim_ids
+            }
         )
         if len(selected) == len(request.selected_claim_ids) or graph.next_cursor is None:
             break
         cursor = graph.next_cursor
     if len(selected) != len(request.selected_claim_ids):
-        raise DeliveryAuthorizationConflictError("Selected claims are unknown in the scoped pinned graph")
+        raise DeliveryAuthorizationConflictError(
+            "Selected claims are unknown in the scoped pinned graph"
+        )
     if any(claim.state != "verified" for claim in selected.values()):
-        raise DeliveryAuthorizationConflictError("Only independently verified claims may be authorized")
+        raise DeliveryAuthorizationConflictError(
+            "Only independently verified claims may be authorized"
+        )
     if any(claim.proposer_actor_id == actor.actor_id for claim in selected.values()):
-        raise DeliveryAuthorizationConflictError("Approvers may not authorize their own proposed claims")
+        raise DeliveryAuthorizationConflictError(
+            "Approvers may not authorize their own proposed claims"
+        )
     claims = [
         DeliveryClaimReadV1(claim_id=claim.claim_id, content_hash=claim.content_hash)
         for claim in sorted(selected.values(), key=lambda value: value.claim_id)
@@ -558,7 +579,8 @@ async def authorize_delivery(
                 DeliveryAuthorizationDecisionV1.workspace_id == scope.workspace_id,
                 DeliveryAuthorizationDecisionV1.project_id == scope.project_id,
                 DeliveryAuthorizationDecisionV1.workflow_id == scope.workflow_id,
-                DeliveryAuthorizationDecisionV1.studio_workflow_version_id == scope.studio_workflow_version_id,
+                DeliveryAuthorizationDecisionV1.studio_workflow_version_id
+                == scope.studio_workflow_version_id,
                 DeliveryAuthorizationDecisionV1.run_id == scope.run_id,
                 or_(
                     DeliveryAuthorizationDecisionV1.operation_id == request.operation_id,
@@ -571,7 +593,9 @@ async def authorize_delivery(
     if existing_rows:
         if len(existing_rows) == 1 and _matches_binding(existing_rows[0], binding_hash):
             return _decision_read(existing_rows[0])
-        raise DeliveryAuthorizationConflictError("Operation or idempotency key was reused with changed frozen binding")
+        raise DeliveryAuthorizationConflictError(
+            "Operation or idempotency key was reused with changed frozen binding"
+        )
     decided_at = datetime.now(UTC)
     decision = DeliveryAuthorizationDecisionV1(
         version="v1",
@@ -614,7 +638,12 @@ async def authorize_delivery(
         decision_hash=_canonical_hash(
             {
                 "binding": binding,
-                "approvalEvidence": [{**binding["approval"], "decidedAt": actor.authorized_at.isoformat()}],
+                "approvalEvidence": [
+                    {
+                        **binding["approval"],
+                        "decidedAt": actor.authorized_at.isoformat(),
+                    }
+                ],
                 "decisionedAt": decided_at.isoformat(),
             }
         ),
@@ -631,7 +660,8 @@ async def authorize_delivery(
                     DeliveryAuthorizationDecisionV1.workspace_id == scope.workspace_id,
                     DeliveryAuthorizationDecisionV1.project_id == scope.project_id,
                     DeliveryAuthorizationDecisionV1.workflow_id == scope.workflow_id,
-                    DeliveryAuthorizationDecisionV1.studio_workflow_version_id == scope.studio_workflow_version_id,
+                    DeliveryAuthorizationDecisionV1.studio_workflow_version_id
+                    == scope.studio_workflow_version_id,
                     DeliveryAuthorizationDecisionV1.run_id == scope.run_id,
                     or_(
                         DeliveryAuthorizationDecisionV1.operation_id == request.operation_id,
@@ -642,7 +672,9 @@ async def authorize_delivery(
         ).scalars().all()
         if len(existing_rows) == 1 and _matches_binding(existing_rows[0], binding_hash):
             return _decision_read(existing_rows[0])
-        raise DeliveryAuthorizationConflictError("Concurrent authorization conflicted with frozen binding")
+        raise DeliveryAuthorizationConflictError(
+            "Concurrent authorization conflicted with frozen binding"
+        )
     return _decision_read(decision)
 
 
@@ -658,7 +690,8 @@ async def get_delivery_authorization(
             DeliveryAuthorizationDecisionV1.workspace_id == scope.workspace_id,
             DeliveryAuthorizationDecisionV1.project_id == scope.project_id,
             DeliveryAuthorizationDecisionV1.workflow_id == scope.workflow_id,
-            DeliveryAuthorizationDecisionV1.studio_workflow_version_id == scope.studio_workflow_version_id,
+            DeliveryAuthorizationDecisionV1.studio_workflow_version_id
+            == scope.studio_workflow_version_id,
             DeliveryAuthorizationDecisionV1.run_id == scope.run_id,
         )
     )
@@ -681,7 +714,8 @@ async def list_delivery_authorizations(
             DeliveryAuthorizationDecisionV1.workspace_id == scope.workspace_id,
             DeliveryAuthorizationDecisionV1.project_id == scope.project_id,
             DeliveryAuthorizationDecisionV1.workflow_id == scope.workflow_id,
-            DeliveryAuthorizationDecisionV1.studio_workflow_version_id == scope.studio_workflow_version_id,
+            DeliveryAuthorizationDecisionV1.studio_workflow_version_id
+            == scope.studio_workflow_version_id,
             DeliveryAuthorizationDecisionV1.run_id == scope.run_id,
         )
         .order_by(DeliveryAuthorizationDecisionV1.id)

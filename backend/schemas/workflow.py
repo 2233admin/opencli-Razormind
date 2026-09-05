@@ -16,9 +16,23 @@ from typing import Annotated, Any, Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from backend.schemas.plan_ir import PlanGraph
+from backend.schemas.workflow_compile import WorkflowCompileError
+from backend.schemas.workflow_runtime import (
+    WORKFLOW_NODE_PATH_SEPARATOR,
+    WorkflowRunProjection,
+)
+from backend.schemas.workflow_runtime import (
+    WorkflowNodeRunEvent as _WorkflowNodeRunEvent,
+)
+from backend.schemas.workflow_runtime import (
+    legacy_workflow_node_location as _legacy_workflow_node_location,
+)
+from backend.schemas.workflow_runtime import (
+    normalize_workflow_node_path as _normalize_workflow_node_path,
+)
 
+WorkflowNodeRunEvent = _WorkflowNodeRunEvent
 WORKFLOW_COMPILE_VERSION = "1.1.0"
-WORKFLOW_NODE_PATH_SEPARATOR = "::"
 RunId = Annotated[
     str,
     Field(
@@ -27,31 +41,11 @@ RunId = Annotated[
         pattern=r"^[A-Za-z0-9][A-Za-z0-9_-]{0,35}$",
     ),
 ]
+WorkflowRunTriggerKind = Literal["manual", "ai", "schedule", "webhook"]
+WorkflowRunInputSource = Literal["operator", "agent", "external"]
+WorkflowRunResponseMode = Literal["async", "sync-short-wait", "callback"]
 
 
-def _normalize_workflow_node_path(
-    *,
-    node_id: str,
-    node_path: list[str],
-    package_node_id: str | None,
-    internal_node_id: str | None,
-) -> list[str]:
-    if node_path:
-        return node_path
-    if package_node_id and internal_node_id:
-        return [
-            *package_node_id.split(WORKFLOW_NODE_PATH_SEPARATOR),
-            *internal_node_id.split(WORKFLOW_NODE_PATH_SEPARATOR),
-        ]
-    if WORKFLOW_NODE_PATH_SEPARATOR in node_id:
-        return node_id.split(WORKFLOW_NODE_PATH_SEPARATOR)
-    return [node_id]
-
-
-def _legacy_workflow_node_location(node_path: list[str]) -> tuple[str | None, str | None]:
-    if len(node_path) <= 1:
-        return None, None
-    return WORKFLOW_NODE_PATH_SEPARATOR.join(node_path[:-1]), node_path[-1]
 
 WorkflowProfile = Literal["intelligence", "agent-debug", "sdk-dev"]
 WorkflowNodeKind = Literal[
@@ -627,13 +621,6 @@ class WorkflowExternalImportRequest(BaseModel):
     locale: Optional[str] = None
 
 
-class WorkflowCompileError(BaseModel):
-    code: str
-    message: str
-    node_id: Optional[str] = None
-    edge_id: Optional[str] = None
-    path: list[str] = Field(default_factory=list)
-
 
 class CompiledWorkflowAdapterBinding(BaseModel):
     id: str
@@ -993,39 +980,9 @@ class WorkflowOpenCLIHDATraceResponse(BaseModel):
     dispatches: list[WorkflowOpenCLIHDATraceDispatch] = Field(default_factory=list)
 
 
-WorkflowRunStatus = Literal[
-    "queued",
-    "running",
-    "partial",
-    "partial_success",
-    "waiting",
-    "blocked",
-    "completed",
-    "failed",
-]
-WorkflowRunTriggerKind = Literal["manual", "ai", "schedule", "webhook"]
-WorkflowRunInputSource = Literal["operator", "agent", "external"]
-WorkflowRunResponseMode = Literal["async", "sync-short-wait", "callback"]
-WorkflowResearchStatus = Literal[
-    "running",
-    "needs_evidence",
-    "final",
-    "incomplete",
-    "blocked",
-    "failed",
-]
-WorkflowNodeRunEventType = Literal[
-    "queued",
-    "started",
-    "waiting",
-    "blocked",
-    "batch_ready",
-    "tool_call_started",
-    "tool_call_completed",
-    "partial",
-    "completed",
-    "failed",
-]
+
+
+
 
 
 class WorkflowRunTrigger(BaseModel):
@@ -1070,255 +1027,6 @@ class WorkflowRunSourceOutputsRequest(BaseModel):
     sourceOutputs: dict[str, list[dict[str, Any]]] = Field(..., min_length=1)
 
 
-class WorkflowResearchContinuationRequest(BaseModel):
-    expectedRevisionId: str = Field(..., min_length=1)
-    proposalId: str = Field(..., min_length=1)
-    idempotencyKey: str = Field(..., min_length=1, max_length=255)
-    sourceOutputs: dict[str, list[dict[str, Any]]] = Field(..., min_length=1)
-
-
-class WorkflowRunBlockReason(BaseModel):
-    code: str = Field(..., min_length=1)
-    message: str = Field(..., min_length=1)
-    source: Optional[str] = None
-    details: dict[str, Any] = Field(default_factory=dict)
-
-
-class WorkflowRuntimeResourceRequirement(BaseModel):
-    nodeId: str = Field(..., min_length=1)
-    sourceGroup: str = Field(..., min_length=1)
-    site: str = Field(..., min_length=1)
-    mutationMode: Literal["read", "write"]
-    requestedCapability: str = Field(..., min_length=1)
-    adapterNodeId: Optional[str] = None
-
-
-class WorkflowRuntimeResourceResolution(BaseModel):
-    status: Literal["resolved", "blocked"]
-    adapterNodeId: Optional[str] = None
-    command: Optional[str] = None
-    workerSlotId: Optional[str] = None
-    profileBindingId: Optional[str] = None
-    sessionSnapshotId: Optional[str] = None
-    lockId: Optional[str] = None
-    concurrencyLimit: Optional[int] = Field(default=None, ge=1)
-    blockReason: Optional[WorkflowRunBlockReason] = None
-
-
-class WorkflowRunBatchReference(BaseModel):
-    batchId: str = Field(..., min_length=1)
-    itemCount: int = Field(..., ge=0)
-    recordCount: int = Field(..., ge=0)
-    sourceGroup: Optional[str] = None
-    adapterTaskId: Optional[str] = None
-    odpRef: Optional[str] = None
-    manifestUri: Optional[str] = None
-
-
-class WorkflowNodeRunEvent(BaseModel):
-    id: str = Field(..., min_length=1)
-    sequence: int = Field(..., ge=1)
-    workflowId: str = Field(..., min_length=1)
-    workflowRunId: str = Field(..., min_length=1)
-    traceId: str = Field(..., min_length=1)
-    nodeId: str = Field(..., min_length=1)
-    sourceId: Optional[str] = None
-    eventType: WorkflowNodeRunEventType
-    createdAt: str = Field(..., min_length=1)
-    nodePath: list[str] = Field(default_factory=list)
-    packageNodeId: Optional[str] = None
-    internalNodeId: Optional[str] = None
-    sourceGroup: Optional[str] = None
-    message: Optional[str] = None
-    blockReason: Optional[WorkflowRunBlockReason] = None
-    batch: Optional[WorkflowRunBatchReference] = None
-    details: dict[str, Any] = Field(default_factory=dict)
-
-    @model_validator(mode="after")
-    def normalize_node_location(self) -> WorkflowNodeRunEvent:
-        self.nodePath = _normalize_workflow_node_path(
-            node_id=self.nodeId,
-            node_path=self.nodePath,
-            package_node_id=self.packageNodeId,
-            internal_node_id=self.internalNodeId,
-        )
-        package_node_id, internal_node_id = _legacy_workflow_node_location(self.nodePath)
-        self.packageNodeId = package_node_id
-        self.internalNodeId = internal_node_id
-        return self
-
-
-class WorkflowRunNodeState(BaseModel):
-    nodeId: str = Field(..., min_length=1)
-    status: WorkflowRunStatus = "queued"
-    nodePath: list[str] = Field(default_factory=list)
-    packageNodeId: Optional[str] = None
-    internalNodeId: Optional[str] = None
-    sourceGroups: list[str] = Field(default_factory=list)
-    latestEventId: Optional[str] = None
-    eventCount: int = Field(0, ge=0)
-    blockReasons: list[WorkflowRunBlockReason] = Field(default_factory=list)
-    batches: list[WorkflowRunBatchReference] = Field(default_factory=list)
-
-    @model_validator(mode="after")
-    def normalize_node_location(self) -> WorkflowRunNodeState:
-        self.nodePath = _normalize_workflow_node_path(
-            node_id=self.nodeId,
-            node_path=self.nodePath,
-            package_node_id=self.packageNodeId,
-            internal_node_id=self.internalNodeId,
-        )
-        package_node_id, internal_node_id = _legacy_workflow_node_location(self.nodePath)
-        self.packageNodeId = package_node_id
-        self.internalNodeId = internal_node_id
-        return self
-
-
-class WorkflowRunProjection(BaseModel):
-    workflowId: str = Field(..., min_length=1)
-    runId: str = Field(..., min_length=1)
-    traceId: str = Field(..., min_length=1)
-    valid: bool
-    status: WorkflowRunStatus
-    packageNodeId: Optional[str] = None
-    startedAt: str = Field(..., min_length=1)
-    updatedAt: str = Field(..., min_length=1)
-    eventCount: int = Field(..., ge=0)
-    nodeStates: list[WorkflowRunNodeState] = Field(default_factory=list)
-    errors: list[WorkflowCompileError] = Field(default_factory=list)
-
-
-class WorkflowResearchLedgerEntry(BaseModel):
-    runId: str = Field(..., min_length=1)
-    parentRunId: Optional[str] = None
-    rootRunId: str = Field(..., min_length=1)
-    iteration: int = Field(..., ge=1, le=5)
-    additionalCollectionCount: int = Field(..., ge=0, le=3)
-    revisionId: Optional[str] = None
-    parentRevisionId: Optional[str] = None
-    claimSetHash: Optional[str] = None
-    semanticClaimSetHash: Optional[str] = None
-    scenarioSetHash: Optional[str] = None
-    decision: Optional[Literal["finalize", "collect_more", "stop_incomplete"]] = None
-    researchStatus: WorkflowResearchStatus
-    stopReason: Optional[str] = None
-    proposal: Optional[dict[str, Any]] = None
-    gaps: list[str] = Field(default_factory=list)
-    publishAllowed: Optional[bool] = None
-    gateReasons: list[str] = Field(default_factory=list)
-    evidenceRefs: list[dict[str, Any]] = Field(default_factory=list)
-    createdAt: str = Field(..., min_length=1)
-
-
-class WorkflowResearchLedgerResponse(BaseModel):
-    ledgerId: str = Field(..., min_length=1)
-    rootRunId: str = Field(..., min_length=1)
-    currentRunId: str = Field(..., min_length=1)
-    entries: list[WorkflowResearchLedgerEntry] = Field(default_factory=list)
-
-
-class WorkflowResearchContinuationResponse(BaseModel):
-    ledgerId: str = Field(..., min_length=1)
-    parentRunId: str = Field(..., min_length=1)
-    childRunId: str = Field(..., min_length=1)
-    iteration: int = Field(..., ge=2, le=5)
-    additionalCollectionCount: int = Field(..., ge=1, le=3)
-    researchStatus: WorkflowResearchStatus
-    replayed: bool
-    projectionPath: str = Field(..., min_length=1)
-    eventsPath: str = Field(..., min_length=1)
-    projection: WorkflowRunProjection
-
-
-class EvidenceBatchSummary(BaseModel):
-    runId: str = Field(..., min_length=1)
-    nodeId: str = Field(..., min_length=1)
-    nodePath: list[str] = Field(default_factory=list)
-    packageNodeId: Optional[str] = None
-    internalNodeId: Optional[str] = None
-    sourceGroup: Optional[str] = None
-    adapterTaskId: Optional[str] = None
-    traceId: str = Field(..., min_length=1)
-    batchId: str = Field(..., min_length=1)
-    manifestUri: Optional[str] = None
-    odpRef: Optional[str] = None
-    itemCount: int = Field(..., ge=0)
-    recordCount: int = Field(..., ge=0)
-    status: WorkflowRunStatus
-
-    @model_validator(mode="after")
-    def normalize_node_location(self) -> EvidenceBatchSummary:
-        self.nodePath = _normalize_workflow_node_path(
-            node_id=self.nodeId,
-            node_path=self.nodePath,
-            package_node_id=self.packageNodeId,
-            internal_node_id=self.internalNodeId,
-        )
-        package_node_id, internal_node_id = _legacy_workflow_node_location(self.nodePath)
-        self.packageNodeId = package_node_id
-        self.internalNodeId = internal_node_id
-        return self
-
-
-class WorkflowEvidenceBatchListResponse(BaseModel):
-    runId: str = Field(..., min_length=1)
-    batches: list[EvidenceBatchSummary] = Field(default_factory=list)
-    nextCursor: Optional[str] = None
-
-
-class WorkflowSourceCoverage(BaseModel):
-    sourceGroup: Optional[str] = None
-    status: WorkflowRunStatus
-    batchCount: int = Field(..., ge=0)
-    itemCount: int = Field(..., ge=0)
-    recordCount: int = Field(..., ge=0)
-
-
-class WorkflowEvidenceBatchDetail(BaseModel):
-    runId: str = Field(..., min_length=1)
-    batch: EvidenceBatchSummary
-    manifestUri: Optional[str] = None
-    odpRef: Optional[str] = None
-    recordCount: int = Field(..., ge=0)
-    itemCount: int = Field(..., ge=0)
-    sourceCoverage: WorkflowSourceCoverage
-
-
-class WorkflowMissingSource(BaseModel):
-    nodeId: str = Field(..., min_length=1)
-    sourceGroup: Optional[str] = None
-    status: WorkflowRunStatus
-    reasons: list[WorkflowRunBlockReason] = Field(default_factory=list)
-
-
-class WorkflowEvidenceSummary(BaseModel):
-    summaryId: str = Field(..., min_length=1)
-    sourceGroup: Optional[str] = None
-    status: WorkflowRunStatus
-    batchIds: list[str] = Field(default_factory=list)
-    itemCount: int = Field(..., ge=0)
-    recordCount: int = Field(..., ge=0)
-
-
-class WorkflowProjectionArtifact(BaseModel):
-    artifactId: str = Field(..., min_length=1)
-    batchId: str = Field(..., min_length=1)
-    nodeId: str = Field(..., min_length=1)
-    manifestUri: Optional[str] = None
-    odpRef: Optional[str] = None
-
-
-class WorkflowEvidenceProjection(BaseModel):
-    runId: str = Field(..., min_length=1)
-    traceId: str = Field(..., min_length=1)
-    status: WorkflowRunStatus
-    nodes: list[WorkflowRunNodeState] = Field(default_factory=list)
-    clusters: list[dict[str, Any]] = Field(default_factory=list)
-    missingSources: list[WorkflowMissingSource] = Field(default_factory=list)
-    summaries: list[WorkflowEvidenceSummary] = Field(default_factory=list)
-    conflicts: list[dict[str, Any]] = Field(default_factory=list)
-    artifacts: list[WorkflowProjectionArtifact] = Field(default_factory=list)
-
 
 class WorkflowWebhookIngressResponse(BaseModel):
     workflowId: str
@@ -1333,32 +1041,6 @@ class WorkflowWebhookIngressResponse(BaseModel):
     projection: WorkflowRunProjection
 
 
-class WorkflowRunCheckpoint(BaseModel):
-    checkpointId: str = Field(..., min_length=1)
-    workflowId: str = Field(..., min_length=1)
-    runId: str = Field(..., min_length=1)
-    traceId: str = Field(..., min_length=1)
-    status: WorkflowRunStatus
-    valid: bool
-    eventCount: int = Field(..., ge=0)
-    lastSequence: int = Field(0, ge=0)
-    updatedAt: str = Field(..., min_length=1)
-    nodeStates: list[WorkflowRunNodeState] = Field(default_factory=list)
-    sourceOutputNodeIds: list[str] = Field(default_factory=list)
-    sourceOutputItemCount: int = Field(0, ge=0)
-    waitingNodeIds: list[str] = Field(default_factory=list)
-    pendingJobs: list[dict[str, Any]] = Field(default_factory=list)
-    canContinueWithSourceOutputs: bool = True
-    continuationPath: str = Field(..., min_length=1)
-    tracePath: str = Field(..., min_length=1)
-
-
-class WorkflowRunTraceResponse(BaseModel):
-    projection: WorkflowRunProjection
-    checkpoint: WorkflowRunCheckpoint
-    events: list[WorkflowNodeRunEvent] = Field(default_factory=list)
-    filters: dict[str, Any] = Field(default_factory=dict)
-    nextAfterSequence: int = Field(0, ge=0)
 
 
 class WorkflowMissingCapability(BaseModel):

@@ -13,7 +13,7 @@ see coverage.py's module docstring for why ``source_ts_quality`` is the
 discriminator.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from backend.control.coverage import (
     compute_sensor_coverage,
@@ -34,7 +34,7 @@ def _measurement(**overrides) -> SourceMeasurement:
         error_rate=0.0,
         duplicate_rate=0.0,
         cursor_advanced=False,
-        observed_at=datetime(2026, 7, 2, tzinfo=timezone.utc),
+        observed_at=datetime(2026, 7, 2, tzinfo=UTC),
     )
     kwargs.update(overrides)
     return SourceMeasurement(**kwargs)
@@ -59,7 +59,9 @@ class TestComputeSensorCoverage:
         # A measurement built from a real source_measurements row (C1) always
         # carries a source_ts_quality string — that's the signal cursor
         # coverage is genuinely observed, regardless of the boolean's value.
-        cov = compute_sensor_coverage(_measurement(cursor_advanced=False, source_ts_quality="missing"))
+        cov = compute_sensor_coverage(
+            _measurement(cursor_advanced=False, source_ts_quality="missing")
+        )
         assert cov["cursor"] is True
 
     def test_freshness_true_when_populated(self):

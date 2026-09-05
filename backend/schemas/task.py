@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -10,7 +10,7 @@ class TaskTriggerRequest(BaseModel):
     source_id: str
     parameters: dict[str, Any] = Field(default_factory=dict)
     priority: int = Field(default=5, ge=1, le=10)
-    agent_id: Optional[str] = None
+    agent_id: str | None = None
 
 
 class TaskRecoveryRequest(BaseModel):
@@ -31,17 +31,17 @@ class TaskRecoveryRead(BaseModel):
 class CollectionTaskRead(UTCModel):
     id: str
     source_id: str
-    source_name: Optional[str] = None
-    agent_id: Optional[str] = None
+    source_name: str | None = None
+    agent_id: str | None = None
     trigger_type: str
     parameters: dict[str, Any]
     priority: int
     status: str
-    error_message: Optional[str] = None
-    retry_of_task_id: Optional[str] = None
-    recovery_mode: Optional[str] = None
-    recovery_reason: Optional[str] = None
-    initiating_actor: Optional[str] = None
+    error_message: str | None = None
+    retry_of_task_id: str | None = None
+    recovery_mode: str | None = None
+    recovery_reason: str | None = None
+    initiating_actor: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -52,14 +52,14 @@ class TaskRunRead(UTCModel):
     id: str
     task_id: str
     status: str
-    worker_id: Optional[str]
-    celery_task_id: Optional[str]
-    started_at: Optional[datetime]
-    finished_at: Optional[datetime]
-    duration_ms: Optional[int]
+    worker_id: str | None
+    celery_task_id: str | None
+    started_at: datetime | None
+    finished_at: datetime | None
+    duration_ms: int | None
     records_collected: int
-    error_message: Optional[str]
-    error_detail: Optional[dict[str, Any]] = None
+    error_message: str | None
+    error_detail: dict[str, Any] | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}

@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
@@ -42,36 +42,36 @@ def validate_paw_agent_config(
 
 class AIAgentCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
-    description: Optional[str] = None
+    description: str | None = None
     processor_type: str = "claude"
-    model: Optional[str] = None
+    model: str | None = None
     prompt_template: str = ""
     processor_config: dict[str, Any] = Field(default_factory=dict)
     enabled: bool = True
-    provider_id: Optional[str] = None
+    provider_id: str | None = None
 
 
 class AIAgentUpdate(BaseModel):
-    name: Optional[str] = None
-    description: Optional[str] = None
-    processor_type: Optional[str] = None
-    model: Optional[str] = None
-    prompt_template: Optional[str] = None
-    processor_config: Optional[dict[str, Any]] = None
-    enabled: Optional[bool] = None
-    provider_id: Optional[str] = None
+    name: str | None = None
+    description: str | None = None
+    processor_type: str | None = None
+    model: str | None = None
+    prompt_template: str | None = None
+    processor_config: dict[str, Any] | None = None
+    enabled: bool | None = None
+    provider_id: str | None = None
 
 
 class AIAgentRead(UTCModel):
     id: str
     name: str
-    description: Optional[str]
+    description: str | None
     processor_type: str
-    model: Optional[str]
+    model: str | None
     prompt_template: str
     processor_config: dict[str, Any]
     enabled: bool
-    provider_id: Optional[str]
+    provider_id: str | None
     created_at: datetime
     updated_at: datetime
 

@@ -9,8 +9,6 @@ happened" — filterable and paginated like every other list endpoint
 Pure read: nothing here ever writes to control_actions or any other table.
 """
 
-from typing import Optional
-
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,9 +17,9 @@ from backend.models.control_action import ControlActionRecord
 
 async def list_control_actions(
     session: AsyncSession,
-    source_id: Optional[str] = None,
-    mode: Optional[str] = None,
-    outcome: Optional[str] = None,
+    source_id: str | None = None,
+    mode: str | None = None,
+    outcome: str | None = None,
     page: int = 1,
     limit: int = 20,
 ) -> tuple[list[ControlActionRecord], int]:

@@ -1,20 +1,38 @@
 import argparse
 import sys
 
+
 def main():
     sys.stdout.reconfigure(encoding='utf-8', newline='\n')
-    parser = argparse.ArgumentParser(description='Fetch X DM inbox via GraphQL API (metadata only, message bodies are E2E encrypted)')
-    parser.add_argument('--cursor-id', default='', help='Pagination cursor_id from previous response inboxCursor; empty for first page')
-    parser.add_argument('--graph-snapshot-id', default='', help='Pagination graph_snapshot_id from previous response; empty for first page')
+    parser = argparse.ArgumentParser(
+        description=(
+            'Fetch X DM inbox via GraphQL API (metadata only, '
+            'message bodies are E2E encrypted)'
+        )
+    )
+    parser.add_argument(
+        '--cursor-id',
+        default='',
+        help='Pagination cursor_id from previous response inboxCursor; empty for first page',
+    )
+    parser.add_argument(
+        '--graph-snapshot-id',
+        default='',
+        help='Pagination graph_snapshot_id from previous response; empty for first page',
+    )
     parser.add_argument('--limit', type=int, default=20, help='Conversations per page')
     args = parser.parse_args()
 
     js = f"""
     (async () => {{
       try {{
-        const AUTH = 'Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA';
+        const AUTH =
+          'Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7' +
+          'tfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA';
         const csrf = document.cookie.split('; ').find(c => c.startsWith('ct0='))?.split('=')[1];
-        if (!csrf) return JSON.stringify({{ error: true, message: 'ct0 cookie missing - not logged in' }});
+        if (!csrf) {{
+          return JSON.stringify({{ error: true, message: 'ct0 cookie missing - not logged in' }});
+        }}
         const headers = {{
           'authorization': AUTH,
           'x-csrf-token': csrf,
@@ -27,16 +45,30 @@ def main():
 
         let url;
         if (cursorId && graphSnap) {{
-          url = 'https://api.x.com/graphql/udvEZwRtFbZht-atludZcw/GetInboxPageRequestQuery?variables=' +
+          url =
+            'https://api.x.com/graphql/udvEZwRtFbZht-atludZcw/GetInboxPageRequestQuery?variables='
+            +
             encodeURIComponent(JSON.stringify({{
               continue_cursor: {{ cursor_id: cursorId, graph_snapshot_id: graphSnap }},
-              query_settings: {{ conversation_event_limit: 200, inbox_conversation_event_limit: 5, inbox_conversation_limit: limit, user_event_limit: 500 }}
+              query_settings: {{
+                conversation_event_limit: 200,
+                inbox_conversation_event_limit: 5,
+                inbox_conversation_limit: limit,
+                user_event_limit: 500,
+              }}
             }}));
         }} else {{
-          url = 'https://api.x.com/graphql/eovtSNDuKOzRLKXV4yWcow/GetInitialXChatPageQuery?variables=' +
+          url =
+            'https://api.x.com/graphql/eovtSNDuKOzRLKXV4yWcow/GetInitialXChatPageQuery?variables='
+            +
             encodeURIComponent(JSON.stringify({{
               max_local_sequence_id: null,
-              query_settings: {{ conversation_event_limit: 200, inbox_conversation_event_limit: 5, inbox_conversation_limit: limit, user_event_limit: 500 }},
+              query_settings: {{
+                conversation_event_limit: 200,
+                inbox_conversation_event_limit: 5,
+                inbox_conversation_limit: limit,
+                user_event_limit: 500,
+              }},
               message_pull_version: null
             }}));
         }}
@@ -45,9 +77,16 @@ def main():
         if (!r.ok) return JSON.stringify({{ error: true, message: 'HTTP ' + r.status }});
         const j = await r.json();
         const page = j?.data?.get_initial_chat_page || j?.data?.get_inbox_page;
-        if (!page) return JSON.stringify({{ error: true, message: 'unexpected response shape', sample: JSON.stringify(j).slice(0, 300) }});
-
-        const myId = document.cookie.split('; ').find(c => c.startsWith('twid='))?.split('=')[1]?.replace(/^u%3D/, '').replace(/^u=/, '');
+        if (!page) {{
+          return JSON.stringify({{
+            error: true,
+            message: 'unexpected response shape',
+            sample: JSON.stringify(j).slice(0, 300)
+          }});
+        }}
+        const myId = document.cookie.split('; ')
+          .find(c => c.startsWith('twid='))?.split('=')[1]
+          ?.replace(/^u%3D/, '').replace(/^u=/, '');
         const items = (page.items || []).map(it => {{
           const d = it.conversation_detail || {{}};
           const parts = (d.participants_results || []).map(p => {{
@@ -86,7 +125,9 @@ def main():
           my_user_id: myId,
           count: items.length,
           items,
-          next_cursor: isEnd ? null : {{ cursor_id: cursor.cursor_id, graph_snapshot_id: cursor.graph_snapshot_id }},
+          next_cursor: isEnd
+            ? null
+            : {{ cursor_id: cursor.cursor_id, graph_snapshot_id: cursor.graph_snapshot_id }},
           message_requests_count: page.message_requests_count
         }});
       }} catch(e) {{

@@ -1,6 +1,7 @@
 import argparse
 import sys
 
+
 def main():
     sys.stdout.reconfigure(encoding='utf-8', newline='\n')
     parser = argparse.ArgumentParser()
@@ -22,7 +23,11 @@ def main():
         }});
         if (!r.ok) {{
           var errText = await r.text();
-          return JSON.stringify({{ error: true, message: 'HTTP ' + r.status, detail: errText.slice(0, 200) }});
+          return JSON.stringify({{
+            error: true,
+            message: 'HTTP ' + r.status,
+            detail: errText.slice(0, 200)
+          }});
         }}
         var data = await r.json();
         if (data.require_login) return JSON.stringify({{ error: true, message: 'Login required' }});

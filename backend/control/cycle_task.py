@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from backend.config import get_settings
 from backend.control.cycle import run_control_cycle_once
@@ -30,7 +30,7 @@ async def _tick() -> None:
 
     async with AsyncSessionLocal() as session:
         try:
-            result = await run_control_cycle_once(session, now=datetime.now(timezone.utc))
+            result = await run_control_cycle_once(session, now=datetime.now(UTC))
             await session.commit()
             logger.info(
                 "control cycle tick: sources=%d suggestions=%d executed=%d blocked=%d "

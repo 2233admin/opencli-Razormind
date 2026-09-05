@@ -44,7 +44,7 @@ def _canonical_json(value: Any) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
 
-class ProofRejected(RuntimeError):  # noqa: N818 - public contract name
+class ProofRejectedError(RuntimeError):  # noqa: N818 - public contract name
     """A non-authoritative, substituted, or unsafe proof input was rejected."""
 
 
@@ -93,21 +93,25 @@ def delivery_payload_hash(claims: list[dict[str, Any]], manifests: list[dict[str
     return sha256(_canonical_json(payload).encode()).hexdigest()
 
 
+# Kept as a compatibility alias for the proof runner and acceptance tests.
+ProofRejected = ProofRejectedError
+
+
 def _object(value: Any, name: str, fields: set[str]) -> dict[str, Any]:
     if not isinstance(value, dict) or set(value) != fields:
-        raise ProofRejected(f"{name} does not have the exact redacted DTO shape")
+        raise ProofRejectedError(f"{name} does not have the exact redacted DTO shape")
     return value
 
 
 def _identifier(value: Any, name: str) -> str:
     if not isinstance(value, str) or not value:
-        raise ProofRejected(f"{name} is not a non-empty identifier")
+        raise ProofRejectedError(f"{name} is not a non-empty identifier")
     return value
 
 
 def _hash(value: Any, name: str) -> str:
     if not isinstance(value, str) or _HASH.fullmatch(value) is None:
-        raise ProofRejected(f"{name} is not an immutable SHA-256 hash")
+        raise ProofRejectedError(f"{name} is not an immutable SHA-256 hash")
     return value
 
 
@@ -115,13 +119,13 @@ def _assert_no_secrets(value: Any, path: str = "bundle") -> None:
     if isinstance(value, dict):
         for key, child in value.items():
             if key not in _SAFE_NAMES and _SECRET_NAME.search(str(key)):
-                raise ProofRejected(f"secret-bearing field is forbidden at {path}.{key}")
+                raise ProofRejectedError(f"secret-bearing field is forbidden at {path}.{key}")
             _assert_no_secrets(child, f"{path}.{key}")
     elif isinstance(value, list):
         for index, child in enumerate(value):
             _assert_no_secrets(child, f"{path}[{index}]")
     elif isinstance(value, str) and "-----BEGIN" in value:
-        raise ProofRejected(f"private transport material is forbidden at {path}")
+        raise ProofRejectedError(f"private transport material is forbidden at {path}")
 
 
 def validate_evidence(
@@ -133,14 +137,14 @@ def validate_evidence(
     receipt_keys_json: str | None = None,
 ) -> None:
     if not isinstance(evidence, dict) or set(evidence) != ALLOWED_BUNDLE_KEYS:
-        raise ProofRejected("proof bundle keys are not the acceptance allowlist")
+        raise ProofRejectedError("proof bundle keys are not the acceptance allowlist")
     _assert_no_secrets(evidence)
     if (
         evidence["schemaVersion"] != "NonBypassHappyVerticalProofV1"
         or evidence["run"] != run
         or evidence["image"] != PINNED_III
     ):
-        raise ProofRejected("proof identity or pinned engine changed")
+        raise ProofRejectedError("proof identity or pinned engine changed")
     topology = _object(
         evidence["topology"],
         "topology",
@@ -157,9 +161,9 @@ def validate_evidence(
         },
     )
     if _hash(topology["fixtureDigest"], "topology.fixtureDigest") != fixture_digest:
-        raise ProofRejected("fixture digest was substituted")
+        raise ProofRejectedError("fixture digest was substituted")
     if topology["iiiCliPath"] != "/opt/iii/iii" or topology["iiiUrl"] != "ws://proof-iii:49134":
-        raise ProofRejected("III admission facts are missing")
+        raise ProofRejectedError("III admission facts are missing")
     if (
         topology["relay"] != "three-fixed-callback-paths"
         or topology["containerTransport"] != "docker-internal"
@@ -168,14 +172,14 @@ def validate_evidence(
         or topology["receiverExposure"] != "internal-only"
         or topology["receiverKind"] != "controlled-receiver-v2"
     ):
-        raise ProofRejected("proof topology has bypassed isolated relay or receiver transport")
+        raise ProofRejectedError("proof topology has bypassed isolated relay or receiver transport")
     command = _object(
         evidence["command"], "command", {"id", "workflowId", "workflowRunId", "payloadHash"}
     )
     command_id = _identifier(command["id"], "command.id")
     workflow_id = _identifier(command["workflowId"], "command.workflowId")
     if _identifier(command["workflowRunId"], "command.workflowRunId") == run:
-        raise ProofRejected("proof run was used as the workflow run")
+        raise ProofRejectedError("proof run was used as the workflow run")
     _hash(command["payloadHash"], "command.payloadHash")
     attempt = _object(
         evidence["attempt"], "attempt", {"id", "commandId", "attemptNumber", "taskId"}
@@ -187,7 +191,7 @@ def validate_evidence(
         or not isinstance(attempt["attemptNumber"], int)
         or attempt["attemptNumber"] < 1
     ):
-        raise ProofRejected("command/attempt correlation failed")
+        raise ProofRejectedError("command/attempt correlation failed")
     lifecycle = _object(
         evidence["lifecycleHashes"],
         "lifecycleHashes",
@@ -195,12 +199,10 @@ def validate_evidence(
     )
     for name, value in lifecycle.items():
         _hash(value, f"lifecycleHashes.{name}")
-    report_hash, ingress_hash = (
-        _hash(evidence["reportHash"], "reportHash"),
-        _hash(evidence["ingressReceiptHash"], "ingressReceiptHash"),
-    )
+    report_hash = _hash(evidence["reportHash"], "reportHash")
+    ingress_hash = _hash(evidence["ingressReceiptHash"], "ingressReceiptHash")
     if len({*lifecycle.values(), report_hash, ingress_hash}) != 5:
-        raise ProofRejected("vertical evidence hashes are not distinct immutable facts")
+        raise ProofRejectedError("vertical evidence hashes are not distinct immutable facts")
     manifest = _object(
         evidence["researchGraphManifestRef"],
         "researchGraphManifestRef",
@@ -226,7 +228,7 @@ def validate_evidence(
         or not isinstance(manifest["reconciliationRevision"], int)
         or manifest["reconciliationRevision"] < 1
     ):
-        raise ProofRejected(
+        raise ProofRejectedError(
             "materialized manifest is not a completed authoritative scoped reference"
         )
     for name in ("manifestHash", "expectedRecordKeySetHash", "recordRefSetHash"):
@@ -297,7 +299,7 @@ def validate_evidence(
     )
     pin = _object(evidence["pin"], "pin", {"sequence", "researchRevisionId", "manifestSetHash"})
     if not isinstance(pin["sequence"], int) or pin["sequence"] < 1:
-        raise ProofRejected("pin.sequence is invalid")
+        raise ProofRejectedError("pin.sequence is invalid")
     _identifier(pin["researchRevisionId"], "pin.researchRevisionId")
     pin_hash = _hash(pin["manifestSetHash"], "pin.manifestSetHash")
     decision = _object(
@@ -318,24 +320,24 @@ def validate_evidence(
         _identifier(decision["decisionId"], "decision.decisionId"),
     )
     if operation_id != expected_operation_id:
-        raise ProofRejected("delivery operation is not bound to the proof run")
+        raise ProofRejectedError("delivery operation is not bound to the proof run")
     decision_hash, decision_payload = (
         _hash(decision["decisionHash"], "decision.decisionHash"),
         _hash(decision["payloadHash"], "decision.payloadHash"),
     )
     if _hash(decision["manifestSetHash"], "decision.manifestSetHash") != pin_hash:
-        raise ProofRejected("frozen decision is not bound to the pinned graph")
+        raise ProofRejectedError("frozen decision is not bound to the pinned graph")
     claims = decision["claims"]
     if not isinstance(claims, list) or not claims:
-        raise ProofRejected("delivery claims are absent")
+        raise ProofRejectedError("delivery claims are absent")
     for item in claims:
         claim = _object(item, "decision.claims[]", {"claimId", "contentHash"})
         _identifier(claim["claimId"], "decision.claims[].claimId")
         _hash(claim["contentHash"], "decision.claims[].contentHash")
     if len({claim["claimId"] for claim in claims}) != len(claims):
-        raise ProofRejected("delivery claims are not distinct")
+        raise ProofRejectedError("delivery claims are not distinct")
     if not isinstance(decision["manifests"], list) or not decision["manifests"]:
-        raise ProofRejected("decision manifests are absent")
+        raise ProofRejectedError("decision manifests are absent")
     decision_manifests = []
     for item in decision["manifests"]:
         selected = _object(
@@ -359,7 +361,7 @@ def validate_evidence(
         decision_manifests.append(selected)
     manifest_hashes = {item["manifestHash"] for item in decision_manifests}
     if manifest["manifestHash"] not in manifest_hashes:
-        raise ProofRejected("decision does not retain the materialized manifest")
+        raise ProofRejectedError("decision does not retain the materialized manifest")
     matching_manifest = next(
         item for item in decision_manifests if item["manifestHash"] == manifest["manifestHash"]
     )
@@ -374,9 +376,9 @@ def validate_evidence(
         "materializationStatus",
     ):
         if matching_manifest[name] != manifest[name]:
-            raise ProofRejected("decision manifest does not match materialized manifest")
+            raise ProofRejectedError("decision manifest does not match materialized manifest")
     if decision_payload != delivery_payload_hash(claims, decision_manifests):
-        raise ProofRejected("delivery payload hash does not match frozen claims and manifests")
+        raise ProofRejectedError("delivery payload hash does not match frozen claims and manifests")
     execution = _object(
         evidence["execution"],
         "execution",
@@ -400,7 +402,7 @@ def validate_evidence(
         or not isinstance(execution["attemptCount"], int)
         or execution["attemptCount"] < 1
     ):
-        raise ProofRejected("delivery execution is not terminally accepted and frozen")
+        raise ProofRejectedError("delivery execution is not terminally accepted and frozen")
     receipt = _object(
         evidence["receiverReceipt"],
         "receiverReceipt",
@@ -427,7 +429,7 @@ def validate_evidence(
         or receipt["durableReceipt"] != "verified"
         or receipt["outcome"] != "accepted"
     ):
-        raise ProofRejected("accepted delivery lacks its matching verified durable receipt")
+        raise ProofRejectedError("accepted delivery lacks its matching verified durable receipt")
     signed_receipt = _object(
         receipt["signedReceipt"],
         "receiverReceipt.signedReceipt",
@@ -460,11 +462,11 @@ def validate_evidence(
         or not signed_receipt["signature"]
         or len(signed_receipt["signature"]) > 512
     ):
-        raise ProofRejected("signed durable receipt is not bound to frozen delivery facts")
+        raise ProofRejectedError("signed durable receipt is not bound to frozen delivery facts")
     try:
         base64.b64decode(signed_receipt["signature"], validate=True)
     except (ValueError, TypeError):
-        raise ProofRejected("signed durable receipt signature encoding is invalid")
+        raise ProofRejectedError("signed durable receipt signature encoding is invalid")
     receipt_fields = {
         key: signed_receipt[key]
         for key in (
@@ -479,41 +481,40 @@ def validate_evidence(
         )
     }
     if receipt["receiptPreimage"] != _canonical_json(receipt_fields):
-        raise ProofRejected("receipt canonical preimage was substituted")
+        raise ProofRejectedError("receipt canonical preimage was substituted")
     if (
         _hash(receipt["receiptHash"], "receiverReceipt.receiptHash")
         != sha256(_canonical_json(signed_receipt).encode()).hexdigest()
     ):
-        raise ProofRejected("receipt hash does not match the signed receiver receipt")
+        raise ProofRejectedError("receipt hash does not match the signed receiver receipt")
     if strict_receipt:
         keys_json = receipt_keys_json or os.environ.get("CONTROLLED_RECEIVER_RECEIPT_KEYS_JSON")
         if not keys_json:
-            raise ProofRejected("strict receipt validation requires the receipt key configuration")
+            raise ProofRejectedError("strict receipt validation requires the receipt key configuration")
         try:
             keys = json.loads(keys_json)
         except json.JSONDecodeError as exc:
-            raise ProofRejected(
+            raise ProofRejectedError(
                 "strict receipt validation has invalid receipt key configuration"
             ) from exc
         if not isinstance(keys, dict) or not isinstance(keys.get(signed_receipt["keyId"]), str):
-            raise ProofRejected("strict receipt validation could not resolve the receipt key")
+            raise ProofRejectedError("strict receipt validation could not resolve the receipt key")
         key = keys[signed_receipt["keyId"]].encode()
         if len(key) < 32:
-            raise ProofRejected("strict receipt validation has an undersized receipt key")
+            raise ProofRejectedError("strict receipt validation has an undersized receipt key")
         expected_signature = base64.b64encode(
             hmac.new(key, receipt["receiptPreimage"].encode(), sha256).digest()
         ).decode()
         if not hmac.compare_digest(expected_signature, signed_receipt["signature"]):
-            raise ProofRejected("signed durable receipt HMAC verification failed")
+            raise ProofRejectedError("signed durable receipt HMAC verification failed")
     if not isinstance(evidence["redactionProfile"], str) or not evidence["redactionProfile"]:
-        raise ProofRejected("redaction profile is absent")
+        raise ProofRejectedError("redaction profile is absent")
 
 
 def assert_substitutions_rejected(
     evidence: dict[str, Any], *, fixture_digest: str, run: str
 ) -> None:
     """The five provenance substitutes must fail before signing."""
-
     substitutions = (
         (
             "mock_transport",
@@ -545,6 +546,6 @@ def assert_substitutions_rejected(
         mutate(candidate)
         try:
             validate_evidence(candidate, fixture_digest=fixture_digest, run=run)
-        except ProofRejected:
+        except ProofRejectedError:
             continue
         raise AssertionError(f"unsafe {name} substitution reached signing")

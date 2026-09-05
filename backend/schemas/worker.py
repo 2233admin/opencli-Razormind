@@ -1,7 +1,5 @@
 from datetime import datetime
-from typing import Optional
 
-from pydantic import BaseModel
 from backend.schemas.common import UTCModel
 
 
@@ -11,7 +9,7 @@ class WorkerNodeRead(UTCModel):
     hostname: str
     status: str
     active_tasks: int
-    last_heartbeat: Optional[datetime]
+    last_heartbeat: datetime | None
     created_at: datetime
     updated_at: datetime
 

@@ -5,8 +5,11 @@ import sys
 def main():
     sys.stdout.reconfigure(encoding='utf-8', newline='\n')
     parser = argparse.ArgumentParser(
-        description="Emit JS that extracts the channel About metadata (description, links, counters, channel id) "
-                    "from the current /about page's ytInitialData and pulls any business email already present in the description text."
+        description=(
+            "Emit JS that extracts the channel About metadata (description, links, "
+            "counters, channel id) from the current /about page's ytInitialData and "
+            "pulls any business email already present in the description text."
+        )
     )
     args = parser.parse_args()
     _ = args
@@ -15,7 +18,8 @@ def main():
 (function() {
   try {
     if (!window.ytInitialData) {
-      return JSON.stringify({error: true, message: "ytInitialData not present on page; navigate to a channel /about URL first"});
+      return JSON.stringify({error: true, message: "ytInitialData not present on page; "
+        + "navigate to a channel /about URL first"});
     }
     var findAbout = function(obj, depth) {
       if (depth > 25 || !obj || typeof obj !== "object") return null;
@@ -29,11 +33,13 @@ def main():
     };
     var m = findAbout(window.ytInitialData, 0);
     if (!m) {
-      return JSON.stringify({error: true, message: "aboutChannelViewModel not found in ytInitialData; the page may not be a channel /about view"});
+      return JSON.stringify({error: true, message: "aboutChannelViewModel not found in "
+        + "ytInitialData; the page may not be a channel /about view"});
     }
     var channelTitle = null;
     try {
-      var meta = window.ytInitialData.metadata && window.ytInitialData.metadata.channelMetadataRenderer;
+      var meta = window.ytInitialData.metadata
+        && window.ytInitialData.metadata.channelMetadataRenderer;
       if (meta) channelTitle = meta.title || null;
     } catch (e) {}
     if (!channelTitle) {
@@ -64,13 +70,16 @@ def main():
       var displayUrl = (v.link && v.link.content) || null;
       var redirectHref = null;
       try {
-        var cmd = v.link && v.link.commandRuns && v.link.commandRuns[0] && v.link.commandRuns[0].onTap && v.link.commandRuns[0].onTap.innertubeCommand;
+        var cmd = v.link && v.link.commandRuns && v.link.commandRuns[0]
+          && v.link.commandRuns[0].onTap && v.link.commandRuns[0].onTap.innertubeCommand;
         if (cmd) {
           if (cmd.urlEndpoint && cmd.urlEndpoint.url) redirectHref = cmd.urlEndpoint.url;
         }
       } catch (e) {}
       var unwrapped = unwrapRedirect(redirectHref);
-      var finalUrl = unwrapped || (displayUrl ? (displayUrl.indexOf("http") === 0 ? displayUrl : "https://" + displayUrl) : null);
+      var finalUrl = unwrapped || (displayUrl
+        ? (displayUrl.indexOf("http") === 0 ? displayUrl : "https://" + displayUrl)
+        : null);
       return {title: title, display: displayUrl, url: finalUrl};
     }).filter(function(x) { return x !== null; });
 

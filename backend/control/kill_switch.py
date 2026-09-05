@@ -16,9 +16,7 @@ reset an accidentally-flipped switch back to the safe configured value.
 
 from __future__ import annotations
 
-from typing import Optional
-
-_runtime_override: Optional[bool] = None
+_runtime_override: bool | None = None
 
 
 def is_engaged() -> bool:

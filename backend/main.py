@@ -4,13 +4,14 @@ import asyncio
 import logging
 import secrets
 from contextlib import asynccontextmanager
+from importlib import import_module
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from backend.api.v1 import v1_router
-from backend.config import get_settings
+from backend.api.v1 import create_v1_router
+from backend.config import Settings, get_settings
 from backend.database import run_migrations
 from backend.security.fleet_auth import (
     FleetAuthMiddleware,
@@ -18,6 +19,10 @@ from backend.security.fleet_auth import (
     resolve_uvicorn_host,
 )
 from backend.security.question_bank_body_limit import QuestionBankBodyLimitMiddleware
+from backend.workflow.workflow_plugins import (
+    WorkflowPluginRegistrationError,
+    WorkflowPluginRegistry,
+)
 
 
 def _configure_logging() -> None:
@@ -40,6 +45,22 @@ _configure_logging()
 logger = logging.getLogger(__name__)
 
 settings = get_settings()
+
+
+def build_workflow_plugin_registry(app_settings: Settings) -> WorkflowPluginRegistry:
+    """Assemble optional workflow adapters before the application is returned."""
+
+    enabled = app_settings.workflow_plugin_ids
+    unknown = set(enabled).difference({"research-graph"})
+    if unknown:
+        raise WorkflowPluginRegistrationError(
+            f"unknown workflow plugins: {', '.join(sorted(unknown))}"
+        )
+    registry = WorkflowPluginRegistry()
+    if "research-graph" in enabled:
+        plugin_module = import_module("backend.workflow.research_graph")
+        registry.register(plugin_module.ResearchGraphWorkflowPlugin())
+    return registry
 
 
 def _read_chrome_endpoints() -> list[str]:
@@ -84,6 +105,7 @@ async def lifespan(app: FastAPI):
     mcp_lifespan = mcp_http_app.router.lifespan_context(mcp_http_app)
     await mcp_lifespan.__aenter__()
     await run_migrations()
+    await app.state.workflow_plugins.start()
     # Re-apply logging config: alembic resets root logger level to WARNING during migrations
     # and uvicorn's dictConfig disables pre-existing loggers
     _configure_logging()
@@ -226,10 +248,11 @@ async def lifespan(app: FastAPI):
         from backend.scheduler import stop_scheduler
 
         stop_scheduler()
+    await app.state.workflow_plugins.stop()
     await mcp_lifespan.__aexit__(None, None, None)
 
 
-def create_app() -> FastAPI:
+def create_app(*, app_settings: Settings | None = None) -> FastAPI:
     app = FastAPI(
         title="OpenCLI Admin",
         description=(
@@ -252,6 +275,10 @@ def create_app() -> FastAPI:
     # Bound managed question-bank requests before Starlette parses and spools
     # multipart parts. Fleet auth is added afterwards and remains outermost.
     app.add_middleware(QuestionBankBodyLimitMiddleware)
+    active_settings = app_settings or settings
+
+    workflow_plugins = build_workflow_plugin_registry(active_settings)
+    app.state.workflow_plugins = workflow_plugins
 
     # Fleet auth (ADR-0005): static bearer token on every /api route.
     # Registered BEFORE CORSMiddleware on purpose — Starlette treats the
@@ -264,7 +291,7 @@ def create_app() -> FastAPI:
     # CORS
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"] if settings.debug else ["http://localhost:5173"],
+        allow_origins=["*"] if active_settings.debug else ["http://localhost:5173"],
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -280,7 +307,7 @@ def create_app() -> FastAPI:
         )
 
     # Routes
-    app.include_router(v1_router)
+    app.include_router(create_v1_router(workflow_plugins))
     default_openapi = app.openapi
 
     def openapi_schema() -> dict:

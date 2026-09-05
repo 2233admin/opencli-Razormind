@@ -5,7 +5,7 @@ cap, and idempotency dedup — each tested in isolation with directly-seeded
 control_actions rows, deterministic via an injected ``now``.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -13,7 +13,7 @@ from backend.control import kill_switch
 from backend.control.gate import evaluate_gate
 from backend.models.control_action import ControlActionRecord
 
-NOW = datetime(2026, 7, 2, 12, 0, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 7, 2, 12, 0, 0, tzinfo=UTC)
 
 
 @pytest.fixture(autouse=True)
@@ -79,7 +79,9 @@ async def _seed_row(
     return row
 
 
-async def _seed_evidence(session, *, samples: int, recovered: int, action_type="pause", state="auth_failed"):
+async def _seed_evidence(
+    session, *, samples: int, recovered: int, action_type="pause", state="auth_failed"
+):
     """Seed ``samples`` judged (evaluated) rows for (state, action_type),
     ``recovered`` of which are "recovered" and the rest "persisted"."""
     for i in range(samples):

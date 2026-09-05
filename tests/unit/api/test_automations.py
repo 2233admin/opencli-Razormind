@@ -12,7 +12,13 @@ async def test_admin_can_create_list_and_update_disabled_automation_draft(db_ses
     workspace = Workspace(name="Automation", slug="automation")
     db_session.add_all((user, workspace))
     await db_session.flush()
-    db_session.add(WorkspaceMembership(workspace_id=workspace.id, user_id=user.id, role=WorkspaceRole.ADMIN))
+    db_session.add(
+        WorkspaceMembership(
+            workspace_id=workspace.id,
+            user_id=user.id,
+            role=WorkspaceRole.ADMIN,
+        )
+    )
     await db_session.commit()
 
     app = FastAPI()
@@ -27,17 +33,23 @@ async def test_admin_can_create_list_and_update_disabled_automation_draft(db_ses
     app.dependency_overrides[get_db] = override_db
     app.dependency_overrides[get_request_identity] = override_identity
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        created = await client.post(f"/workspaces/{workspace.id}/automations", json={
-            "name": "Daily review",
-            "prompt": "Review the workspace",
-            "executor": "codex",
-            "schedule": "daily@09:00",
-            "timezone": "Asia/Shanghai",
-            "enabled": False,
-        })
+        created = await client.post(
+            f"/workspaces/{workspace.id}/automations",
+            json={
+                "name": "Daily review",
+                "prompt": "Review the workspace",
+                "executor": "codex",
+                "schedule": "daily@09:00",
+                "timezone": "Asia/Shanghai",
+                "enabled": False,
+            },
+        )
         automation_id = created.json()["data"]["id"]
         listed = await client.get(f"/workspaces/{workspace.id}/automations")
-        updated = await client.patch(f"/workspaces/{workspace.id}/automations/{automation_id}", json={"name": "Updated review"})
+        updated = await client.patch(
+            f"/workspaces/{workspace.id}/automations/{automation_id}",
+            json={"name": "Updated review"},
+        )
 
     assert created.status_code == 201
     assert listed.json()["data"][0]["name"] == "Daily review"

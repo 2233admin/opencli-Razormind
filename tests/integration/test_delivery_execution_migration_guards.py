@@ -2,7 +2,7 @@
 
 import sqlite3
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -40,7 +40,7 @@ async def _stored_frozen_decision(
     endpoint = receiver.resolve_endpoint("receiver-primary", "credential-a")
     policy_version, policy_snapshot, policy_hash = delivery_execution._current_policy()
     target_id, revision_id, decision_id = (str(uuid.uuid4()) for _ in range(3))
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    now = datetime.now(UTC).replace(tzinfo=None)
     claims = [{"claimId": claim_id, "contentHash": "a" * 64}]
     manifests = [{"manifestHash": "b" * 64}]
     payload = {

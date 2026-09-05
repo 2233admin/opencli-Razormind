@@ -1,12 +1,12 @@
 """Tests for backend/schemas/worker.py."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from backend.schemas.worker import WorkerNodeRead
 
 
 def test_worker_node_read_from_attributes():
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     data = {
         "id": "worker-1",
         "worker_id": "celery@hostname",
@@ -27,7 +27,7 @@ def test_worker_node_read_from_attributes():
 
 
 def test_worker_node_read_no_heartbeat():
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     worker = WorkerNodeRead(
         id="w2",
         worker_id="celery@host2",

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from backend.schemas.workflow import (
-    WorkflowCompileError,
     WorkflowMissingCapability,
     WorkflowPackageInternals,
     WorkflowPatchOperation,
@@ -11,6 +10,7 @@ from backend.schemas.workflow import (
     WorkflowPatchResponse,
     WorkflowProject,
 )
+from backend.schemas.workflow_compile import WorkflowCompileError
 from backend.workflow.compiler import compile_workflow_project
 from backend.workflow.node_registry import forbidden_node_definition_keys, resolve_node_origin
 from backend.workflow.opencli_adapter_nodes import (

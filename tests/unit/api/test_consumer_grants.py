@@ -2,7 +2,7 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
-from backend.api.v1 import v1_router
+from backend.api.v1 import create_v1_router
 from backend.api.v1.consumer_grants import router
 from backend.database import get_db
 from backend.models.identity import (
@@ -13,6 +13,7 @@ from backend.models.identity import (
     WorkspaceRole,
 )
 from backend.security.identity import RequestIdentity, get_request_identity
+from backend.workflow.workflow_plugins import WorkflowPluginRegistry
 
 
 async def _client(db_session, subject: str, api_router=router) -> AsyncClient:
@@ -53,7 +54,7 @@ async def _add_member(db_session, workspace: Workspace, role: WorkspaceRole, suf
 
 async def test_consumer_grants_are_registered_on_v1_api(db_session):
     workspace, _ = await _seed_member(db_session, WorkspaceRole.VIEWER)
-    client = await _client(db_session, "viewer-primary", v1_router)
+    client = await _client(db_session, "viewer-primary", create_v1_router(WorkflowPluginRegistry()))
 
     async with client:
         response = await client.get(f"/api/v1/workspaces/{workspace.id}/consumer-grants")

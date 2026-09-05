@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -18,7 +18,7 @@ class CronSchedule(TimestampMixin):
     source_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("data_sources.id", ondelete="CASCADE"), nullable=False
     )
-    agent_id: Mapped[Optional[str]] = mapped_column(
+    agent_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("ai_agents.id", ondelete="SET NULL"), nullable=True
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -28,8 +28,8 @@ class CronSchedule(TimestampMixin):
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     is_one_time: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
-    last_run_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    next_run_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    next_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Relationship
     source: Mapped["DataSource"] = relationship("DataSource", back_populates="schedules")

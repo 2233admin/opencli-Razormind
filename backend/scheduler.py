@@ -2,7 +2,7 @@
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 
 from croniter import croniter
 
@@ -20,6 +20,7 @@ _warned_bad_cron: set[tuple[str, str]] = set()
 
 async def _get_enabled_schedules() -> list[dict]:
     from sqlalchemy import select
+
     from backend.database import AsyncSessionLocal
     from backend.models.schedule import CronSchedule
     from backend.models.source import DataSource
@@ -49,7 +50,7 @@ async def _get_enabled_schedules() -> list[dict]:
 
 def _now() -> datetime:
     """Thin seam over datetime.now so tests can drive the clock without sleeping."""
-    return datetime.now(timezone.utc)
+    return datetime.now(datetime.UTC)
 
 
 def _fires_in_window(

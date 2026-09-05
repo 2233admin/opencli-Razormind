@@ -6,11 +6,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from backend.schemas.workflow import (
-    WorkflowAdapterBinding,
-    WorkflowProjectNode,
-    WorkflowRuntimeResourceRequirement,
-)
+from backend.schemas.workflow import WorkflowAdapterBinding, WorkflowProjectNode
+from backend.schemas.workflow_runtime import WorkflowRuntimeResourceRequirement
 from backend.workflow.block_reasons import (
     MISSING_DELIVERY_PROJECTION,
     MISSING_RUNTIME_BINDING,

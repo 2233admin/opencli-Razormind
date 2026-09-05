@@ -145,7 +145,9 @@ async def list_targets(
         permission=WorkspacePermission.READ,
     )
     try:
-        return ApiResponse.ok(await list_delivery_targets(db, scope=scope, cursor=cursor, limit=limit))
+        return ApiResponse.ok(
+            await list_delivery_targets(db, scope=scope, cursor=cursor, limit=limit)
+        )
     except DeliveryAuthorizationConflictError as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
 
@@ -243,7 +245,11 @@ async def list_authorizations(
         permission=WorkspacePermission.READ,
     )
     try:
-        return ApiResponse.ok(await list_delivery_authorizations(db, scope=scope, cursor=cursor, limit=limit))
+        return ApiResponse.ok(
+            await list_delivery_authorizations(
+                db, scope=scope, cursor=cursor, limit=limit
+            )
+        )
     except DeliveryAuthorizationConflictError as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
 
@@ -271,6 +277,8 @@ async def read_authorization(
         permission=WorkspacePermission.READ,
     )
     try:
-        return ApiResponse.ok(await get_delivery_authorization(db, scope=scope, decision_id=decision_id))
+        return ApiResponse.ok(
+            await get_delivery_authorization(db, scope=scope, decision_id=decision_id)
+        )
     except DeliveryAuthorizationConflictError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc

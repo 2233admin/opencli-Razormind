@@ -57,7 +57,9 @@ async def test_token_bucket_bursts_then_blocks(monkeypatch):
 @pytest.mark.asyncio
 async def test_retries_on_429_then_succeeds(monkeypatch):
     slept: list[float] = []
-    monkeypatch.setattr("backend.pipeline.http_client.asyncio.sleep", lambda d: slept.append(d) or _noop())
+    monkeypatch.setattr(
+        "backend.pipeline.http_client.asyncio.sleep", lambda d: slept.append(d) or _noop()
+    )
 
     client = FakeClient([httpx.Response(429), httpx.Response(200)])
     rl = RateLimitedClient(client, TokenBucket(1000), log=None)
@@ -71,7 +73,9 @@ async def test_retries_on_429_then_succeeds(monkeypatch):
 @pytest.mark.asyncio
 async def test_honors_retry_after_header(monkeypatch):
     slept: list[float] = []
-    monkeypatch.setattr("backend.pipeline.http_client.asyncio.sleep", lambda d: slept.append(d) or _noop())
+    monkeypatch.setattr(
+        "backend.pipeline.http_client.asyncio.sleep", lambda d: slept.append(d) or _noop()
+    )
 
     client = FakeClient([httpx.Response(429, headers={"Retry-After": "7"}), httpx.Response(200)])
     rl = RateLimitedClient(client, TokenBucket(1000))

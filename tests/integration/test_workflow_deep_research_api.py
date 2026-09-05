@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import pytest
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 
+from backend.database import get_db
+from backend.main import Settings, create_app
 from backend.models.record import CollectedRecord
 
 
@@ -245,6 +248,13 @@ async def test_deep_research_chain_compiles_and_runs_with_auditable_metrics(clie
     assert partials["scenario"]["metrics"]["scenarioCount"] == 1
     assert partials["revision"]["metrics"]["addedClaimCount"] == 1
     assert partials["gate"]["metrics"]["publishAllowed"] is True
+    graph = await client.get(
+        "/api/v1/workflows/runs/run-synthetic-research/research-graph"
+    )
+    assert graph.status_code == 200
+    # Fixture collection has no sourceId, so automatic lineage must omit it rather
+    # than manufacture a source-to-evidence chain.
+    assert graph.json()["data"]["entities"] == []
     assert partials["gate"]["outputItemCount"] == 4
     batches_response = await client.get(
         "/api/v1/workflows/runs/run-synthetic-research/evidence-batches"
@@ -275,6 +285,257 @@ async def test_deep_research_chain_compiles_and_runs_with_auditable_metrics(clie
         normalize_batch["manifestUri"]
     }
 
+
+@pytest.mark.asyncio
+async def test_enabled_plugin_derives_complete_graph_lineage_from_real_source_outputs(
+    client,
+):
+    project = _project()
+    source_node = next(node for node in project["nodes"] if node["id"] == "fixture-source")
+    source_node["params"]["sourceId"] = "deterministic-deep-research-source"
+    run_id = "run-plugin-lineage-tracer"
+    trace_id = "trace-plugin-lineage-tracer"
+    fixture_items = source_node["params"]["fixtureItems"]
+    source_outputs = {
+        "fixture-source": [
+            {
+                **item,
+                "id": f"deterministic-{item['evidenceId']}",
+                "sourceId": "deterministic-deep-research-source",
+            }
+            for item in fixture_items
+        ]
+    }
+
+    started = await client.post(
+        "/api/v1/workflows/runs",
+        json={
+            "project": project,
+            "runId": run_id,
+            "traceId": trace_id,
+            "sourceOutputs": source_outputs,
+        },
+    )
+    assert started.status_code == 202, started.text
+    assert started.json()["data"]["status"] == "completed", started.text
+
+    replay = await client.get(f"/api/v1/workflows/runs/{run_id}/events")
+    assert replay.status_code == 200, replay.text
+    graph_events = [
+        event["details"]["researchGraph"]
+        for event in replay.json()["data"]
+        if "researchGraph" in event["details"]
+    ]
+    event_types = [event["eventType"] for event in graph_events]
+    assert event_types[0] == "source/recorded"
+    assert event_types[-1] == "claim/projected"
+    evidence_events = [
+        event for event in graph_events if event["eventType"] == "evidence/linked"
+    ]
+    assert len(evidence_events) == len(source_outputs["fixture-source"])
+    for event in graph_events:
+        assert event["runId"] == run_id
+        assert event["traceId"] == trace_id
+        assert event["nodeId"]
+    for evidence_event in evidence_events:
+        lineage = evidence_event["lineage"]
+        assert lineage["sourceId"] == "deterministic-deep-research-source"
+        assert lineage["evidenceId"]
+        assert lineage["itemKey"]
+        assert lineage["batchId"]
+        assert lineage["manifestUri"]
+
+    graph_response = await client.get(
+        f"/api/v1/workflows/runs/{run_id}/research-graph"
+    )
+    assert graph_response.status_code == 200, graph_response.text
+    graph = graph_response.json()["data"]
+    assert graph["runId"] == run_id
+    assert graph["traceId"] == trace_id
+    source_entities = [entity for entity in graph["entities"] if entity["kind"] == "source"]
+    evidence_entities = [entity for entity in graph["entities"] if entity["kind"] == "evidence"]
+    claim_entity = next(entity for entity in graph["entities"] if entity["kind"] == "claim")
+    assert len(source_entities) == 1
+    assert len(evidence_entities) == len(evidence_events)
+    assert all(entity["sourceIds"] == [source_entities[0]["id"]] for entity in evidence_entities)
+    assert set(claim_entity["evidenceIds"]) == {
+        entity["id"] for entity in evidence_entities
+    }
+    assert all(entity["lineage"]["batchId"] for entity in evidence_entities)
+
+    proposal = {
+        "schemaVersion": 1,
+        "idempotencyKey": "plugin-lineage-proposal",
+        "expectedRevision": graph["currentRevision"],
+        "expectedSequence": graph["lastSequence"],
+        "action": "propose",
+        "traceId": trace_id,
+        "nodeId": claim_entity["nodeId"],
+        "entity": {
+            "id": "plugin-lineage-proposal",
+            "kind": "claim",
+            "evidenceIds": [evidence_entities[0]["id"]],
+        },
+    }
+    proposed = await client.post(
+        f"/api/v1/workflows/runs/{run_id}/research-graph/mutations",
+        json=proposal,
+    )
+    assert proposed.status_code == 200, proposed.text
+    proposed_graph = proposed.json()["data"]["graph"]
+    assert proposed_graph["entities"][-1]["state"] == "proposed"
+
+    verified = await client.post(
+        f"/api/v1/workflows/runs/{run_id}/research-graph/mutations",
+        json={
+            "schemaVersion": 1,
+            "idempotencyKey": "plugin-lineage-verify",
+            "expectedRevision": proposed_graph["currentRevision"],
+            "expectedSequence": proposed_graph["lastSequence"],
+            "action": "verify",
+            "traceId": trace_id,
+            "nodeId": claim_entity["nodeId"],
+            "targetId": "plugin-lineage-proposal",
+        },
+    )
+    assert verified.status_code == 200, verified.text
+    verified_graph = verified.json()["data"]["graph"]
+    assert verified_graph["entities"][-1]["state"] == "verified"
+
+    retracted = await client.post(
+        f"/api/v1/workflows/runs/{run_id}/research-graph/mutations",
+        json={
+            "schemaVersion": 1,
+            "idempotencyKey": "plugin-lineage-retract",
+            "expectedRevision": verified_graph["currentRevision"],
+            "expectedSequence": verified_graph["lastSequence"],
+            "action": "retract",
+            "traceId": trace_id,
+            "nodeId": claim_entity["nodeId"],
+            "targetId": "plugin-lineage-proposal",
+        },
+    )
+    assert retracted.status_code == 200, retracted.text
+    assert retracted.json()["data"]["graph"]["entities"][-1]["state"] == "retracted"
+
+
+@pytest.mark.asyncio
+async def test_disabled_plugin_keeps_ordinary_workflow_run_without_graph_contributions(
+    db_session,
+):
+    app = create_app(app_settings=Settings(workflow_plugins=""))
+
+    async def override_get_db():
+        yield db_session
+
+    app.dependency_overrides[get_db] = override_get_db
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app),
+            base_url="http://test",
+        ) as disabled_client:
+            run_id = "run-plugin-disabled-tracer"
+            started = await disabled_client.post(
+                "/api/v1/workflows/runs",
+                json={
+                    "project": _project(),
+                    "runId": run_id,
+                    "traceId": "trace-plugin-disabled-tracer",
+                },
+            )
+            assert started.status_code == 202, started.text
+            assert started.json()["data"]["status"] == "completed", started.text
+
+            replay = await disabled_client.get(f"/api/v1/workflows/runs/{run_id}/events")
+            assert replay.status_code == 200, replay.text
+            assert all(
+                "researchGraph" not in event["details"]
+                for event in replay.json()["data"]
+            )
+
+            graph = await disabled_client.get(
+                f"/api/v1/workflows/runs/{run_id}/research-graph"
+            )
+            assert graph.status_code == 404
+    finally:
+        app.dependency_overrides.clear()
+
+
+
+@pytest.mark.asyncio
+async def test_unscoped_research_graph_mutations_are_guarded_and_replayable(client):
+    project = _project()
+    run_id = "run-graph-mutation"
+    trace_id = "trace-graph-mutation"
+    run = await client.post(
+        "/api/v1/workflows/runs",
+        json={"project": project, "runId": run_id, "traceId": trace_id},
+    )
+    assert run.status_code == 202
+    initial = (
+        await client.get(f"/api/v1/workflows/runs/{run_id}/research-graph")
+    ).json()["data"]
+    proposal = {
+        "schemaVersion": 1,
+        "idempotencyKey": "unscoped-proposal-1",
+        "expectedRevision": None,
+        "expectedSequence": initial["lastSequence"],
+        "action": "propose",
+        "traceId": trace_id,
+        "nodeId": "claim",
+        "entity": {"id": "manual-source", "kind": "source"},
+    }
+    endpoint = f"/api/v1/workflows/runs/{run_id}/research-graph/mutations"
+    first = await client.post(endpoint, json=proposal)
+    assert first.status_code == 200
+    first_data = first.json()["data"]
+    assert first_data["events"][0]["id"] == proposal["idempotencyKey"]
+    assert first_data["graph"]["entities"][-1]["state"] == "proposed"
+    replay = await client.post(endpoint, json=proposal)
+    assert replay.status_code == 200
+    assert replay.json()["data"]["graph"]["history"] == first_data["graph"]["history"]
+    stale = await client.post(
+        endpoint,
+        json={**proposal, "idempotencyKey": "unscoped-proposal-stale"},
+    )
+    assert stale.status_code == 409
+    verified = await client.post(
+        endpoint,
+        json={
+            "schemaVersion": 1,
+            "idempotencyKey": "unscoped-verify-1",
+            "expectedRevision": None,
+            "expectedSequence": first_data["graph"]["lastSequence"],
+            "action": "verify",
+            "traceId": trace_id,
+            "nodeId": "claim",
+            "targetId": "manual-source",
+        },
+    )
+    assert verified.status_code == 200
+    verify_graph = verified.json()["data"]["graph"]
+    assert verify_graph["entities"][-1]["authoritative"] is True
+    retracted = await client.post(
+        endpoint,
+        json={
+            "schemaVersion": 1,
+            "idempotencyKey": "unscoped-retract-1",
+            "expectedRevision": None,
+            "expectedSequence": verify_graph["lastSequence"],
+            "action": "retract",
+            "traceId": trace_id,
+            "nodeId": "claim",
+            "targetId": "manual-source",
+        },
+    )
+    assert retracted.status_code == 200
+    graph = retracted.json()["data"]["graph"]
+    assert graph["entities"][-1]["state"] == "retracted"
+    assert [entry["action"] for entry in graph["history"]] == [
+        "propose",
+        "verify",
+        "retract",
+    ]
 
 @pytest.mark.asyncio
 async def test_publish_gate_blocks_incomplete_research_before_sink(

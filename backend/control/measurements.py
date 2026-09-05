@@ -6,7 +6,6 @@ from the database or ODP — callers pass in raw counts they already have.
 """
 
 from datetime import datetime
-from typing import Optional
 
 from pydantic import BaseModel, Field
 
@@ -22,17 +21,17 @@ class SourceMeasurement(BaseModel):
     rejected: int
 
     fetch_latency_ms: int
-    ingest_latency_ms: Optional[int] = None
-    store_latency_ms: Optional[int] = None
+    ingest_latency_ms: int | None = None
+    store_latency_ms: int | None = None
 
     error_rate: float
     duplicate_rate: float
 
-    freshness_lag_seconds: Optional[int] = None
+    freshness_lag_seconds: int | None = None
     cursor_advanced: bool
 
-    odp_stream_lag: Optional[int] = None
-    odp_pending: Optional[int] = None
+    odp_stream_lag: int | None = None
+    odp_pending: int | None = None
     dlq_count: int = 0
 
     #: {ErrorKind.value: count} — PR-Control-3. Reuses the SAME taxonomy the
@@ -45,7 +44,7 @@ class SourceMeasurement(BaseModel):
     #: backend.models.source_measurement.SourceMeasurement.source_ts_quality.
     #: None when this measurement was built from the pre-C1 TaskRunEvent
     #: fallback path, which has no freshness quality signal at all.
-    source_ts_quality: Optional[str] = None
+    source_ts_quality: str | None = None
 
     observed_at: datetime
 
@@ -61,14 +60,14 @@ class SourceMeasurement(BaseModel):
         fetch_latency_ms: int,
         observed_at: datetime,
         cursor_advanced: bool,
-        ingest_latency_ms: Optional[int] = None,
-        store_latency_ms: Optional[int] = None,
-        freshness_lag_seconds: Optional[int] = None,
-        odp_stream_lag: Optional[int] = None,
-        odp_pending: Optional[int] = None,
+        ingest_latency_ms: int | None = None,
+        store_latency_ms: int | None = None,
+        freshness_lag_seconds: int | None = None,
+        odp_stream_lag: int | None = None,
+        odp_pending: int | None = None,
         dlq_count: int = 0,
-        error_kinds: Optional[dict[str, int]] = None,
-        source_ts_quality: Optional[str] = None,
+        error_kinds: dict[str, int] | None = None,
+        source_ts_quality: str | None = None,
     ) -> "SourceMeasurement":
         """Construct a SourceMeasurement, safely deriving error/duplicate rates.
 

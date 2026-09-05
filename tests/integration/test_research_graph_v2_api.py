@@ -73,7 +73,12 @@ async def test_authenticated_studio_review_rejects_self_review_and_pins_fold(cli
                 counts={"expected": 1, "record_present": 1, "rejected": 0, "dlq": 0, "unknown": 0},
                 materialization_status="completed",
                 record_references=[
-                    {"source_id": "source-1", "event_id": "event-1", "odp_record_id": 1, "committed_at": "2026-08-30T00:00:00+00:00"}
+                    {
+                        "source_id": "source-1",
+                        "event_id": "event-1",
+                        "odp_record_id": 1,
+                        "committed_at": "2026-08-30T00:00:00+00:00",
+                    }
                 ],
                 retention_state="retained",
                 finalization_reason="complete",
@@ -249,7 +254,12 @@ async def test_authenticated_studio_review_rejects_self_review_and_pins_fold(cli
                 counts={"expected": 1, "record_present": 1, "rejected": 0, "dlq": 0, "unknown": 0},
                 materialization_status="completed",
                 record_references=[
-                    {"source_id": "source-1", "event_id": "event-1", "odp_record_id": 1, "committed_at": "2026-08-30T00:00:00+00:00"}
+                    {
+                        "source_id": "source-1",
+                        "event_id": "event-1",
+                        "odp_record_id": 1,
+                        "committed_at": "2026-08-30T00:00:00+00:00",
+                    }
                 ],
                 retention_state="retained",
                 finalization_reason="complete",
@@ -376,7 +386,12 @@ async def test_zero_and_partial_manifest_policy_fail_closed(db_session):
                 counts={"expected": 2, "record_present": 1, "rejected": 1, "dlq": 0, "unknown": 0},
                 materialization_status="partial",
                 record_references=[
-                    {"source_id": "source-1", "event_id": "event-1", "odp_record_id": 1, "committed_at": "2026-08-30T00:00:00+00:00"}
+                    {
+                        "source_id": "source-1",
+                        "event_id": "event-1",
+                        "odp_record_id": 1,
+                        "committed_at": "2026-08-30T00:00:00+00:00",
+                    }
                 ],
                 retention_state="retained",
                 finalization_reason="rejected",

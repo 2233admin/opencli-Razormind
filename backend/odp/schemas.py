@@ -74,7 +74,7 @@ class IngestReject:
     event_id: str | None = None
 
     @classmethod
-    def from_wire(cls, d: dict[str, Any]) -> "IngestReject":
+    def from_wire(cls, d: dict[str, Any]) -> IngestReject:
         return cls(
             index=int(d.get("index", 0)),
             reason=str(d.get("reason", "")),
@@ -96,7 +96,7 @@ class OdpIngestResponse:
     errors: list[IngestReject] = field(default_factory=list)
 
     @classmethod
-    def from_wire(cls, d: dict[str, Any]) -> "OdpIngestResponse":
+    def from_wire(cls, d: dict[str, Any]) -> OdpIngestResponse:
         return cls(
             accepted=int(d.get("accepted", 0)),
             duplicates=int(d.get("duplicates", 0)),

@@ -296,6 +296,35 @@ export type WorkflowRunProjection = {
   errors: Array<{ code: string; message: string; node_id?: string | null; edge_id?: string | null }>
 }
 
+export type WorkspaceWorkflowRunScope = {
+  workspaceId: string
+  projectId: string
+  workflowId: string
+}
+
+type WorkspaceWorkflowRunTrace = {
+  trace: WorkflowRunTraceResponse
+}
+
+function workspaceWorkflowRunEndpoint(
+  scope: WorkspaceWorkflowRunScope,
+  runId?: string,
+): string {
+  const root = `/api/v1/workspaces/${encodeURIComponent(scope.workspaceId)}`
+    + `/projects/${encodeURIComponent(scope.projectId)}`
+    + `/workflows/${encodeURIComponent(scope.workflowId)}/runs`
+  return runId ? `${root}/${encodeURIComponent(runId)}` : root
+}
+
+function workspaceWorkflowEvidenceBatchEndpoint(
+  scope: WorkspaceWorkflowRunScope,
+  runId: string,
+  batchId?: string,
+): string {
+  const root = `${workspaceWorkflowRunEndpoint(scope, runId)}/evidence-batches`
+  return batchId ? `${root}/${encodeURIComponent(batchId)}` : root
+}
+
 export type WorkflowResearchLedgerEntry = {
   runId: string
   parentRunId?: string | null
@@ -450,6 +479,45 @@ export async function startWorkflowRun(
     }),
   })
   return readApiResponse(response, "Workflow run failed")
+}
+
+export async function startWorkspaceWorkflowRun(
+  scope: WorkspaceWorkflowRunScope,
+  options: { authorization?: string | null } = {},
+): Promise<WorkflowRunProjection> {
+  const response = await fetch(workspaceWorkflowRunEndpoint(scope), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(options.authorization ? { Authorization: options.authorization } : {}),
+    },
+    body: JSON.stringify({
+      inputs: {},
+      user: "studio-run-trace",
+    }),
+  })
+  return readApiResponse(response, "Published Studio workflow run failed")
+}
+
+export async function replayWorkspaceWorkflowRunTrace(
+  scope: WorkspaceWorkflowRunScope,
+  runId: string,
+  options: { authorization?: string | null } = {},
+): Promise<WorkflowRunStreamReplay> {
+  const response = await fetch(`${workspaceWorkflowRunEndpoint(scope, runId)}/trace`, {
+    headers: {
+      ...(options.authorization ? { Authorization: options.authorization } : {}),
+    },
+    cache: "no-store",
+  })
+  const result = await readApiResponse<WorkspaceWorkflowRunTrace>(
+    response,
+    "Published Studio workflow trace failed",
+  )
+  return {
+    events: result.trace.events,
+    projection: result.trace.projection,
+  }
 }
 
 export async function fetchWorkflowRunProjection(
@@ -651,6 +719,32 @@ export async function fetchWorkflowEvidenceBatches(
   return readApiResponse(response, "Workflow evidence batches failed")
 }
 
+export async function fetchWorkspaceWorkflowEvidenceBatches(
+  scope: WorkspaceWorkflowRunScope,
+  runId: string,
+  options: {
+    authorization?: string | null
+    nodeId?: string
+    sourceGroup?: string
+    cursor?: string
+    limit?: number
+  } = {},
+): Promise<WorkflowEvidenceBatchListResponse> {
+  const search = new URLSearchParams()
+  if (options.nodeId) search.set("node_id", options.nodeId)
+  if (options.sourceGroup) search.set("source_group", options.sourceGroup)
+  if (options.cursor) search.set("cursor", options.cursor)
+  if (typeof options.limit === "number") search.set("limit", String(options.limit))
+  const suffix = search.size > 0 ? `?${search.toString()}` : ""
+  const response = await fetch(`${workspaceWorkflowEvidenceBatchEndpoint(scope, runId)}${suffix}`, {
+    headers: {
+      ...(options.authorization ? { Authorization: options.authorization } : {}),
+    },
+    cache: "no-store",
+  })
+  return readApiResponse(response, "Published Studio workflow evidence batches failed")
+}
+
 export async function fetchWorkflowEvidenceBatchDetail(
   runId: string,
   batchId: string,
@@ -663,6 +757,21 @@ export async function fetchWorkflowEvidenceBatchDetail(
     cache: "no-store",
   })
   return readApiResponse(response, "Workflow evidence batch detail failed")
+}
+
+export async function fetchWorkspaceWorkflowEvidenceBatchDetail(
+  scope: WorkspaceWorkflowRunScope,
+  runId: string,
+  batchId: string,
+  options: { authorization?: string | null } = {},
+): Promise<WorkflowEvidenceBatchDetail> {
+  const response = await fetch(workspaceWorkflowEvidenceBatchEndpoint(scope, runId, batchId), {
+    headers: {
+      ...(options.authorization ? { Authorization: options.authorization } : {}),
+    },
+    cache: "no-store",
+  })
+  return readApiResponse(response, "Published Studio workflow evidence batch detail failed")
 }
 
 export async function fetchWorkflowEvidenceBatchProjection(
@@ -686,6 +795,30 @@ export async function fetchWorkflowEvidenceBatchProjection(
     cache: "no-store",
   })
   return readApiResponse(response, "Workflow evidence batch projection failed")
+}
+
+export async function fetchWorkspaceWorkflowEvidenceBatchProjection(
+  scope: WorkspaceWorkflowRunScope,
+  runId: string,
+  options: {
+    authorization?: string | null
+    nodeId?: string
+    sourceGroup?: string
+    include?: string[]
+  } = {},
+): Promise<WorkflowEvidenceBatchProjection> {
+  const search = new URLSearchParams()
+  if (options.nodeId) search.set("node_id", options.nodeId)
+  if (options.sourceGroup) search.set("source_group", options.sourceGroup)
+  for (const value of options.include ?? []) search.append("include", value)
+  const suffix = search.size > 0 ? `?${search.toString()}` : ""
+  const response = await fetch(`${workspaceWorkflowEvidenceBatchEndpoint(scope, runId)}/projection${suffix}`, {
+    headers: {
+      ...(options.authorization ? { Authorization: options.authorization } : {}),
+    },
+    cache: "no-store",
+  })
+  return readApiResponse(response, "Published Studio workflow evidence batch projection failed")
 }
 
 export function parseWorkflowRunEventStream(text: string): WorkflowRunStreamReplay {

@@ -31,7 +31,6 @@ from backend.llm.openai_compat import OpenAICompatAdapter
 from backend.llm.resolver import resolver
 from backend.models.provider import ModelProvider
 
-
 # ── factory helpers (backend.llm.factory) ───────────────────────────────────
 
 
@@ -177,7 +176,12 @@ async def test_skill_channel_build_model_call_uses_dict_provider_fields():
         model_call = await _build_model_call(
             {"api_key": "sk-skill", "base_url": None, "model": "qwen3:4b"}
         )
-        await model_call([{"role": "user", "content": "hi"}], tools=None, model="qwen3:4b", xml=False)
+        await model_call(
+            [{"role": "user", "content": "hi"}],
+            tools=None,
+            model="qwen3:4b",
+            xml=False,
+        )
     _, kwargs = mock_cls.call_args
     assert kwargs["api_key"] == "sk-skill"
 

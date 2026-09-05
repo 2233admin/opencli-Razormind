@@ -58,7 +58,9 @@ async def test_successful_run_records_measurement_with_real_counts(db_engine, db
         record_a, record_b = MagicMock(normalized_data={}), MagicMock(normalized_data={})
         sink = MagicMock()
         sink.write_batch = AsyncMock(
-            return_value=SinkResult(accepted=2, duplicates=1, rejected=0, records=[record_a, record_b])
+            return_value=SinkResult(
+                accepted=2, duplicates=1, rejected=0, records=[record_a, record_b]
+            )
         )
 
         with patch("backend.pipeline.collector.collect", return_value=channel_result):
@@ -134,7 +136,9 @@ async def test_no_run_id_skips_measurement_recording(db_engine, db_session):
         source, task = await _seed(db_session)
         channel_result = ChannelResult.ok([{"title": "x"}])
         sink = MagicMock()
-        sink.write_batch = AsyncMock(return_value=SinkResult(accepted=1, records=[MagicMock(normalized_data={})]))
+        sink.write_batch = AsyncMock(
+            return_value=SinkResult(accepted=1, records=[MagicMock(normalized_data={})])
+        )
 
         with patch("backend.pipeline.collector.collect", return_value=channel_result):
             result = await run_pipeline(
@@ -157,10 +161,14 @@ async def test_cursor_advanced_flows_from_real_commit_result(db_engine, db_sessi
         source, task = await _seed(db_session)
 
         channel_result = ChannelResult.ok(
-            [{"title": "x"}], __cursor_pending__={"etag": "v2"}, __cursor_source_id__=source.id,
+            [{"title": "x"}],
+            __cursor_pending__={"etag": "v2"},
+            __cursor_source_id__=source.id,
         )
         sink = MagicMock()
-        sink.write_batch = AsyncMock(return_value=SinkResult(accepted=1, records=[MagicMock(normalized_data={})]))
+        sink.write_batch = AsyncMock(
+            return_value=SinkResult(accepted=1, records=[MagicMock(normalized_data={})])
+        )
 
         with patch("backend.pipeline.collector.collect", return_value=channel_result):
             result = await run_pipeline(
@@ -181,7 +189,9 @@ async def test_freshness_source_quality_from_parseable_published_at(db_engine, d
     with patch("backend.database.AsyncSessionLocal", _sessionmaker(db_engine)):
         source, task = await _seed(db_session)
 
-        channel_result = ChannelResult.ok([{"title": "x", "published": "Wed, 01 Jul 2026 00:00:00 GMT"}])
+        channel_result = ChannelResult.ok(
+            [{"title": "x", "published": "Wed, 01 Jul 2026 00:00:00 GMT"}]
+        )
         record = MagicMock(normalized_data={"published_at": "Wed, 01 Jul 2026 00:00:00 GMT"})
         sink = MagicMock()
         sink.write_batch = AsyncMock(return_value=SinkResult(accepted=1, records=[record]))

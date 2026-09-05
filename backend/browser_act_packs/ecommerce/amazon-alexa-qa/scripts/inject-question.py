@@ -15,7 +15,8 @@ def main():
     (function() {{
       try {{
         const el = document.getElementById('rufus-text-area');
-        if (!el) return JSON.stringify({{error: true, message: 'Alexa textarea not found - panel may be closed'}});
+        if (!el) return JSON.stringify({{error: true, message: 'Alexa textarea not found - ' +
+          'panel may be closed'}});
         const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
         setter.call(el, {q});
         el.dispatchEvent(new Event('input', {{bubbles: true}}));

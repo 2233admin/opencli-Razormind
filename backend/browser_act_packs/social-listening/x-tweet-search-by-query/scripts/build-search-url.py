@@ -6,29 +6,124 @@ import urllib.parse
 def main():
     sys.stdout.reconfigure(encoding='utf-8', newline='\n')
     parser = argparse.ArgumentParser(
-        description='Build X search URL from a raw query and optional advanced filters'
+        description=(
+            "Build X search URL from a raw query and optional advanced filters"
+        )
     )
-    parser.add_argument('raw_query', help='Free-form X advanced search query (e.g. "AI min_faves:100 lang:en filter:media -filter:retweets")')
-    parser.add_argument('--sort', choices=['Latest', 'Top'], default='Latest', help='Sort mode')
-    parser.add_argument('--language', default=None, help='ISO 639-1 language code; appended as lang:<code> if not already in query')
-    parser.add_argument('--min-retweets', type=int, default=None, help='Minimum retweet count; appended as min_retweets:N')
-    parser.add_argument('--min-faves', type=int, default=None, help='Minimum favorite count; appended as min_faves:N')
-    parser.add_argument('--min-replies', type=int, default=None, help='Minimum reply count; appended as min_replies:N')
-    parser.add_argument('--since', default=None, help='Start date YYYY-MM-DD; appended as since:YYYY-MM-DD')
-    parser.add_argument('--until', default=None, help='End date YYYY-MM-DD; appended as until:YYYY-MM-DD')
-    parser.add_argument('--author', default=None, help='Tweets only from this handle (without @); appended as from:HANDLE')
-    parser.add_argument('--in-reply-to', default=None, help='Tweets replying to this handle; appended as to:HANDLE')
-    parser.add_argument('--mentioning', default=None, help='Tweets mentioning this handle; appended as @HANDLE')
-    parser.add_argument('--only-verified', action='store_true', help='Only verified users; appended as filter:verified')
-    parser.add_argument('--only-blue-verified', action='store_true', help='Only X Premium / blue verified; appended as filter:blue_verified')
-    parser.add_argument('--only-image', action='store_true', help='Only tweets with images; appended as filter:images')
-    parser.add_argument('--only-video', action='store_true', help='Only tweets with native video; appended as filter:native_video')
-    parser.add_argument('--only-quote', action='store_true', help='Only quote tweets; appended as filter:quote')
-    parser.add_argument('--exclude-retweets', action='store_true', help='Exclude retweets; appended as -filter:retweets')
-    parser.add_argument('--exclude-replies', action='store_true', help='Exclude replies; appended as -filter:replies')
-    parser.add_argument('--geocode', default=None, help='Geocode filter LAT,LON,RADIUS (e.g. 37.7749,-122.4194,5mi); appended as geocode:...')
-    parser.add_argument('--near', default=None, help='Place name near (appended as near:"NAME")')
-    parser.add_argument('--within', default=None, help='Radius around near (e.g. 15mi or 25km); appended as within:VALUE')
+    parser.add_argument(
+        "raw_query",
+        help=(
+            'Free-form X advanced search query (e.g. "AI min_faves:100 '
+            'lang:en filter:media -filter:retweets")'
+        ),
+    )
+    parser.add_argument(
+        "--sort",
+        choices=["Latest", "Top"],
+        default="Latest",
+        help="Sort mode",
+    )
+    parser.add_argument(
+        "--language",
+        default=None,
+        help="ISO 639-1 language code; appended as lang:<code> if not already in query",
+    )
+    parser.add_argument(
+        "--min-retweets",
+        type=int,
+        default=None,
+        help="Minimum retweet count; appended as min_retweets:N",
+    )
+    parser.add_argument(
+        "--min-faves",
+        type=int,
+        default=None,
+        help="Minimum favorite count; appended as min_faves:N",
+    )
+    parser.add_argument(
+        "--min-replies",
+        type=int,
+        default=None,
+        help="Minimum reply count; appended as min_replies:N",
+    )
+    parser.add_argument(
+        "--since",
+        default=None,
+        help="Start date YYYY-MM-DD; appended as since:YYYY-MM-DD",
+    )
+    parser.add_argument(
+        "--until",
+        default=None,
+        help="End date YYYY-MM-DD; appended as until:YYYY-MM-DD",
+    )
+    parser.add_argument(
+        "--author",
+        default=None,
+        help="Tweets only from this handle (without @); appended as from:HANDLE",
+    )
+    parser.add_argument(
+        "--in-reply-to",
+        default=None,
+        help="Tweets replying to this handle; appended as to:HANDLE",
+    )
+    parser.add_argument(
+        "--mentioning",
+        default=None,
+        help="Tweets mentioning this handle; appended as @HANDLE",
+    )
+    parser.add_argument(
+        "--only-verified",
+        action="store_true",
+        help="Only verified users; appended as filter:verified",
+    )
+    parser.add_argument(
+        "--only-blue-verified",
+        action="store_true",
+        help="Only X Premium / blue verified; appended as filter:blue_verified",
+    )
+    parser.add_argument(
+        "--only-image",
+        action="store_true",
+        help="Only tweets with images; appended as filter:images",
+    )
+    parser.add_argument(
+        "--only-video",
+        action="store_true",
+        help="Only tweets with native video; appended as filter:native_video",
+    )
+    parser.add_argument(
+        "--only-quote",
+        action="store_true",
+        help="Only quote tweets; appended as filter:quote",
+    )
+    parser.add_argument(
+        "--exclude-retweets",
+        action="store_true",
+        help="Exclude retweets; appended as -filter:retweets",
+    )
+    parser.add_argument(
+        "--exclude-replies",
+        action="store_true",
+        help="Exclude replies; appended as -filter:replies",
+    )
+    parser.add_argument(
+        "--geocode",
+        default=None,
+        help=(
+            "Geocode filter LAT,LON,RADIUS (e.g. 37.7749,-122.4194,5mi); "
+            "appended as geocode:..."
+        ),
+    )
+    parser.add_argument(
+        "--near",
+        default=None,
+        help='Place name near (appended as near:"NAME")',
+    )
+    parser.add_argument(
+        "--within",
+        default=None,
+        help="Radius around near (e.g. 15mi or 25km); appended as within:VALUE",
+    )
     args = parser.parse_args()
 
     q = args.raw_query.strip()

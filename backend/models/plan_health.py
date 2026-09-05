@@ -1,5 +1,4 @@
 from datetime import datetime
-from typing import Optional
 
 from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
@@ -57,7 +56,7 @@ class PlanHealthRecord(TimestampMixin):
     #: records actually stored by the store sink, ...).
     items_out: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
-    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     #: Extra per-node-type context (e.g. dedupe's dropped-count, store's
     #: skipped-count) for debugging without reconstructing from logs —
     #: mirrors SourceMeasurement.raw / ControlActionRecord.payload precedent.

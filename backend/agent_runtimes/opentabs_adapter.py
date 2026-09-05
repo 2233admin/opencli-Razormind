@@ -17,8 +17,8 @@ from __future__ import annotations
 
 import os
 import shutil
-from inspect import isawaitable
 from collections.abc import AsyncIterator
+from inspect import isawaitable
 from typing import Any
 
 import httpx
@@ -117,7 +117,9 @@ class OpenTabsRuntimeAdapter(RuntimeAdapter):
                 error_type=exc.error_type or type(exc).__name__,
             )
         except httpx.TimeoutException as exc:
-            yield event_error(task.task_id, f"OpenTabs request timed out: {exc}", type(exc).__name__)
+            yield event_error(
+                task.task_id, f"OpenTabs request timed out: {exc}", type(exc).__name__
+            )
         except httpx.HTTPError as exc:
             yield event_error(task.task_id, f"OpenTabs request failed: {exc}", type(exc).__name__)
         except Exception as exc:
@@ -154,7 +156,9 @@ class OpenTabsRuntimeAdapter(RuntimeAdapter):
             response = await client.get("/health", headers=self._headers(task.config))
         payload = _checked_json_response(response, "/health")
         if not isinstance(payload, dict):
-            raise RuntimeInvocationError("OpenTabs /health response was not an object", "ValueError")
+            raise RuntimeInvocationError(
+                "OpenTabs /health response was not an object", "ValueError"
+            )
         yield event_state(task.task_id, {"opentabs": payload})
         yield event_done(task.task_id, result={"health": payload})
 
@@ -224,12 +228,17 @@ class OpenTabsRuntimeAdapter(RuntimeAdapter):
         return result[0] if isinstance(result, tuple) else result
 
     def _headers(self, config: dict[str, Any]) -> dict[str, str]:
-        secret = _read_optional_string(config.get("secret")) or os.environ.get("OPENTABS_SECRET", "")
+        secret = (
+            _read_optional_string(config.get("secret"))
+            or os.environ.get("OPENTABS_SECRET", "")
+        )
         return {"Authorization": f"Bearer {secret}"} if secret else {}
 
 
 def _base_url(config: dict[str, Any]) -> str:
-    configured = _read_optional_string(config.get("base_url")) or os.environ.get("OPENTABS_BASE_URL")
+    configured = _read_optional_string(config.get("base_url")) or os.environ.get(
+        "OPENTABS_BASE_URL"
+    )
     return (configured or _DEFAULT_BASE_URL).rstrip("/")
 
 
@@ -288,7 +297,11 @@ def _tool_error_message(result: dict[str, Any]) -> str:
         parts = [
             str(item.get("text"))
             for item in content
-            if isinstance(item, dict) and item.get("type") == "text" and item.get("text") is not None
+            if (
+                isinstance(item, dict)
+                and item.get("type") == "text"
+                and item.get("text") is not None
+            )
         ]
         return "".join(parts)
     error = result.get("error")

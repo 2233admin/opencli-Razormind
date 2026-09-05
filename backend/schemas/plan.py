@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -24,8 +24,8 @@ class PlanUpdate(BaseModel):
     ``graph`` is supplied it goes through the same validator as create and
     bumps ``version``."""
 
-    name: Optional[str] = Field(None, min_length=1, max_length=255)
-    graph: Optional[dict[str, Any]] = None
+    name: str | None = Field(None, min_length=1, max_length=255)
+    graph: dict[str, Any] | None = None
 
 
 class PlanRead(UTCModel):
@@ -55,14 +55,16 @@ class SourceSegmentRead(BaseModel):
     field-for-field."""
 
     node_id: str
-    source_id: Optional[str] = None
-    task_id: Optional[str] = None
-    run_id: Optional[str] = None
+    source_id: str | None = None
+    task_id: str | None = None
+    run_id: str | None = None
+
     success: bool
     collected: int
     stored: int
     skipped: int
-    error: Optional[str] = None
+    error: str | None = None
+
 
     model_config = {"from_attributes": True}
 
@@ -75,8 +77,9 @@ class SharedSegmentRead(BaseModel):
 
     run_key: str
     success: bool
-    failed_node_id: Optional[str] = None
-    error: Optional[str] = None
+    failed_node_id: str | None = None
+    error: str | None = None
+
     items_in: int
     stored: int
     skipped: int
@@ -95,14 +98,14 @@ class PlanRunRead(BaseModel):
     plan_id: str
     source_id: str
     task_id: str
-    run_id: Optional[str] = None
+    run_id: str | None = None
     success: bool
     collected: int
     stored: int
     skipped: int
-    error: Optional[str] = None
+    error: str | None = None
     source_results: list[SourceSegmentRead] = Field(default_factory=list)
-    shared_segment: Optional[SharedSegmentRead] = None
+    shared_segment: SharedSegmentRead | None = None
 
     model_config = {"from_attributes": True}
 
@@ -121,7 +124,7 @@ class PlanHealthRead(BaseModel):
     duration_ms: int
     items_in: int
     items_out: int
-    error_message: Optional[str] = None
+    error_message: str | None = None
     detail: dict[str, Any] = Field(default_factory=dict)
     recorded_at: datetime
 

@@ -2,14 +2,14 @@
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from typing import Any
 
 from sqlalchemy import select
 
 from backend.channels.base import ChannelFetchError
-from backend.control.error_kinds import map_error_type, map_exception
+from backend.control.error_kinds import map_exception
 from backend.control.recorder import FreshnessInfo, record_run_measurement
 from backend.models.source import DataSource
 from backend.pipeline import events
@@ -30,14 +30,13 @@ def _parse_item_timestamp(value: Any) -> datetime | None:
     try:
         dt = parsedate_to_datetime(value)
         if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        return dt
+            dt = dt.replace(tzinfo=UTC)
     except (TypeError, ValueError):
         pass
     try:
         dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
         if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
+            dt = dt.replace(tzinfo=UTC)
         return dt
     except (TypeError, ValueError):
         return None
@@ -159,7 +158,7 @@ async def run_pipeline(
     from backend.database import AsyncSessionLocal
     from backend.pipeline import ai_processor, collector, notifier_dispatch
 
-    started = datetime.now(timezone.utc)
+    started = datetime.now(UTC)
     params = parameters or {}
     # Pre-step: auto-resolve chrome endpoint from a browser binding. Channels that
     # declare capabilities.session_affinity (opencli, skill) drive a real Chrome
@@ -192,7 +191,7 @@ async def run_pipeline(
     # Step 1: Collect
     logger.info("[task:%s] step1/collect start | source=%s channel=%s params=%s",
                 task_id, source.name, source.channel_type, params)
-    step1_start = datetime.now(timezone.utc)
+    step1_start = datetime.now(UTC)
 
     if run_id:
         # Skill channel: inject run_id into params BEFORE dispatch so the loop can
@@ -214,7 +213,10 @@ async def run_pipeline(
             cfg = source.channel_config
             _site = cfg.get("site", "")
             _cmd = cfg.get("command", "")
-            _raw_args = {**cfg.get("args", {}), **{k: v for k, v in params.items() if k != "chrome_endpoint"}}
+            _raw_args = {
+                **cfg.get("args", {}),
+                **{k: v for k, v in params.items() if k != "chrome_endpoint"},
+            }
             _pos = [str(v) for v in cfg.get("positional_args", [])]
             _fmt = cfg.get("format", "json")
             # Apply same positional-resolution logic as the channel, but this
@@ -265,7 +267,9 @@ async def run_pipeline(
         if run_id:
             await _record_measurement_best_effort(
                 source_id=source.id, run_id=run_id,
-                fetch_latency_ms=int((datetime.now(timezone.utc) - step1_start).total_seconds() * 1000),
+                fetch_latency_ms=int(
+                    (datetime.now(UTC) - step1_start).total_seconds() * 1000
+                ),
                 error_kind=map_exception(exc),
                 raw={"stage": "collect", "error": str(exc), "error_type": error_type},
             )
@@ -308,7 +312,7 @@ async def run_pipeline(
                         await pause_source_for_captcha(
                             session,
                             source=src,
-                            now=datetime.now(timezone.utc),
+                            now=datetime.now(UTC),
                             ttl_seconds=ttl,
                         )
                         await session.commit()
@@ -334,7 +338,9 @@ async def run_pipeline(
         if run_id:
             await _record_measurement_best_effort(
                 source_id=source.id, run_id=run_id,
-                fetch_latency_ms=int((datetime.now(timezone.utc) - step1_start).total_seconds() * 1000),
+                fetch_latency_ms=int(
+                    (datetime.now(UTC) - step1_start).total_seconds() * 1000
+                ),
                 error_type=channel_result.error_type,
                 raw={"stage": "collect", "error": channel_result.error},
             )
@@ -347,7 +353,7 @@ async def run_pipeline(
             )
         return PipelineResult(success=False, source_id=source.id, error=channel_result.error)
 
-    step1_elapsed = int((datetime.now(timezone.utc) - step1_start).total_seconds() * 1000)
+    step1_elapsed = int((datetime.now(UTC) - step1_start).total_seconds() * 1000)
     logger.info("[task:%s] step1/collect done | count=%d metadata=%s",
                 task_id, channel_result.count, channel_result.metadata)
     if run_id:
@@ -620,7 +626,7 @@ async def run_pipeline(
                     level="warning",
                 )
 
-    duration_ms = int((datetime.now(timezone.utc) - started).total_seconds() * 1000)
+    duration_ms = int((datetime.now(UTC) - started).total_seconds() * 1000)
 
     if shadow_errors:
         # Non-blocking signal onto the result too (in addition to the emitted
@@ -634,7 +640,10 @@ async def run_pipeline(
     if run_id:
         await events.emit(
             run_id, "complete",
-            f"任务完成 | 总耗时 {duration_ms}ms | 采集 {channel_result.count} 新增 {len(new_records)} 跳过 {skipped}",
+            (
+                f"任务完成 | 总耗时 {duration_ms}ms | 采集 {channel_result.count} "
+                f"新增 {len(new_records)} 跳过 {skipped}"
+            ),
             detail={
                 "duration_ms": duration_ms,
                 "collected": channel_result.count,
@@ -642,7 +651,7 @@ async def run_pipeline(
                 "skipped": skipped,
             },
         )
-        completed_at = datetime.now(timezone.utc)
+        completed_at = datetime.now(UTC)
         # A successful run has no terminal error_type by definition — shadow-sink
         # errors are non-blocking (the run still succeeded) and are already
         # surfaced via the "complete" event above and PipelineResult.metadata;

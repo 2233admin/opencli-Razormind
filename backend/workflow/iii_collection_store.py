@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+
 from backend.config import get_settings
 from backend.models.iii_collection import (
     IIICollectionAttemptV1,
@@ -76,7 +77,9 @@ def _now() -> datetime:
 
 
 def _canonical_json(value: dict) -> bytes:
-    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return json.dumps(
+        value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
 
 
 def _sha256(value: dict) -> str:
@@ -90,7 +93,14 @@ def _expected_key_set_hash(report: CollectorFinalExpectedKeyReportV1) -> str:
     )
     if len(keys) != len(report.expected_keys):
         raise IIICollectionConflictError("Expected source/event keys must be unique")
-    return _sha256({"expected_keys": [{"source_id": source_id, "event_id": event_id} for source_id, event_id in keys]})
+    return _sha256(
+        {
+            "expected_keys": [
+                {"source_id": source_id, "event_id": event_id}
+                for source_id, event_id in keys
+            ]
+        }
+    )
 
 
 def _report_hash(report: CollectorFinalExpectedKeyReportV1) -> str:
@@ -159,7 +169,10 @@ def _outcomes_match_report(
         and len(outcomes) == len(expected)
         and len(set(outcomes)) == len(outcomes)
         and set(outcomes) == expected
-        and sum(outcome.outcome == "rejected" for outcome in receipt.outcomes) == report.rejected_count
+        and sum(
+            outcome.outcome == "rejected" for outcome in receipt.outcomes
+        )
+        == report.rejected_count
     )
 
 
@@ -304,7 +317,9 @@ async def submit_collection(
             collection=collection,
             payload_sha256=payload_sha256,
         ):
-            raise IIICollectionConflictError("Idempotency key was reused with a different collection")
+            raise IIICollectionConflictError(
+                "Idempotency key was reused with a different collection"
+            )
         attempt, outbound = await _attempt_and_outbound(db, existing.id)
         return CollectionSubmission(existing, attempt, outbound, created=False)
 
@@ -370,7 +385,9 @@ async def submit_collection(
             collection=collection,
             payload_sha256=payload_sha256,
         ):
-            raise IIICollectionConflictError("Idempotency key was reused with a different collection")
+            raise IIICollectionConflictError(
+                "Idempotency key was reused with a different collection"
+            )
         attempt, outbound = await _attempt_and_outbound(db, existing.id)
         return CollectionSubmission(existing, attempt, outbound, created=False)
     await db.refresh(command)
@@ -451,7 +468,9 @@ async def ingest_lifecycle(
         and attempt.trace_id == event.trace_id
         and command.trace_id == event.trace_id
     ):
-        raise IIICollectionConflictError("Lifecycle identity, scope, or payload hash does not match")
+        raise IIICollectionConflictError(
+            "Lifecycle identity, scope, or payload hash does not match"
+        )
     expected = {
         1: "bridge_accepted",
         2: "collector_started",
@@ -559,11 +578,15 @@ async def ingest_expected_key_report(
     """Retain one immutable collector boundary without inferring ODP persistence."""
 
     if report.report_sequence != 1:
-        raise IIICollectionConflictError("Only one final expected-key report is permitted per attempt")
+        raise IIICollectionConflictError(
+            "Only one final expected-key report is permitted per attempt"
+        )
     if _expected_key_set_hash(report) != report.expected_key_set_sha256:
         raise IIICollectionConflictError("Expected-key set hash does not match canonical keys")
     if _report_hash(report) != report.report_hash:
-        raise IIICollectionConflictError("Expected-key report hash does not match canonical content")
+        raise IIICollectionConflictError(
+            "Expected-key report hash does not match canonical content"
+        )
     command, attempt = await _fact_target(
         db, command_id=report.command_id, attempt_id=report.attempt_id
     )
@@ -625,7 +648,11 @@ async def ingest_expected_key_report(
     except IntegrityError:
         await db.rollback()
         existing = await _report_for_attempt(db, attempt.id)
-        if existing is None or existing.report_hash != report.report_hash or existing.report_id != report.report_id:
+        if (
+            existing is None
+            or existing.report_hash != report.report_hash
+            or existing.report_id != report.report_id
+        ):
             raise IIICollectionConflictError("Expected-key report replay has changed content")
         return CollectorFinalExpectedKeyReportReadV1(
             command_id=command.id,

@@ -1,15 +1,33 @@
 import argparse
 import sys
 
+
 def main():
     sys.stdout.reconfigure(encoding='utf-8', newline='\n')
     parser = argparse.ArgumentParser()
-    parser.add_argument('page_id')                        # Numeric Facebook page ID
-    parser.add_argument('--cursor', default='null')       # Pagination cursor (null for first page)
-    parser.add_argument('--after-time', default='null')   # Unix timestamp: only posts after this time
-    parser.add_argument('--before-time', default='null')  # Unix timestamp: only posts before this time
-    parser.add_argument('--count', default='5')           # Number of posts per batch (1-10)
+    parser.add_argument('page_id')  # Numeric Facebook page ID
+    parser.add_argument(
+        '--cursor', default='null'
+    )  # Pagination cursor (null for first page)
+    parser.add_argument(
+        '--after-time', default='null'
+    )  # Unix timestamp: only posts after this time
+    parser.add_argument(
+        '--before-time', default='null'
+    )  # Unix timestamp: only posts before this time
+    parser.add_argument(
+        '--count', default='5'
+    )  # Number of posts per batch (1-10)
     args = parser.parse_args()
+    feed_flag_key = (
+        "'__relay_internal__pv__CometFeedStory"
+        "DangerouslySetInnerFeedItemDisplayContent"
+        "relayprovider'"
+    )
+    reels_flag_key = (
+        "'__relay_internal__pv__FBReelsMediaFooter_comet_enable_reels_ads_"
+        "gkv2relayprovider'"
+    )
 
     cursor_val = 'null' if args.cursor == 'null' else repr(args.cursor)
     after_val = args.after_time if args.after_time == 'null' else args.after_time
@@ -20,7 +38,9 @@ def main():
       try {{
         const fbDtsg = require('DTSGInitData')?.token || '';
         let lsd = '';
-        const allScripts = Array.from(document.querySelectorAll('script')).map(s => s.textContent).join('');
+        const allScripts = Array.from(
+          document.querySelectorAll('script')
+        ).map(s => s.textContent).join('');
         const lsdM = allScripts.match(/"LSD"[^}}]*"token":"([^"]+)"/);
         if (lsdM) lsd = lsdM[1];
 
@@ -58,11 +78,11 @@ def main():
           '__relay_internal__pv__IncludeCommentWithAttachmentrelayprovider': true,
           '__relay_internal__pv__GHLShouldUpdateVideoPreviewImagerelayprovider': false,
           '__relay_internal__pv__GHLVideoTimestampOnShortsrelayprovider': false,
-          '__relay_internal__pv__CometFeedStoryDangerouslySetInnerFeedItemDisplayContentrelayprovider': false,
+          {feed_flag_key}: false,
           '__relay_internal__pv__StoriesRingrelayprovider': false,
           '__relay_internal__pv__UseCometRouter_cometRouterrelayprovider': false,
           '__relay_internal__pv__FBReelsFeedbackActionsrelayprovider': false,
-          '__relay_internal__pv__FBReelsMediaFooter_comet_enable_reels_ads_gkv2relayprovider': false,
+          {reels_flag_key}: false,
           '__relay_internal__pv__GHLShouldChangeSponsoredDataFieldNameForFeedV2relayprovider': true,
           '__relay_internal__pv__GHLShouldChangeAdIdFieldNameForFeedV2relayprovider': true
         }};
@@ -90,7 +110,8 @@ def main():
 
         const text = await resp.text();
         const lines = text.split('\\n').filter(l => l.trim().startsWith('{{'));
-        if (lines.length < 2) return JSON.stringify({{ error: true, message: 'Unexpected response format', raw: text.slice(0, 200) }});
+        if (lines.length < 2) return JSON.stringify({{ error: true,
+          message: 'Unexpected response format', raw: text.slice(0, 200) }});
 
         function getUFI(node) {{
           return node?.comet_sections?.feedback?.story?.story_ufi_container?.story
@@ -124,7 +145,8 @@ def main():
               profileUrl: node?.actors?.[0]?.url || null
             }},
             likes: renderers?.[0]?.feedback?.reaction_count?.count ?? null,
-            comments: renderers?.[1]?.feedback?.comment_rendering_instance?.comments?.total_count ?? null,
+            comments: renderers?.[1]?.feedback?.comment_rendering_instance
+              ?.comments?.total_count ?? null,
             shares: renderers?.[2]?.feedback?.share_count?.count ?? null,
             topReactions: ufi?.top_reactions?.edges?.map(e => ({{
               name: e.node?.localized_name,

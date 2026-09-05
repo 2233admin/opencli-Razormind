@@ -90,7 +90,7 @@ class DeliveryAuthorizationCreateV1(_V1Model):
     selected_claim_ids: list[str] = Field(min_length=1, max_length=200)
 
     @model_validator(mode="after")
-    def require_distinct_claims(self) -> "DeliveryAuthorizationCreateV1":
+    def require_distinct_claims(self) -> DeliveryAuthorizationCreateV1:
         if len(self.selected_claim_ids) != len(set(self.selected_claim_ids)):
             raise ValueError("Selected claim IDs must be distinct")
         return self

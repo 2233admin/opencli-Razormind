@@ -1,5 +1,3 @@
-from typing import Optional
-
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,8 +11,8 @@ router = APIRouter(prefix="/schedules", tags=["schedules"])
 
 @router.get("", response_model=ApiResponse[list[CronScheduleRead]])
 async def list_schedules(
-    source_id: Optional[str] = None,
-    enabled: Optional[bool] = None,
+    source_id: str | None = None,
+    enabled: bool | None = None,
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),

@@ -1,11 +1,12 @@
 """Unit tests for the pipeline orchestrator."""
 
-import pytest
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 from backend.channels.base import ChannelResult
-from backend.pipeline.pipeline import PipelineResult, run_pipeline
+from backend.pipeline.pipeline import run_pipeline
 
 
 def _make_source(db_session, name="Pipeline Test Source", channel_type="rss"):
@@ -49,7 +50,10 @@ async def test_run_pipeline_success(db_session):
 
     with (
         patch("backend.pipeline.collector.collect", return_value=channel_result),
-        patch("backend.pipeline.storer.store_records", new=AsyncMock(return_value=(mock_records, 0))),
+        patch(
+            "backend.pipeline.storer.store_records",
+            new=AsyncMock(return_value=(mock_records, 0)),
+        ),
     ):
         result = await run_pipeline(
             task.id,
@@ -155,8 +159,14 @@ async def test_run_pipeline_with_ai(db_session):
 
     with (
         patch("backend.pipeline.collector.collect", return_value=channel_result),
-        patch("backend.pipeline.storer.store_records", new=AsyncMock(return_value=([mock_record], 0))),
-        patch("backend.pipeline.ai_processor.process_with_ai", new=AsyncMock(return_value=1)),
+        patch(
+            "backend.pipeline.storer.store_records",
+            new=AsyncMock(return_value=([mock_record], 0)),
+        ),
+        patch(
+            "backend.pipeline.ai_processor.process_with_ai",
+            new=AsyncMock(return_value=1),
+        ),
         patch("backend.database.AsyncSessionLocal", return_value=inner_cm),
     ):
         result = await run_pipeline(
@@ -217,8 +227,14 @@ async def test_run_pipeline_ai_persist_is_bulk_not_n_plus_one(db_session):
 
     with (
         patch("backend.pipeline.collector.collect", return_value=channel_result),
-        patch("backend.pipeline.storer.store_records", new=AsyncMock(return_value=(mock_records, 0))),
-        patch("backend.pipeline.ai_processor.process_with_ai", new=AsyncMock(return_value=n)),
+        patch(
+            "backend.pipeline.storer.store_records",
+            new=AsyncMock(return_value=(mock_records, 0)),
+        ),
+        patch(
+            "backend.pipeline.ai_processor.process_with_ai",
+            new=AsyncMock(return_value=n),
+        ),
         patch("backend.database.AsyncSessionLocal", return_value=inner_cm),
     ):
         result = await run_pipeline(
@@ -314,7 +330,10 @@ async def test_run_pipeline_with_notifications(db_session):
 
     with (
         patch("backend.pipeline.collector.collect", return_value=channel_result),
-        patch("backend.pipeline.storer.store_records", new=AsyncMock(return_value=([mock_record], 0))),
+        patch(
+            "backend.pipeline.storer.store_records",
+            new=AsyncMock(return_value=([mock_record], 0)),
+        ),
         patch(
             "backend.pipeline.notifier_dispatch.dispatch_notifications",
             new=AsyncMock(return_value={"sent": 1, "failed": 0}),
@@ -419,7 +438,10 @@ async def test_run_pipeline_store_exception(db_session):
 
     with (
         patch("backend.pipeline.collector.collect", return_value=channel_result),
-        patch("backend.pipeline.storer.store_records", new=AsyncMock(side_effect=RuntimeError("db error"))),
+        patch(
+            "backend.pipeline.storer.store_records",
+            new=AsyncMock(side_effect=RuntimeError("db error")),
+        ),
     ):
         result = await run_pipeline(
             task.id, source, enable_ai=False, enable_notifications=False
@@ -452,8 +474,14 @@ async def test_run_pipeline_ai_exception_continues(db_session):
 
     with (
         patch("backend.pipeline.collector.collect", return_value=channel_result),
-        patch("backend.pipeline.storer.store_records", new=AsyncMock(return_value=([mock_record], 0))),
-        patch("backend.pipeline.ai_processor.process_with_ai", new=AsyncMock(side_effect=RuntimeError("ai crash"))),
+        patch(
+            "backend.pipeline.storer.store_records",
+            new=AsyncMock(return_value=([mock_record], 0)),
+        ),
+        patch(
+            "backend.pipeline.ai_processor.process_with_ai",
+            new=AsyncMock(side_effect=RuntimeError("ai crash")),
+        ),
         patch("backend.database.AsyncSessionLocal", return_value=inner_cm),
     ):
         result = await run_pipeline(
@@ -482,7 +510,10 @@ async def test_run_pipeline_no_ai_config_skips_ai(db_session):
 
     with (
         patch("backend.pipeline.collector.collect", return_value=channel_result),
-        patch("backend.pipeline.storer.store_records", new=AsyncMock(return_value=([mock_record], 0))),
+        patch(
+            "backend.pipeline.storer.store_records",
+            new=AsyncMock(return_value=([mock_record], 0)),
+        ),
         patch("backend.pipeline.ai_processor.process_with_ai", mock_process_with_ai),
     ):
         result = await run_pipeline(
@@ -517,7 +548,10 @@ async def test_run_pipeline_notification_exception_continues(db_session):
 
     with (
         patch("backend.pipeline.collector.collect", return_value=channel_result),
-        patch("backend.pipeline.storer.store_records", new=AsyncMock(return_value=([mock_record], 0))),
+        patch(
+            "backend.pipeline.storer.store_records",
+            new=AsyncMock(return_value=([mock_record], 0)),
+        ),
         patch("backend.pipeline.notifier_dispatch.dispatch_notifications", mock_dispatch),
         patch("backend.database.AsyncSessionLocal", return_value=inner_cm),
     ):
@@ -562,12 +596,15 @@ async def test_run_pipeline_opencli_auto_binding(db_session):
     browser_cm.__aexit__ = AsyncMock(return_value=False)
 
     with (
-        patch("backend.services.browser_service.get_binding_by_site", new=AsyncMock(return_value=mock_binding)),
+        patch(
+            "backend.services.browser_service.get_binding_by_site",
+            new=AsyncMock(return_value=mock_binding),
+        ),
         patch("backend.database.AsyncSessionLocal", return_value=browser_cm),
         patch("backend.pipeline.collector.collect", return_value=mock_channel_result),
         patch("backend.pipeline.storer.store_records", new=AsyncMock(return_value=([], 0))),
     ):
-        result = await run_pipeline(
+        await run_pipeline(
             task.id,
             source,
             parameters={},

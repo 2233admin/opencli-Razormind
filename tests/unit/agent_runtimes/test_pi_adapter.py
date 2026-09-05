@@ -80,7 +80,14 @@ def emit(obj):
     sys.stdout.flush()
 
 sys.stdin.readline()
-emit({"type": "response", "command": "prompt", "success": False, "error": "Model not found: bogus/model"})
+emit(
+    {
+        "type": "response",
+        "command": "prompt",
+        "success": False,
+        "error": "Model not found: bogus/model",
+    }
+)
 sys.exit(1)
 '''
 
@@ -106,7 +113,13 @@ sys.stdout.write("\n")  # blank line: must be skipped, not treated as JSON
 sys.stdout.flush()
 sys.stdout.write("not json at all\n")
 sys.stdout.flush()
-emit({"type": "message_update", "message": {}, "assistantMessageEvent": {"type": "text_delta", "contentIndex": 0, "delta": "ok"}})
+emit(
+    {
+        "type": "message_update",
+        "message": {},
+        "assistantMessageEvent": {"type": "text_delta", "contentIndex": 0, "delta": "ok"},
+    }
+)
 emit({"type": "agent_end", "messages": []})
 sys.exit(0)
 '''
@@ -374,9 +387,13 @@ def test_is_available_false_for_bogus_binary():
 
 async def test_health_reflects_is_available(monkeypatch):
     adapter = PiRuntimeAdapter()
-    monkeypatch.setattr(PiRuntimeAdapter, "is_available", classmethod(lambda cls, binary="pi": True))
+    monkeypatch.setattr(
+        PiRuntimeAdapter, "is_available", classmethod(lambda cls, binary="pi": True)
+    )
     assert await adapter.health() is True
-    monkeypatch.setattr(PiRuntimeAdapter, "is_available", classmethod(lambda cls, binary="pi": False))
+    monkeypatch.setattr(
+        PiRuntimeAdapter, "is_available", classmethod(lambda cls, binary="pi": False)
+    )
     assert await adapter.health() is False
 
 

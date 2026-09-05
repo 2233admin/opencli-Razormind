@@ -4,7 +4,7 @@ No DB, no ODP, no runner/pipeline wiring — these tests only exercise the
 Pydantic models and the pure rate-derivation classmethod.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from pydantic import ValidationError
@@ -12,7 +12,6 @@ from pydantic import ValidationError
 from backend.control.measurements import SourceMeasurement
 from backend.control.models import ControlAction, SourceControlState
 from backend.control.objectives import SourceObjective
-
 
 # ---------------------------------------------------------------------------
 # SourceControlState
@@ -114,7 +113,7 @@ class TestSourceMeasurementConstruction:
             odp_stream_lag=None,
             odp_pending=None,
             dlq_count=0,
-            observed_at=datetime(2026, 7, 2, tzinfo=timezone.utc),
+            observed_at=datetime(2026, 7, 2, tzinfo=UTC),
         )
         kwargs.update(overrides)
         return kwargs
@@ -166,7 +165,7 @@ class TestSourceMeasurementDerive:
             duplicates=0,
             rejected=0,
             fetch_latency_ms=100,
-            observed_at=datetime.now(timezone.utc),
+            observed_at=datetime.now(UTC),
             cursor_advanced=False,
         )
         assert m.error_rate == 0.0
@@ -181,7 +180,7 @@ class TestSourceMeasurementDerive:
             duplicates=2,
             rejected=1,
             fetch_latency_ms=250,
-            observed_at=datetime.now(timezone.utc),
+            observed_at=datetime.now(UTC),
             cursor_advanced=True,
         )
         assert m.error_rate == pytest.approx(1 / 13)
@@ -195,7 +194,7 @@ class TestSourceMeasurementDerive:
             duplicates=0,
             rejected=5,
             fetch_latency_ms=100,
-            observed_at=datetime.now(timezone.utc),
+            observed_at=datetime.now(UTC),
             cursor_advanced=False,
         )
         assert m.error_rate == 1.0
@@ -209,14 +208,14 @@ class TestSourceMeasurementDerive:
             duplicates=5,
             rejected=0,
             fetch_latency_ms=100,
-            observed_at=datetime.now(timezone.utc),
+            observed_at=datetime.now(UTC),
             cursor_advanced=False,
         )
         assert m.duplicate_rate == 1.0
         assert m.error_rate == 0.0
 
     def test_optional_passthrough_fields(self):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         m = SourceMeasurement.derive(
             source_id="src-1",
             run_id="run-1",
@@ -249,7 +248,7 @@ class TestSourceMeasurementDerive:
             duplicates=0,
             rejected=0,
             fetch_latency_ms=1,
-            observed_at=datetime.now(timezone.utc),
+            observed_at=datetime.now(UTC),
             cursor_advanced=True,
         )
         assert m.dlq_count == 0

@@ -20,7 +20,7 @@ Two things stay where they were on purpose, to keep this slice behavior-only:
 from __future__ import annotations
 
 import logging
-from typing import Sequence
+from collections.abc import Sequence
 
 from backend.pipeline.sinks.base import RunContext, SinkResult
 

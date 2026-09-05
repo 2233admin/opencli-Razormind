@@ -10,10 +10,14 @@ def main():
 
     js = f"""(async () => {{
   try {{
-    const r = await fetch('/api/challenge/detail/?challengeName={args.hashtag}&aid=1988&app_language=en&app_name=tiktok_web&device_platform=web_pc', {{credentials: 'include'}});
+    const endpoint = '/api/challenge/detail/'
+      + '?challengeName={args.hashtag}&aid=1988&app_language=en'
+      + '&app_name=tiktok_web&device_platform=web_pc';
+    const r = await fetch(endpoint, {{credentials: 'include'}});
     const d = await r.json();
     const c = d.challengeInfo && d.challengeInfo.challenge;
-    if (!c) return JSON.stringify({{error: true, message: 'challenge not found for: {args.hashtag}'}});
+    if (!c) return JSON.stringify({{error: true,
+      message: 'challenge not found for: {args.hashtag}'}});
     return JSON.stringify({{
       id: c.id,
       title: c.title,

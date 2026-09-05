@@ -17,8 +17,8 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Any, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 from backend.control import error_kinds as _error_kinds
 from backend.control.error_kinds import ErrorKind
@@ -37,9 +37,9 @@ class FreshnessInfo:
     a freshness signal.
     """
 
-    newest_source_ts: Optional[datetime] = None
-    newest_observed_at: Optional[datetime] = None
-    freshness_lag_seconds: Optional[int] = None
+    newest_source_ts: datetime | None = None
+    newest_observed_at: datetime | None = None
+    freshness_lag_seconds: int | None = None
     quality: str = "missing"
 
 
@@ -79,7 +79,7 @@ async def record_run_measurement(
     """
     from backend.models.source_measurement import SourceMeasurement as SourceMeasurementRow
 
-    now = measured_at or datetime.now(timezone.utc)
+    now = measured_at or datetime.now(UTC)
     fresh = freshness or FreshnessInfo()
     quality = fresh.quality if fresh.quality in _VALID_QUALITIES else "missing"
 

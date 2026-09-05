@@ -5,8 +5,8 @@ Revises: a8b9c0d1e2f3
 Create Date: 2026-08-30
 """
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
 revision = "a9b0c1d2e3f4"
 down_revision = "a8b9c0d1e2f3"
@@ -33,12 +33,19 @@ def upgrade() -> None:
         sa.Column("expected_keys", sa.JSON(), nullable=False),
         sa.Column("reported_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("report_hash", sa.String(length=64), nullable=False),
-        sa.ForeignKeyConstraint(["attempt_id"], ["iii_collection_attempts.id"], ondelete="RESTRICT"),
-        sa.ForeignKeyConstraint(["command_id"], ["iii_collection_commands.id"], ondelete="RESTRICT"),
+        sa.ForeignKeyConstraint(
+            ["attempt_id"], ["iii_collection_attempts.id"], ondelete="RESTRICT"
+        ),
+        sa.ForeignKeyConstraint(
+            ["command_id"], ["iii_collection_commands.id"], ondelete="RESTRICT"
+        ),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("report_id", name="uq_iii_collection_expected_key_report_id"),
         sa.UniqueConstraint(
-            "command_id", "attempt_id", "report_sequence", name="uq_iii_collection_expected_key_report_replay"
+            "command_id",
+            "attempt_id",
+            "report_sequence",
+            name="uq_iii_collection_expected_key_report_replay",
         ),
     )
     op.create_index(
@@ -75,8 +82,12 @@ def upgrade() -> None:
         sa.Column("issued_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("receipt_hash", sa.String(length=64), nullable=False),
         sa.Column("signature", sa.String(length=128), nullable=False),
-        sa.ForeignKeyConstraint(["attempt_id"], ["iii_collection_attempts.id"], ondelete="RESTRICT"),
-        sa.ForeignKeyConstraint(["command_id"], ["iii_collection_commands.id"], ondelete="RESTRICT"),
+        sa.ForeignKeyConstraint(
+            ["attempt_id"], ["iii_collection_attempts.id"], ondelete="RESTRICT"
+        ),
+        sa.ForeignKeyConstraint(
+            ["command_id"], ["iii_collection_commands.id"], ondelete="RESTRICT"
+        ),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("receipt_id", name="uq_iii_collection_ingress_receipt_id"),
         sa.UniqueConstraint(

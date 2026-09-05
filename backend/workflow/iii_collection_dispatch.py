@@ -12,7 +12,11 @@ from sqlalchemy import or_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.config import get_settings
-from backend.models.iii_collection import IIICollectionAttemptV1, IIICollectionCommandV1, IIICollectionOutboundV1
+from backend.models.iii_collection import (
+    IIICollectionAttemptV1,
+    IIICollectionCommandV1,
+    IIICollectionOutboundV1,
+)
 from backend.workflow.iii_collection_store import _attempt_and_outbound
 
 
@@ -28,7 +32,9 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
-def collector_trigger_payload(command: IIICollectionCommandV1, attempt: IIICollectionAttemptV1) -> dict:
+def collector_trigger_payload(
+    command: IIICollectionCommandV1, attempt: IIICollectionAttemptV1
+) -> dict:
     """Build the one supported collector invocation with immutable Admin correlation."""
 
     return {

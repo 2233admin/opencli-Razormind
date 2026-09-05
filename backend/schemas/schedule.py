@@ -1,7 +1,8 @@
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
+
 from backend.schemas.common import UTCModel
 
 
@@ -13,31 +14,32 @@ class CronScheduleCreate(BaseModel):
     parameters: dict[str, Any] = Field(default_factory=dict)
     enabled: bool = True
     is_one_time: bool = False
-    agent_id: Optional[str] = None
+    agent_id: str | None = None
 
 
 class CronScheduleUpdate(BaseModel):
-    name: Optional[str] = None
-    cron_expression: Optional[str] = None
-    timezone: Optional[str] = None
-    parameters: Optional[dict[str, Any]] = None
-    enabled: Optional[bool] = None
-    is_one_time: Optional[bool] = None
-    agent_id: Optional[str] = None
+    name: str | None = None
+    cron_expression: str | None = None
+    timezone: str | None = None
+    parameters: dict[str, Any] | None = None
+    enabled: bool | None = None
+    is_one_time: bool | None = None
+    agent_id: str | None = None
 
 
 class CronScheduleRead(UTCModel):
     id: str
     source_id: str
-    agent_id: Optional[str] = None
+    agent_id: str | None = None
+
     name: str
     cron_expression: str
     timezone: str
     parameters: dict[str, Any]
     enabled: bool
     is_one_time: bool
-    last_run_at: Optional[datetime]
-    next_run_at: Optional[datetime]
+    last_run_at: datetime | None
+    next_run_at: datetime | None
     created_at: datetime
     updated_at: datetime
 

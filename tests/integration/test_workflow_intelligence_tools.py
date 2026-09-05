@@ -141,7 +141,9 @@ async def test_two_package_catalog_capabilities_are_projected_runnable(client):
     assert catalog["package.intelligence.situation-awareness"]["backendAvailable"] is True
     assert catalog["package.simulation.swarm-forecast"]["status"] == "runnable"
     assert catalog["package.simulation.swarm-forecast"]["backendAvailable"] is True
-    native_parameters = catalog["package.intelligence.native-lifecycle"]["manifest"]["presentation"]["parameters"]
+    native_parameters = catalog["package.intelligence.native-lifecycle"]["manifest"][
+        "presentation"
+    ]["parameters"]
     assert [parameter["name"] for parameter in native_parameters] == [
         "seed",
         "personaCount",

@@ -15,9 +15,10 @@ import asyncio
 import json
 import logging
 import re
+from collections.abc import Awaitable, Callable
 from contextvars import ContextVar
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Literal
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -76,7 +77,10 @@ async def _flush_activity() -> None:
 
 def _tool_public_description(name: str, args: dict[str, Any]) -> tuple[str, str, str | None]:
     label, target_type = _PUBLIC_TOOL_LABELS.get(name, ("执行操作", "系统对象"))
-    target_id = next((str(args[key]) for key in ("source_id", "schedule_id", "provider_id") if args.get(key)), None)
+    target_id = next(
+        (str(args[key]) for key in ("source_id", "schedule_id", "provider_id") if args.get(key)),
+        None,
+    )
     return label, target_type, target_id
 
 
@@ -86,6 +90,7 @@ def _result_public_summary(result: Any) -> str:
     if isinstance(result, dict) and result.get("error"):
         return "未能读取目标信息"
     return "已读取目标信息"
+
 
 SYSTEM_PROMPT = """你是 opencli-admin 的全局操作助手。用户可能位于任意产品页面。\
 你的职责: 根据当前页面和对象上下文解释系统状态，并在已有工具覆盖范围内按用户意图查询或修改后端配置。
@@ -288,12 +293,17 @@ async def _create_durable_run(body: ChatRequest, identity: RequestIdentity | Non
             )
             session.add(agent_session)
             await session.flush()
-        goal = next((message.content for message in reversed(body.messages) if message.role == "user"), "")
+        goal = next(
+            (message.content for message in reversed(body.messages) if message.role == "user"), ""
+        )
         run = AgentRun(
             session_id=agent_session.id,
             status="queued",
             goal=goal,
-            request_payload={"messages": [message.model_dump() for message in body.messages], "context": body.context or {}},
+            request_payload={
+                "messages": [message.model_dump() for message in body.messages],
+                "context": body.context or {},
+            },
         )
         session.add(run)
         await session.commit()
@@ -335,6 +345,7 @@ class _RunScopedDurableEventWriter:
             raise RuntimeError("Durable event writer is not open")
         self.run.status = "running"
         self.dirty = True
+
     async def emit(self, event: dict[str, Any]) -> None:
         if self.session is None or self.run is None:
             raise RuntimeError("Durable event writer is not open")
@@ -365,9 +376,7 @@ class _RunScopedDurableEventWriter:
             finally:
                 self.pending.clear()
                 self.dirty = False
-            raise _DurableEventPersistenceError(
-                "Failed to persist agent run events"
-            ) from exc
+            raise _DurableEventPersistenceError("Failed to persist agent run events") from exc
         committed, self.pending = self.pending, []
         self.dirty = False
         for payload in committed:
@@ -439,7 +448,8 @@ async def _pick_provider(db: AsyncSession, provider_id: str | None) -> ModelProv
     provider = result.scalars().first()
     if not provider:
         raise HTTPException(
-            status_code=400, detail="没有可用的模型 provider, 先在「模型提供商」里配置一个并启用"
+            status_code=400,
+            detail="没有可用的模型 provider, 先在「模型提供商」里配置一个并启用",
         )
     return provider
 
@@ -773,9 +783,7 @@ async def run_chat_request(
         provider = adapter.provider
         client = await _build_client(provider)
         model = model_id or provider.default_model or "gpt-4o-mini"
-        result = await _chat_with_client(
-            client, model, body, db, identity, tool_trace=tool_trace
-        )
+        result = await _chat_with_client(client, model, body, db, identity, tool_trace=tool_trace)
         return ApiResponse.ok(result.reply)
 
     return await resolver.resolve_with_fallback(db, "chat", operation)
@@ -911,6 +919,8 @@ def _run_payload(run: AgentRun) -> dict[str, Any]:
         "reply": run.reply_payload,
         "error": run.error_message,
     }
+
+
 async def _authorize_durable_run(
     db: AsyncSession,
     run: AgentRun,
@@ -1048,7 +1058,9 @@ async def _chat_xml(
     for _step in range(MAX_TOOL_STEPS):
         await db.commit()
         try:
-            response = await client.chat.completions.create(model=model, messages=messages, max_tokens=1024)
+            response = await client.chat.completions.create(
+                model=model, messages=messages, max_tokens=1024
+            )
         except Exception as exc:
             logger.error("chat(xml) llm error | %s", exc)
             raise HTTPException(status_code=502, detail=f"模型调用失败: {exc}") from exc

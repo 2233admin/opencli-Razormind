@@ -1,7 +1,7 @@
 """Unit tests for backend/scheduler.py."""
 
 import asyncio
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -34,25 +34,25 @@ def _reset_warned_bad_cron(monkeypatch):
 
 def test_fires_in_window_fires_within_window_counts_once():
     """A fire time landing inside (window_start, window_end] counts."""
-    last_tick = datetime(2024, 6, 1, 12, 0, 0, tzinfo=timezone.utc)
-    now = datetime(2024, 6, 1, 12, 1, 0, tzinfo=timezone.utc)
+    last_tick = datetime(2024, 6, 1, 12, 0, 0, tzinfo=datetime.UTC)
+    now = datetime(2024, 6, 1, 12, 1, 0, tzinfo=datetime.UTC)
     # "* * * * *" fires every minute; next fire after 12:00:00 is 12:01:00
     assert _fires_in_window("* * * * *", "sched-1", last_tick, now) == 1
 
 
 def test_fires_in_window_open_left_edge_excludes_prior_fire():
     """A fire time exactly at window_start (the exclusive edge) is not recounted."""
-    last_tick = datetime(2024, 6, 1, 12, 1, 0, tzinfo=timezone.utc)  # itself a fire instant
-    now = datetime(2024, 6, 1, 12, 2, 0, tzinfo=timezone.utc)
+    last_tick = datetime(2024, 6, 1, 12, 1, 0, tzinfo=datetime.UTC)  # itself a fire instant
+    now = datetime(2024, 6, 1, 12, 2, 0, tzinfo=datetime.UTC)
     assert _fires_in_window("* * * * *", "sched-1", last_tick, now) == 1  # only 12:02:00
 
 
 def test_fires_in_window_consecutive_windows_never_double_count():
     """Two back-to-back (last_tick, now] windows sharing a boundary each see
     the boundary fire exactly once between them — this is the C4 guarantee."""
-    t0 = datetime(2024, 6, 1, 12, 0, 0, tzinfo=timezone.utc)
-    t1 = datetime(2024, 6, 1, 12, 1, 0, tzinfo=timezone.utc)  # exact fire instant
-    t2 = datetime(2024, 6, 1, 12, 2, 0, tzinfo=timezone.utc)
+    t0 = datetime(2024, 6, 1, 12, 0, 0, tzinfo=datetime.UTC)
+    t1 = datetime(2024, 6, 1, 12, 1, 0, tzinfo=datetime.UTC)  # exact fire instant
+    t2 = datetime(2024, 6, 1, 12, 2, 0, tzinfo=datetime.UTC)
 
     window1 = _fires_in_window("* * * * *", "sched-1", t0, t1)
     window2 = _fires_in_window("* * * * *", "sched-1", t1, t2)
@@ -63,23 +63,23 @@ def test_fires_in_window_consecutive_windows_never_double_count():
 
 def test_fires_in_window_no_fire_returns_zero():
     """No fire time in a short window returns 0."""
-    last_tick = datetime(2024, 6, 1, 12, 0, 10, tzinfo=timezone.utc)
-    now = datetime(2024, 6, 1, 12, 0, 40, tzinfo=timezone.utc)
+    last_tick = datetime(2024, 6, 1, 12, 0, 10, tzinfo=datetime.UTC)
+    now = datetime(2024, 6, 1, 12, 0, 40, tzinfo=datetime.UTC)
     assert _fires_in_window("0 * * * *", "sched-1", last_tick, now) == 0
 
 
 def test_fires_in_window_future_cron_not_due():
     """Cron for a later time has no fire in a window that ends before it."""
-    last_tick = datetime(2024, 6, 1, 12, 0, 0, tzinfo=timezone.utc)
-    now = datetime(2024, 6, 1, 12, 1, 0, tzinfo=timezone.utc)
+    last_tick = datetime(2024, 6, 1, 12, 0, 0, tzinfo=datetime.UTC)
+    now = datetime(2024, 6, 1, 12, 1, 0, tzinfo=datetime.UTC)
     assert _fires_in_window("0 13 * * *", "sched-1", last_tick, now) == 0
 
 
 def test_fires_in_window_slow_tick_coalesces_missed_fires():
     """A window spanning 3 missed fire times reports count=3 so the caller
     can dispatch once instead of once per missed fire."""
-    last_tick = datetime(2024, 6, 1, 12, 0, 0, tzinfo=timezone.utc)
-    now = datetime(2024, 6, 1, 12, 3, 0, tzinfo=timezone.utc)
+    last_tick = datetime(2024, 6, 1, 12, 0, 0, tzinfo=datetime.UTC)
+    now = datetime(2024, 6, 1, 12, 3, 0, tzinfo=datetime.UTC)
     assert _fires_in_window("* * * * *", "sched-1", last_tick, now) == 3
 
 
@@ -87,7 +87,7 @@ def test_fires_in_window_malformed_cron_returns_zero_and_warns_once():
     """An unparseable cron_expression returns 0 (treated as not-due) and logs
     exactly one warning across repeated calls with the same
     (schedule_id, cron_expression) pair."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(datetime.UTC)
     last_tick = now - timedelta(seconds=60)
 
     with patch("backend.scheduler.logger") as mock_logger:
@@ -105,7 +105,7 @@ def test_fires_in_window_malformed_cron_returns_zero_and_warns_once():
 def test_fires_in_window_rewarns_when_expression_changes():
     """Editing a bad schedule to a different (still-bad) expression re-warns,
     while repeating the same bad expression does not spam."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(datetime.UTC)
     last_tick = now - timedelta(seconds=60)
 
     with patch("backend.scheduler.logger") as mock_logger:
@@ -119,7 +119,7 @@ def test_fires_in_window_rewarns_when_expression_changes():
 def test_fires_in_window_independent_schedules_warn_independently():
     """Two different schedules sharing the same broken expression each get
     their own warning (the cache key includes schedule_id)."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(datetime.UTC)
     last_tick = now - timedelta(seconds=60)
 
     with patch("backend.scheduler.logger") as mock_logger:
@@ -246,7 +246,7 @@ async def test_scheduler_loop_first_tick_establishes_watermark_no_dispatch():
     fetch schedules or dispatch anything (no catch-up storm on restart)."""
     from backend.scheduler import _scheduler_loop
 
-    t0 = datetime(2024, 6, 1, 12, 0, 0, tzinfo=timezone.utc)
+    t0 = datetime(2024, 6, 1, 12, 0, 0, tzinfo=datetime.UTC)
 
     iteration = 0
 
@@ -275,8 +275,8 @@ async def test_scheduler_loop_dispatches_once_when_fire_in_window():
     (last_tick, now] is dispatched exactly once."""
     from backend.scheduler import _scheduler_loop
 
-    t0 = datetime(2024, 6, 1, 12, 0, 0, tzinfo=timezone.utc)
-    t1 = datetime(2024, 6, 1, 12, 1, 0, tzinfo=timezone.utc)
+    t0 = datetime(2024, 6, 1, 12, 0, 0, tzinfo=datetime.UTC)
+    t1 = datetime(2024, 6, 1, 12, 1, 0, tzinfo=datetime.UTC)
 
     due_schedule = {
         "schedule_id": "sched-fire",
@@ -300,7 +300,10 @@ async def test_scheduler_loop_dispatches_once_when_fire_in_window():
     with (
         patch("asyncio.sleep", side_effect=mock_sleep),
         patch("backend.scheduler._now", side_effect=[t0, t1]),
-        patch("backend.scheduler._get_enabled_schedules", new=AsyncMock(return_value=[due_schedule])),
+        patch(
+            "backend.scheduler._get_enabled_schedules",
+            new=AsyncMock(return_value=[due_schedule]),
+        ),
         patch("backend.scheduler._fires_in_window", return_value=1) as mock_fires,
         patch("backend.executor.get_executor", return_value=mock_executor),
     ):
@@ -318,8 +321,8 @@ async def test_scheduler_loop_dispatches_once_when_fire_in_window():
 async def test_scheduler_loop_recovers_queued_scheduled_agent_runs():
     from backend.scheduler import _scheduler_loop
 
-    t0 = datetime(2024, 6, 1, 12, 0, 0, tzinfo=timezone.utc)
-    t1 = datetime(2024, 6, 1, 12, 1, 0, tzinfo=timezone.utc)
+    t0 = datetime(2024, 6, 1, 12, 0, 0, tzinfo=UTC)
+    t1 = datetime(2024, 6, 1, 12, 1, 0, tzinfo=UTC)
     iteration = 0
 
     async def mock_sleep(_seconds):
@@ -349,8 +352,8 @@ async def test_scheduler_loop_skips_when_no_fire_in_window():
     """_scheduler_loop does not dispatch schedules with zero fires in the window."""
     from backend.scheduler import _scheduler_loop
 
-    t0 = datetime(2024, 6, 1, 12, 0, 0, tzinfo=timezone.utc)
-    t1 = datetime(2024, 6, 1, 12, 1, 0, tzinfo=timezone.utc)
+    t0 = datetime(2024, 6, 1, 12, 0, 0, tzinfo=datetime.UTC)
+    t1 = datetime(2024, 6, 1, 12, 1, 0, tzinfo=datetime.UTC)
 
     non_due_schedule = {
         "schedule_id": "sched-skip",
@@ -374,7 +377,10 @@ async def test_scheduler_loop_skips_when_no_fire_in_window():
     with (
         patch("asyncio.sleep", side_effect=mock_sleep),
         patch("backend.scheduler._now", side_effect=[t0, t1]),
-        patch("backend.scheduler._get_enabled_schedules", new=AsyncMock(return_value=[non_due_schedule])),
+        patch(
+            "backend.scheduler._get_enabled_schedules",
+            new=AsyncMock(return_value=[non_due_schedule]),
+        ),
         patch("backend.scheduler._fires_in_window", return_value=0),
         patch("backend.executor.get_executor", return_value=mock_executor),
     ):
@@ -390,9 +396,9 @@ async def test_scheduler_loop_consecutive_ticks_use_disjoint_windows():
     ticks can never both dispatch for the same fire instant (AUDIT C4)."""
     from backend.scheduler import _scheduler_loop
 
-    t0 = datetime(2024, 6, 1, 12, 0, 0, tzinfo=timezone.utc)
-    t1 = datetime(2024, 6, 1, 12, 1, 0, tzinfo=timezone.utc)
-    t2 = datetime(2024, 6, 1, 12, 2, 0, tzinfo=timezone.utc)
+    t0 = datetime(2024, 6, 1, 12, 0, 0, tzinfo=datetime.UTC)
+    t1 = datetime(2024, 6, 1, 12, 1, 0, tzinfo=datetime.UTC)
+    t2 = datetime(2024, 6, 1, 12, 2, 0, tzinfo=datetime.UTC)
 
     sched = {
         "schedule_id": "sched-1",
@@ -429,8 +435,8 @@ async def test_scheduler_loop_coalesces_multiple_fires_into_single_dispatch():
     dispatches exactly once, and logs the coalesced count at debug level."""
     from backend.scheduler import _scheduler_loop
 
-    t0 = datetime(2024, 6, 1, 12, 0, 0, tzinfo=timezone.utc)
-    t1 = datetime(2024, 6, 1, 12, 3, 0, tzinfo=timezone.utc)
+    t0 = datetime(2024, 6, 1, 12, 0, 0, tzinfo=datetime.UTC)
+    t1 = datetime(2024, 6, 1, 12, 3, 0, tzinfo=datetime.UTC)
 
     sched = {
         "schedule_id": "sched-1",
@@ -473,8 +479,8 @@ async def test_scheduler_loop_handles_exception_and_continues():
     successful tick's window naturally widens to catch up."""
     from backend.scheduler import _scheduler_loop
 
-    t0 = datetime(2024, 6, 1, 12, 0, 0, tzinfo=timezone.utc)
-    t1 = datetime(2024, 6, 1, 12, 5, 0, tzinfo=timezone.utc)
+    t0 = datetime(2024, 6, 1, 12, 0, 0, tzinfo=datetime.UTC)
+    t1 = datetime(2024, 6, 1, 12, 5, 0, tzinfo=datetime.UTC)
 
     iteration = 0
 
@@ -517,9 +523,9 @@ async def test_scheduler_loop_dispatch_failure_does_not_stall_watermark():
     """
     from backend.scheduler import _scheduler_loop
 
-    t0 = datetime(2024, 6, 1, 12, 0, 0, tzinfo=timezone.utc)
-    t1 = datetime(2024, 6, 1, 12, 1, 0, tzinfo=timezone.utc)  # "1 12 * * *" fires here
-    t2 = datetime(2024, 6, 1, 12, 2, 0, tzinfo=timezone.utc)
+    t0 = datetime(2024, 6, 1, 12, 0, 0, tzinfo=datetime.UTC)
+    t1 = datetime(2024, 6, 1, 12, 1, 0, tzinfo=datetime.UTC)  # "1 12 * * *" fires here
+    t2 = datetime(2024, 6, 1, 12, 2, 0, tzinfo=datetime.UTC)
 
     sched_ok = {
         "schedule_id": "sched-ok",

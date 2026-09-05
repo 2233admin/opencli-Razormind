@@ -6,18 +6,43 @@ import sys
 def main():
     sys.stdout.reconfigure(encoding='utf-8', newline='\n')
     parser = argparse.ArgumentParser(
-        description="Extract main content + metadata + outbound links from the currently loaded page"
+        description=(
+            "Extract main content + metadata + outbound links from the currently loaded page"
+        )
     )
-    parser.add_argument('start_url', help="Crawl scope: only outbound links under this URL prefix are kept")
-    parser.add_argument('--remove-selectors', default='',
-                        help='Comma-separated CSS selectors to remove before extraction (e.g. ".cookie-banner,#chat")')
-    parser.add_argument('--keep-selector', default='',
-                        help='CSS selector identifying the main content area; if set, only this is used')
-    parser.add_argument('--output-format', default='markdown',
-                        choices=['markdown', 'text', 'html', 'all'],
-                        help='Body output format')
-    parser.add_argument('--include-globs', default='[]', help='JSON array of glob patterns for outbound links')
-    parser.add_argument('--exclude-globs', default='[]', help='JSON array of glob patterns to drop')
+    parser.add_argument(
+        'start_url',
+        help="Crawl scope: only outbound links under this URL prefix are kept",
+    )
+    parser.add_argument(
+        '--remove-selectors',
+        default='',
+        help=(
+            'Comma-separated CSS selectors to remove before extraction '
+            '(e.g. ".cookie-banner,#chat")'
+        ),
+    )
+    parser.add_argument(
+        '--keep-selector',
+        default='',
+        help='CSS selector identifying the main content area; if set, only this is used',
+    )
+    parser.add_argument(
+        '--output-format',
+        default='markdown',
+        choices=['markdown', 'text', 'html', 'all'],
+        help='Body output format',
+    )
+    parser.add_argument(
+        '--include-globs',
+        default='[]',
+        help='JSON array of glob patterns for outbound links',
+    )
+    parser.add_argument(
+        '--exclude-globs',
+        default='[]',
+        help='JSON array of glob patterns to drop',
+    )
     args = parser.parse_args()
 
     include_globs = json.loads(args.include_globs)
@@ -103,7 +128,9 @@ def main():
 
         // ---------- gather metadata from the original document ----------
         function metaContent(name) {{
-          const el = document.querySelector('meta[name="' + name + '"], meta[property="' + name + '"]')
+          const el = document.querySelector(
+            'meta[name="' + name + '"], meta[property="' + name + '"]'
+          )
                   || document.querySelector('meta[property="og:' + name + '"]');
           return el ? (el.getAttribute('content') || null) : null;
         }}
@@ -134,7 +161,12 @@ def main():
           if (!href || linkSeen.has(href)) continue;
           if (!href.startsWith(scopeUrl.origin)) continue;
           if (!href.startsWith(scopeBase) && href !== scopeUrl.origin + scopeUrl.pathname) continue;
-          if (/\\.(png|jpg|jpeg|gif|svg|webp|ico|mp4|mp3|webm|woff2?|ttf|css|js|json|xml|zip|tar\\.gz|pdf|doc|docx|xls|xlsx)$/i.test(href)) continue;
+          const assetExtensions = (
+            'png|jpg|jpeg|gif|svg|webp|ico|mp4|mp3|webm|woff2?|ttf|css|js|json|'
+            + 'xml|zip|tar\\.gz|pdf|doc|docx|xls|xlsx'
+          );
+          const assetRe = new RegExp('\\\\.(' + assetExtensions + ')$', 'i');
+          if (assetRe.test(href)) continue;
           if (excludeRes.some(re => re.test(href))) continue;
           if (includeRes.length > 0 && !includeRes.some(re => re.test(href))) continue;
           linkSeen.add(href);
@@ -216,7 +248,9 @@ def main():
                 break;
               }}
               case 'blockquote':
-                out += '\\n\\n> ' + htmlToMarkdown(child).trim().replace(/\\n/g, '\\n> ') + '\\n\\n';
+                out += (
+                  '\n\n> ' + htmlToMarkdown(child).trim().replace(/\n/g, '\n> ') + '\n\n'
+                );
                 break;
               case 'table': {{
                 const rows = [];
@@ -282,7 +316,12 @@ def main():
 
         return JSON.stringify(result);
       }} catch(e) {{
-        return JSON.stringify({{ error: true, message: e.message, stack: e.stack, url: location.href }});
+        return JSON.stringify({{
+          error: true,
+          message: e.message,
+          stack: e.stack,
+          url: location.href
+        }});
       }}
     }})()
     """

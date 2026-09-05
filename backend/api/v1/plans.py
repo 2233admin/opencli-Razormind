@@ -11,7 +11,6 @@ in this router runs a Plan.
 """
 
 import logging
-from typing import Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from pydantic import ValidationError
@@ -30,7 +29,7 @@ router = APIRouter(prefix="/plans", tags=["plans"])
 
 @router.get("", response_model=ApiResponse[list[PlanRead]])
 async def list_plans(
-    draft: Optional[bool] = None,
+    draft: bool | None = None,
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
@@ -74,8 +73,8 @@ async def update_plan(
     if not plan:
         raise HTTPException(status_code=404, detail="Plan not found")
 
-    draft: Optional[bool] = None
-    runnable: Optional[bool] = None
+    draft: bool | None = None
+    runnable: bool | None = None
     if body.graph is not None:
         try:
             _parsed, result = plan_service.validate_graph_dict(body.graph)
@@ -136,7 +135,7 @@ async def run_plan(
 @router.get("/{plan_id}/health", response_model=ApiResponse[list[PlanHealthRead]])
 async def get_plan_health(
     plan_id: str,
-    run_key: Optional[str] = None,
+    run_key: str | None = None,
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),

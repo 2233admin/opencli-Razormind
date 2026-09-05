@@ -61,7 +61,13 @@ def bypass_database_run_lock(monkeypatch, request):
 
 def test_authorization_contract_rejects_client_authority_payload_and_duplicate_claims() -> None:
     base = _request().model_dump(by_alias=True)
-    for forbidden_field in ("actorId", "capability", "policySnapshot", "publishAllowed", "targetRevision"):
+    for forbidden_field in (
+        "actorId",
+        "capability",
+        "policySnapshot",
+        "publishAllowed",
+        "targetRevision",
+    ):
         with pytest.raises(ValidationError):
             DeliveryAuthorizationCreateV1.model_validate(
                 {**base, forbidden_field: "client-controlled"}
@@ -80,7 +86,9 @@ def test_authorization_contract_rejects_client_authority_payload_and_duplicate_c
         ("credentialReference", "credential-ref:raw-secret"),
     ],
 )
-def test_target_configuration_rejects_nonopaque_values_and_policy_is_stable(field, unsafe_value) -> None:
+def test_target_configuration_rejects_nonopaque_values_and_policy_is_stable(
+    field, unsafe_value
+) -> None:
     values = {
         "receiverIdentity": "controlled-receiver-1",
         "endpointIdentity": "receiver-channel-1",
@@ -126,7 +134,11 @@ def test_controlled_receiver_v2_policy_snapshot_is_complete_and_hash_bound(monke
     assert policy_hash == delivery_authorization._canonical_hash(
         {"version": version, "snapshot": snapshot}
     )
-    monkeypatch.setitem(delivery_authorization._CONTROLLED_RECEIVER_POLICY, "timeout", {"perAttemptSeconds": 31})
+    monkeypatch.setitem(
+        delivery_authorization._CONTROLLED_RECEIVER_POLICY,
+        "timeout",
+        {"perAttemptSeconds": 31},
+    )
     assert delivery_authorization._policy_hash() != policy_hash
 
 
@@ -161,7 +173,9 @@ class _ConcurrentTargetSession:
     async def flush(self):
         if isinstance(self._pending, DeliveryTarget):
             self.target_insert_attempts += 1
-            raise IntegrityError("insert delivery target", {}, RuntimeError("unique target identity"))
+            raise IntegrityError(
+                "insert delivery target", {}, RuntimeError("unique target identity")
+            )
         self._pending.created_at = datetime.now(UTC)
 
 
@@ -183,7 +197,9 @@ async def test_concurrent_new_receiver_reselects_unique_winner_before_revision(m
     session = _ConcurrentTargetSession(winner)
     configured = await delivery_authorization.configure_delivery_target(
         session,
-        scope=DeliveryAuthorizationScope("workspace-1", "project-1", "workflow-1", "version-1", "run-1"),
+        scope=DeliveryAuthorizationScope(
+            "workspace-1", "project-1", "workflow-1", "version-1", "run-1"
+        ),
         request=DeliveryTargetConfigureV1(
             receiver_identity="controlled-receiver-1",
             endpoint_identity="receiver-channel-1",
@@ -209,12 +225,17 @@ async def test_run_lock_is_a_scoped_postgres_write_lock() -> None:
             return object()
 
     await delivery_authorization._lock_scoped_run(
-        Session(), scope=DeliveryAuthorizationScope("workspace", "project", "workflow", "version", "run")
+        Session(),
+        scope=DeliveryAuthorizationScope(
+            "workspace", "project", "workflow", "version", "run"
+        ),
     )
 
 
 @pytest.mark.asyncio
-async def test_authorization_decision_commits_before_shared_run_lock_allows_stale_pin_mutation(monkeypatch) -> None:
+async def test_authorization_decision_commits_before_shared_run_lock_allows_stale_pin_mutation(
+    monkeypatch,
+) -> None:
     run_lock = asyncio.Lock()
     amendment_committed = asyncio.Event()
 
@@ -370,7 +391,9 @@ async def test_authorization_rejects_nonverified_v2_claims(monkeypatch, state: s
 
 
 @pytest.mark.asyncio
-async def test_authorization_rejects_all_excluded_partial_without_record_evidence(monkeypatch) -> None:
+async def test_authorization_rejects_all_excluded_partial_without_record_evidence(
+    monkeypatch,
+) -> None:
     async def current_target(*_args, **_kwargs):
         return object()
 
@@ -452,7 +475,9 @@ def test_evidence_bearing_partial_manifest_is_eligible() -> None:
 
 
 @pytest.mark.asyncio
-async def test_authorization_pages_exact_pinned_graph_until_selected_claim_is_found(monkeypatch) -> None:
+async def test_authorization_pages_exact_pinned_graph_until_selected_claim_is_found(
+    monkeypatch,
+) -> None:
     calls: list[str | None] = []
 
     async def current_target(*_args, **_kwargs):

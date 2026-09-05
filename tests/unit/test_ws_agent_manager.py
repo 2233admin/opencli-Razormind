@@ -223,11 +223,18 @@ async def test_send_agent_task_supports_async_on_event():
         if payload["type"] == "agent_task":
             request_id = payload["request_id"]
             await mgr.resolve_agent_event(
-                request_id, {"event": {"type": "started", "task_id": request_id}}
+                request_id,
+                {"event": {"type": "started", "task_id": request_id}},
             )
             mgr.resolve_agent_result(
                 request_id,
-                {"result": {"type": "done", "task_id": request_id, "result": {"ok": True}}},
+                {
+                    "result": {
+                        "type": "done",
+                        "task_id": request_id,
+                        "result": {"ok": True},
+                    }
+                },
             )
 
     ws.send_json = AsyncMock(side_effect=fake_send)
@@ -332,9 +339,7 @@ async def test_ack_required_event_callback_failure_cancels_without_acknowledging
     ws.send_json = AsyncMock(side_effect=fake_send)
 
     with pytest.raises(OSError, match="spool unavailable"):
-        await mgr.send_agent_task(
-            "http://agent:19823", {"runtime": "bbx"}, on_event, timeout=5.0
-        )
+        await mgr.send_agent_task("http://agent:19823", {"runtime": "bbx"}, on_event, timeout=5.0)
 
     assert [frame["type"] for frame in sent_frames] == ["agent_task", "cancel"]
 
@@ -350,7 +355,10 @@ async def test_send_agent_task_timeout():
 
     with pytest.raises(TimeoutError, match="did not complete agent_task"):
         await mgr.send_agent_task(
-            "http://agent:19823", {"runtime": "pi"}, lambda e: None, timeout=0.05
+            "http://agent:19823",
+            {"runtime": "pi"},
+            lambda e: None,
+            timeout=0.05,
         )
 
     sent_frames = [call.args[0] for call in ws.send_json.await_args_list]

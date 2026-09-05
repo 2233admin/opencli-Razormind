@@ -366,7 +366,7 @@ class PinnedAsyncHTTPTransport(httpx.AsyncHTTPTransport):
         ips: list[str],
         *,
         allow_private: bool = False,
-        verify: "bool | str" = True,
+        verify: bool | str = True,
         http1: bool = True,
         http2: bool = False,
         **kwargs: typing.Any,

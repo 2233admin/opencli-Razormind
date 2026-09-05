@@ -32,7 +32,9 @@ class Automation(TimestampMixin):
     schedule: Mapped[str] = mapped_column(String(255), nullable=False)
     timezone: Mapped[str] = mapped_column(String(64), nullable=False, default="UTC")
     session_mode: Mapped[str] = mapped_column(String(32), nullable=False, default="fresh")
-    approval_mode: Mapped[str] = mapped_column(String(32), nullable=False, default="suggest_changes")
+    approval_mode: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="suggest_changes"
+    )
     project: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_by_user_id: Mapped[str] = mapped_column(

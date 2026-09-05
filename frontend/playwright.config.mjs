@@ -5,6 +5,8 @@ if (!/^[1-9]\d{0,4}$/.test(port) || Number(port) > 65535) {
   throw new Error("PLAYWRIGHT_SMOKE_PORT must be an integer from 1 through 65535");
 }
 
+const isolatedStudioUrl = process.env.STUDIO_TRACER_URL
+
 export default defineConfig({
   testDir: "./e2e",
   use: {

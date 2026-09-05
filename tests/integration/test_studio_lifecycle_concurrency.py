@@ -6,7 +6,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
-from backend.api.v1.studio import router as studio_router
+from backend.api.v1.studio import create_studio_router
 from backend.database import Base, get_db
 from tests.fixtures.workflow_conformance import workflow_conformance_project
 
@@ -36,7 +36,7 @@ async def test_studio_concurrent_publish_returns_conflict_instead_of_server_erro
         expire_on_commit=False,
     )
     test_app = FastAPI()
-    test_app.include_router(studio_router, prefix="/api/v1")
+    test_app.include_router(create_studio_router(), prefix="/api/v1")
 
     async def override_get_db():
         async with session_factory() as session:

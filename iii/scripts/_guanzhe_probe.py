@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import re
 import subprocess
 import time
 from pathlib import Path
@@ -61,7 +60,10 @@ def main() -> None:
     for c in tier_a:
         print(f"  {c['id']}  {c['name']}")
 
-    print(f"\n=== Tier B — 转发流 / 策略订阅（共 {sum(1 for c in ranked if tier(c['name'])==1)} 个，列前 30）===\n")
+    print(
+        f"\n=== Tier B — 转发流 / 策略订阅（共 "
+        f"{sum(1 for c in ranked if tier(c['name']) == 1)} 个，列前 30）===\n"
+    )
     tier_b = [c for c in ranked if tier(c["name"]) == 1][:30]
     for c in tier_b:
         print(f"  {c['id']}  {c['name']}")

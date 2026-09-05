@@ -1,5 +1,4 @@
 import logging
-from typing import Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel, ValidationError
@@ -37,8 +36,8 @@ router = APIRouter(prefix="/sources", tags=["sources"])
 
 @router.get("", response_model=ApiResponse[list[DataSourceRead]])
 async def list_sources(
-    enabled: Optional[bool] = None,
-    channel_type: Optional[str] = None,
+    enabled: bool | None = None,
+    channel_type: str | None = None,
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
@@ -68,7 +67,7 @@ class FeedDiscoveryRequest(BaseModel):
 
 class FeedCandidate(BaseModel):
     url: str
-    title: Optional[str] = None
+    title: str | None = None
 
 
 @router.post("/discover-feed", response_model=ApiResponse[list[FeedCandidate]])

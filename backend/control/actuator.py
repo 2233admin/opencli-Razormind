@@ -27,8 +27,8 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
-from typing import Any, Optional
+from datetime import datetime, timedelta
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -81,10 +81,10 @@ class ExecutionResult:
     original_action_type: str
     original_payload: dict[str, Any]
     detail: dict[str, Any] = field(default_factory=dict)
-    inverse: Optional["ExecutionResult"] = None
+    inverse: ExecutionResult | None = None
 
 
-def _parse_step_minutes(cron_expression: str) -> Optional[int]:
+def _parse_step_minutes(cron_expression: str) -> int | None:
     """Extract N from a ``*/N * * * *`` step-minute cron expression, or None
     for any other shape (fixed times, day-of-week constraints, etc — the
     bounded-backoff math below only knows how to widen a simple step)."""

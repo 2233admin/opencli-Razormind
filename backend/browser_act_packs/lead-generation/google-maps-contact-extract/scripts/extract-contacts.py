@@ -5,7 +5,8 @@ import sys
 def main():
     sys.stdout.reconfigure(encoding='utf-8', newline='\n')
     parser = argparse.ArgumentParser()
-    parser.add_argument('--depth', default='shallow')  # 'shallow' = homepage only, 'deep' = also discover contact/about pages
+    # 'shallow' = homepage only; 'deep' = also discover contact/about pages
+    parser.add_argument('--depth', default='shallow')
     args = parser.parse_args()
 
     depth = args.depth
@@ -29,7 +30,11 @@ def main():
     var m;
     while ((m = mailtoRe.exec(html)) !== null) {
       var decoded = '';
-      try { decoded = decodeURIComponent(m[1]).toLowerCase(); } catch(x) { decoded = m[1].toLowerCase(); }
+      try {
+        decoded = decodeURIComponent(m[1]).toLowerCase();
+      } catch(x) {
+        decoded = m[1].toLowerCase();
+      }
       if (!isSpam(decoded)) emailSet[decoded] = true;
     }
     var bodyText = document.body ? (document.body.innerText || '') : '';
@@ -53,11 +58,29 @@ def main():
     }
 
     var socials = {};
-    var fbLinks = extractSocial('https?://(?:www[.])?facebook[.]com/(?!sharer|share|dialog|tr[?]|plugins|embed|video|events|groups)[a-zA-Z0-9._/%-]+');
-    var igLinks = extractSocial('https?://(?:www[.])?instagram[.]com/(?!p/|reel/|explore/|_/|share/|accounts/)[a-zA-Z0-9._]+/?');
-    var twLinks = extractSocial('https?://(?:www[.])?(?:twitter|x)[.]com/(?!intent/|share[?]|hashtag|home|search|i/)[a-zA-Z0-9._]+/?');
-    var liLinks = extractSocial('https?://(?:www[.])?linkedin[.]com/(?:company|in)/[a-zA-Z0-9._/-]+');
-    var ytLinks = extractSocial('https?://(?:www[.])?youtube[.]com/(?:@|c/|channel/|user/)[a-zA-Z0-9._/-]+');
+    var fbLinks = extractSocial(
+      'https?://(?:www[.])?facebook[.]com/' +
+      '(?!sharer|share|dialog|tr[?]|plugins|embed|video|events|groups)' +
+      '[a-zA-Z0-9._/%-]+'
+    );
+    var igLinks = extractSocial(
+      'https?://(?:www[.])?instagram[.]com/' +
+      '(?!p/|reel/|explore/|_/|share/|accounts/)' +
+      '[a-zA-Z0-9._]+/?'
+    );
+    var twLinks = extractSocial(
+      'https?://(?:www[.])?(?:twitter|x)[.]com/' +
+      '(?!intent/|share[?]|hashtag|home|search|i/)' +
+      '[a-zA-Z0-9._]+/?'
+    );
+    var liLinks = extractSocial(
+      'https?://(?:www[.])?linkedin[.]com/(?:company|in)/' +
+      '[a-zA-Z0-9._/-]+'
+    );
+    var ytLinks = extractSocial(
+      'https?://(?:www[.])?youtube[.]com/(?:@|c/|channel/|user/)' +
+      '[a-zA-Z0-9._/-]+'
+    );
     var ttLinks = extractSocial('https?://(?:www[.])?tiktok[.]com/@[a-zA-Z0-9._/-]+');
     var piLinks = extractSocial('https?://(?:www[.])?pinterest[.]com/[a-zA-Z0-9._/-]+');
     var dcLinks = extractSocial('https?://(?:www[.])?discord[.](?:gg|com/invite)/[a-zA-Z0-9._/-]+');
@@ -85,8 +108,10 @@ def main():
       var contactLinks = Array.from(document.querySelectorAll('a[href]')).filter(function(a) {
         var href = a.href || '';
         var text = (a.textContent || '').toLowerCase();
-        return (href.indexOf('/contact') !== -1 || href.indexOf('/about') !== -1 ||
-                href.indexOf('/reach') !== -1 || text.match(/contact|about|reach us|get in touch/)) &&
+        return (href.indexOf('/contact') !== -1 ||
+                href.indexOf('/about') !== -1 ||
+                href.indexOf('/reach') !== -1 ||
+                text.match(/contact|about|reach us|get in touch/)) &&
                href.indexOf(origin) === 0 && href !== url;
       }).map(function(a) { return a.href.split('#')[0]; });
       var seen = {};

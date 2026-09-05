@@ -31,8 +31,20 @@ async def test_sync_upserts_every_cookie_into_domain_keyed_jar(db_engine, monkey
     decrypted = {
         "cookie_data": {
             "example.com": [
-                {"name": "session_id", "value": "abc", "domain": ".example.com", "path": "/", "sameSite": "unspecified"},
-                {"name": "csrf", "value": "xyz", "domain": "example.com", "path": "/", "secure": True},
+                {
+                    "name": "session_id",
+                    "value": "abc",
+                    "domain": ".example.com",
+                    "path": "/",
+                    "sameSite": "unspecified",
+                },
+                {
+                    "name": "csrf",
+                    "value": "xyz",
+                    "domain": "example.com",
+                    "path": "/",
+                    "secure": True,
+                },
             ]
         },
         "local_storage_data": {"example.com": {"ignored": "not v1 scope"}},
@@ -45,7 +57,8 @@ async def test_sync_upserts_every_cookie_into_domain_keyed_jar(db_engine, monkey
 
     by_name = {c["name"]: c for c in cookies}
     assert by_name["session_id"]["value"] == "abc"
-    assert by_name["session_id"]["sameSite"] == "Lax"  # CookieCloud's own "unspecified" normalization
+    # CookieCloud's own "unspecified" normalization
+    assert by_name["session_id"]["sameSite"] == "Lax"
     assert by_name["csrf"]["secure"] is True
 
 

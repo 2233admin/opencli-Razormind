@@ -106,9 +106,7 @@ class PiRuntimeAdapter(RuntimeAdapter):
         resume_by_id=False,  # see module docstring: no --session-id in pi's RPC protocol
         checkpoint="none",
         concurrent_sessions=True,
-        features=frozenset(
-            {"tool_events", "model_selection", "workspace_read", "workspace_write"}
-        ),
+        features=frozenset({"tool_events", "model_selection", "workspace_read", "workspace_write"}),
     )
     binary_name = "pi"
     session_dir_env = "PI_CODING_AGENT_SESSION_DIR"
@@ -130,8 +128,10 @@ class PiRuntimeAdapter(RuntimeAdapter):
             errors.append("'cwd' must be a string when provided")
         if "env" in config and config["env"] is not None and not isinstance(config["env"], dict):
             errors.append("'env' must be a dict when provided")
-        if "provider_dir" in config and config["provider_dir"] is not None and not isinstance(
-            config["provider_dir"], str
+        if (
+            "provider_dir" in config
+            and config["provider_dir"] is not None
+            and not isinstance(config["provider_dir"], str)
         ):
             errors.append("'provider_dir' must be a string when provided")
         if "args" in config and config["args"] is not None:

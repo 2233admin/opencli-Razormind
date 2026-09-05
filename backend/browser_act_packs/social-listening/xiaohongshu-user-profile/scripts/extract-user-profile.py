@@ -14,7 +14,8 @@ def main():
     const unwrap = v => v?.value !== undefined ? v.value : v?._value !== undefined ? v._value : v;
     const pageData = unwrap(window.__INITIAL_STATE__?.user?.userPageData);
     if (!pageData) {{
-      return JSON.stringify({{ error: true, message: 'userPageData not found — verify page is a user profile page' }});
+      return JSON.stringify({{ error: true, message: 'userPageData not found — '
+        + 'verify page is a user profile page' }});
     }}
     const basic = unwrap(pageData?.basicInfo);
     const interactions = unwrap(pageData?.interactions);
@@ -23,7 +24,8 @@ def main():
       return unwrap(ut?.name);
     }}).filter(Boolean);
     if (!basic) {{
-      return JSON.stringify({{ error: true, message: 'basicInfo not found for user: {args.user_id}' }});
+      return JSON.stringify({{ error: true, message: 'basicInfo not found for user: '
+        + '{args.user_id}' }});
     }}
     const interMap = {{}};
     (interactions ?? []).forEach(i => {{

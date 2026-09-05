@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from backend.config import get_settings
-from backend.schemas.workflow import WorkflowNodeRunEvent
+from backend.schemas.workflow_runtime import WorkflowNodeRunEvent
 
 SCHEMA_VERSION = 1
 WORKFLOW_EVENT_MIRROR_PROVIDER = "opencli-admin/workflow-run-event"

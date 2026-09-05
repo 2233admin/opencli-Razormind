@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -10,21 +10,21 @@ from backend.schemas.provider_capacity import ProviderCapacityRead, project_prov
 class ModelProviderCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     provider_type: str = "openai"
-    base_url: Optional[str] = None
-    api_key: Optional[str] = None
-    default_model: Optional[str] = None
-    notes: Optional[str] = None
+    base_url: str | None = None
+    api_key: str | None = None
+    default_model: str | None = None
+    notes: str | None = None
     enabled: bool = True
 
 
 class ModelProviderUpdate(BaseModel):
-    name: Optional[str] = None
-    provider_type: Optional[str] = None
-    base_url: Optional[str] = None
-    api_key: Optional[str] = None
-    default_model: Optional[str] = None
-    notes: Optional[str] = None
-    enabled: Optional[bool] = None
+    name: str | None = None
+    provider_type: str | None = None
+    base_url: str | None = None
+    api_key: str | None = None
+    default_model: str | None = None
+    notes: str | None = None
+    enabled: bool | None = None
 
 
 class ProviderModelDiscoveryRequest(BaseModel):
@@ -36,8 +36,8 @@ class ProviderModelDiscoveryRequest(BaseModel):
     """
 
     provider_type: str = "openai"
-    base_url: Optional[str] = None
-    api_key: Optional[str] = None
+    base_url: str | None = None
+    api_key: str | None = None
 
 
 class ModelProviderRead(UTCModel):
@@ -55,11 +55,11 @@ class ModelProviderRead(UTCModel):
     id: str
     name: str
     provider_type: str
-    base_url: Optional[str]
+    base_url: str | None
     has_api_key: bool
-    api_key_preview: Optional[str]
-    default_model: Optional[str]
-    notes: Optional[str]
+    api_key_preview: str | None
+    default_model: str | None
+    notes: str | None
     enabled: bool
     capacity: ProviderCapacityRead
     created_at: datetime
@@ -95,7 +95,7 @@ class ModelProviderRead(UTCModel):
         )
 
 
-def _mask_api_key(raw_key: Optional[str]) -> Optional[str]:
+def _mask_api_key(raw_key: str | None) -> str | None:
     """``sk-abcd1234...wxyz`` -> ``sk-...wxyz`` (last 4 chars); None when unset
     or too short to safely preview."""
     if not raw_key:

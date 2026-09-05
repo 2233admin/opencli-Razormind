@@ -1,6 +1,5 @@
 """Resolve OpenCLI runtime resources from existing catalog and fleet metadata."""
 
-from __future__ import annotations
 
 import uuid
 
@@ -8,6 +7,8 @@ from backend.schemas.workflow import (
     CompiledWorkflowNode,
     WorkflowFleetCapabilityMatchResponse,
     WorkflowOpenCLIHDATraceDispatch,
+)
+from backend.schemas.workflow_runtime import (
     WorkflowRunBlockReason,
     WorkflowRuntimeResourceRequirement,
     WorkflowRuntimeResourceResolution,

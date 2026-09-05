@@ -10,13 +10,16 @@ def main():
     parser.add_argument('--week', default='', help='Week number for weekly archive')
     parser.add_argument('--month', default='', help='Month number for monthly archive')
     parser.add_argument('--filter-type', default='all', help='Filter type: all or featured')
-    args = parser.parse_args()
+    parser.parse_args()
 
     js = """
     (()=>{
       try {
         const cards = Array.from(document.querySelectorAll('section.group'));
-        if(cards.length === 0) return JSON.stringify({error: true, message: "No product cards found on page. Check if the page loaded correctly."});
+        if(cards.length === 0) return JSON.stringify({
+          error: true,
+          message: "No product cards found on page. Check if the page loaded correctly."
+        });
         const products = cards.map(card => {
           const link = card.querySelector('a[href^="/products/"]');
           if(!link) return null;
@@ -34,7 +37,17 @@ def main():
           const upvotes = buttons[0] ? parseInt(buttons[0].textContent.trim()) || 0 : 0;
           const comments = buttons[1] ? parseInt(buttons[1].textContent.trim()) || 0 : 0;
           const href = link.getAttribute('href');
-          return { rank, name, tagline, categories, thumbnail, upvotes, comments, url: 'https://www.producthunt.com' + href, slug: href.replace('/products/', '') };
+          return {
+            rank,
+            name,
+            tagline,
+            categories,
+            thumbnail,
+            upvotes,
+            comments,
+            url: 'https://www.producthunt.com' + href,
+            slug: href.replace('/products/', '')
+          };
         }).filter(Boolean);
         return JSON.stringify(products);
       } catch(e) {

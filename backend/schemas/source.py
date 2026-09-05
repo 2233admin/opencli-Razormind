@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -22,43 +22,43 @@ ChannelType = Literal[
 
 class DataSourceCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
-    description: Optional[str] = None
+    description: str | None = None
     channel_type: ChannelType
     channel_config: dict[str, Any] = Field(default_factory=dict)
-    ai_config: Optional[dict[str, Any]] = None
+    ai_config: dict[str, Any] | None = None
     enabled: bool = True
     tags: list[str] = Field(default_factory=list)
 
 
 class DataSourceUpdate(BaseModel):
-    name: Optional[str] = Field(None, min_length=1, max_length=255)
-    description: Optional[str] = None
-    channel_config: Optional[dict[str, Any]] = None
-    ai_config: Optional[dict[str, Any]] = None
-    enabled: Optional[bool] = None
-    tags: Optional[list[str]] = None
+    name: str | None = Field(None, min_length=1, max_length=255)
+    description: str | None = None
+    channel_config: dict[str, Any] | None = None
+    ai_config: dict[str, Any] | None = None
+    enabled: bool | None = None
+    tags: list[str] | None = None
 
 
 class DataSourceRead(UTCModel):
     id: str
     name: str
-    description: Optional[str]
+    description: str | None
     channel_type: str
     channel_config: dict[str, Any]
-    ai_config: Optional[dict[str, Any]]
+    ai_config: dict[str, Any] | None
     enabled: bool
     tags: list[str]
     #: Raw stored per-source SourceObjective override (issue 02), null when
     #: none is set. This is the UNRESOLVED override dict — see
     #: backend.schemas.control.SourceControlStateRead.objective for what
     #: classification actually uses (resolved over defaults).
-    objective_override: Optional[dict[str, Any]] = None
+    objective_override: dict[str, Any] | None = None
     #: Issue 03 (Control Cycle + Actuator): set by an executed require_review
     #: action; a human clears it, the Control Cycle never does.
     review_required: bool = False
     #: Issue 03: set alongside enabled=False by an executed pause action;
     #: null once resumed (manually or by the Control Cycle's TTL auto-resume).
-    paused_until: Optional[datetime] = None
+    paused_until: datetime | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -67,7 +67,7 @@ class DataSourceRead(UTCModel):
 
 class DataSourceDetail(DataSourceRead):
     """Extended read with connectivity status."""
-    connectivity_ok: Optional[bool] = None
+    connectivity_ok: bool | None = None
     connectivity_errors: list[str] = Field(default_factory=list)
 
 
@@ -87,4 +87,4 @@ class SourceObjectiveOverridePatch(BaseModel):
     JSON object with a bad field name still gets a precise error.
     """
 
-    objective_override: Optional[dict[str, Any]] = None
+    objective_override: dict[str, Any] | None = None

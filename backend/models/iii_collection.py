@@ -21,13 +21,22 @@ class IIICollectionCommandV1(TimestampMixin):
 
     version: Mapped[str] = mapped_column(String(16), nullable=False, default="v1")
     workspace_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("studio_workspaces.id", ondelete="RESTRICT"), nullable=False, index=True
+        String(36),
+        ForeignKey("studio_workspaces.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
     )
     project_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("studio_projects.id", ondelete="RESTRICT"), nullable=False, index=True
+        String(36),
+        ForeignKey("studio_projects.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
     )
     workflow_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("studio_workflows.id", ondelete="RESTRICT"), nullable=False, index=True
+        String(36),
+        ForeignKey("studio_workflows.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
     )
     studio_workflow_version_id: Mapped[str] = mapped_column(
         String(36),
@@ -84,7 +93,9 @@ class IIICollectionOutboundV1(TimestampMixin):
         index=True,
     )
     state: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
-    dispatch_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    dispatch_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
     available_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     dispatched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -147,10 +158,16 @@ class IIICollectionExpectedKeyReportV1(TimestampMixin):
     version: Mapped[str] = mapped_column(String(16), nullable=False, default="v1")
     report_id: Mapped[str] = mapped_column(String(128), nullable=False)
     command_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("iii_collection_commands.id", ondelete="RESTRICT"), nullable=False, index=True
+        String(36),
+        ForeignKey("iii_collection_commands.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
     )
     attempt_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("iii_collection_attempts.id", ondelete="RESTRICT"), nullable=False, index=True
+        String(36),
+        ForeignKey("iii_collection_attempts.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
     )
     report_sequence: Mapped[int] = mapped_column(Integer, nullable=False)
     payload_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -183,10 +200,16 @@ class IIICollectionIngressReceiptV1(TimestampMixin):
     producer_id: Mapped[str] = mapped_column(String(255), nullable=False)
     producer_key_id: Mapped[str] = mapped_column(String(255), nullable=False)
     command_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("iii_collection_commands.id", ondelete="RESTRICT"), nullable=False, index=True
+        String(36),
+        ForeignKey("iii_collection_commands.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
     )
     attempt_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("iii_collection_attempts.id", ondelete="RESTRICT"), nullable=False, index=True
+        String(36),
+        ForeignKey("iii_collection_attempts.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
     )
     payload_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     expected_key_set_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -229,10 +252,16 @@ class EvidenceBatchMaterializationManifestV1(TimestampMixin):
     run_id: Mapped[str] = mapped_column(String(36), nullable=False)
     node_id: Mapped[str] = mapped_column(String(255), nullable=False)
     command_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("iii_collection_commands.id", ondelete="RESTRICT"), nullable=False, index=True
+        String(36),
+        ForeignKey("iii_collection_commands.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
     )
     attempt_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("iii_collection_attempts.id", ondelete="RESTRICT"), nullable=False, index=True
+        String(36),
+        ForeignKey("iii_collection_attempts.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
     )
     task_id: Mapped[str] = mapped_column(String(36), nullable=False)
     trace_id: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -265,7 +294,11 @@ class EvidenceBatchMaterializationEventV1(TimestampMixin):
             "event_type",
             name="uq_evidence_batch_materialization_event_manifest",
         ),
-        Index("ix_evidence_batch_materialization_event_attempt", "attempt_id", "reconciliation_revision"),
+        Index(
+            "ix_evidence_batch_materialization_event_attempt",
+            "attempt_id",
+            "reconciliation_revision",
+        ),
     )
 
     manifest_id: Mapped[str] = mapped_column(
@@ -275,10 +308,16 @@ class EvidenceBatchMaterializationEventV1(TimestampMixin):
         index=True,
     )
     command_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("iii_collection_commands.id", ondelete="RESTRICT"), nullable=False, index=True
+        String(36),
+        ForeignKey("iii_collection_commands.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
     )
     attempt_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("iii_collection_attempts.id", ondelete="RESTRICT"), nullable=False, index=True
+        String(36),
+        ForeignKey("iii_collection_attempts.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
     )
     reconciliation_revision: Mapped[int] = mapped_column(Integer, nullable=False)
     event_type: Mapped[str] = mapped_column(String(32), nullable=False, default="reconciled")

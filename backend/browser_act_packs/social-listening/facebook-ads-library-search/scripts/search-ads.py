@@ -66,7 +66,8 @@ def main():
       if (end > 10) {{ lsd = s.slice(0, end); break; }}
     }}
   }}
-  if (!lsd) return JSON.stringify({{error: true, message: "lsd token not found - navigate to facebook.com first"}});
+  if (!lsd) return JSON.stringify({{error: true, message: "lsd token not found - " +
+    "navigate to facebook.com first"}});
 
   try {{
     var vars = {vars_json};

@@ -1,24 +1,35 @@
 import argparse
 import sys
 
+
 def main():
     sys.stdout.reconfigure(encoding='utf-8', newline='\n')
-    parser = argparse.ArgumentParser(description='Search X users via GraphQL TypeaheadXChatQuery; returns candidate users with DM permission info')
+    parser = argparse.ArgumentParser(
+        description='Search X users via GraphQL TypeaheadXChatQuery; returns candidate users '
+        'with DM permission info'
+    )
     parser.add_argument('query', help='Search query (name, screen_name or partial)')
     args = parser.parse_args()
 
     js = f"""
     (async () => {{
       try {{
-        const passcode = document.querySelector('input[pattern="[0-9]*"][maxlength="1"]');
-        if (passcode) return JSON.stringify({{ error: true, message: 'passcode_required' }});
+        const AUTH = 'Bearer ' +
+          'AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8L' +
+          'F81IUq16cHjhLTvJu4FA33AGWWjCpTnA';
+        const csrf = document.cookie.split('; ').find(
+          c => c.startsWith('ct0=')
+        )?.split('=')[1];
+        if (!csrf) {{
+          return JSON.stringify({{
+            error: true,
+            message: 'ct0 cookie missing - not logged in'
+          }});
+        }}
 
-        const AUTH = 'Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA';
-        const csrf = document.cookie.split('; ').find(c => c.startsWith('ct0='))?.split('=')[1];
-        if (!csrf) return JSON.stringify({{ error: true, message: 'ct0 cookie missing - not logged in' }});
-
-        const url = 'https://api.x.com/graphql/mYbJ7Qq9UAtG-68VAiBpYA/TypeaheadXChatQuery?variables=' +
-          encodeURIComponent(JSON.stringify({{
+        const url = 'https://api.x.com/graphql/mYbJ7Qq9UAtG-68VAiBpYA/'
+          + 'TypeaheadXChatQuery?variables='
+          + encodeURIComponent(JSON.stringify({{
             query: {repr(args.query)},
             include_group_check: true,
             conv_id: null,

@@ -1,5 +1,3 @@
-from typing import Optional
-
 from sqlalchemy import JSON, Boolean, ForeignKey, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -40,7 +38,7 @@ class ProviderModel(TimestampMixin):
     #: land later without a migration.
     model_type: Mapped[str] = mapped_column(String(50), nullable=False, default="llm")
     #: e.g. {"tools": true, "vision": false, "context_window": 200000}.
-    capabilities: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    capabilities: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     #: discovered | manual — closed-set validated, see backend.llm.VALID_MODEL_SOURCES.
     source: Mapped[str] = mapped_column(String(50), nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)

@@ -3,7 +3,7 @@
 rows, POST /control/outcomes/evaluate, and GET /control/advisory-report.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import select
@@ -25,7 +25,7 @@ async def _seed_measurement_row(session, source_id: str, **overrides):
     kwargs = dict(
         source_id=source_id,
         run_id="row-run-1",
-        measured_at=datetime(2026, 7, 2, tzinfo=timezone.utc),
+        measured_at=datetime(2026, 7, 2, tzinfo=UTC),
         accepted=0,
         duplicates=0,
         rejected=1,
@@ -154,7 +154,7 @@ async def test_evaluate_and_advisory_report_recovery_flow(
             .all()
         )
         assert rows
-        backdated = datetime.now(timezone.utc) - timedelta(seconds=120)
+        backdated = datetime.now(UTC) - timedelta(seconds=120)
         for row in rows:
             row.created_at = backdated
         await db_session.commit()
@@ -166,7 +166,7 @@ async def test_evaluate_and_advisory_report_recovery_flow(
             db_session,
             source_id,
             run_id="row-run-post",
-            measured_at=datetime.now(timezone.utc),
+            measured_at=datetime.now(UTC),
             accepted=5,
             duplicates=0,
             rejected=0,
@@ -299,7 +299,7 @@ async def test_kill_switch_engaged_short_circuits_control_cycle(
                         executed=False,
                         measurement_before={},
                         outcome="recovered" if i < 8 else "persisted",
-                        evaluated_at=datetime.now(timezone.utc),
+                        evaluated_at=datetime.now(UTC),
                     )
                 )
         await db_session.commit()
@@ -309,7 +309,7 @@ async def test_kill_switch_engaged_short_circuits_control_cycle(
 
         from backend.control.cycle import run_control_cycle_once
 
-        result = await run_control_cycle_once(db_session, now=datetime.now(timezone.utc))
+        result = await run_control_cycle_once(db_session, now=datetime.now(UTC))
         await db_session.commit()
 
         assert result.executions == []

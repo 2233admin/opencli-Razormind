@@ -13,11 +13,11 @@ from dataclasses import dataclass
 
 from backend.schemas.workflow import (
     WorkflowAdapterBinding,
-    WorkflowCompileError,
     WorkflowProject,
     WorkflowProjectEdge,
     WorkflowProjectNode,
 )
+from backend.schemas.workflow_compile import WorkflowCompileError
 from backend.workflow.node_registry import resolve_node_origin
 from backend.workflow.runtime_registry import (
     SCHEDULE_TRIGGER_BINDING_ID,

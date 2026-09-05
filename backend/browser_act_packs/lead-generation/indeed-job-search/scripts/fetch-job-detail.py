@@ -17,7 +17,11 @@ def main():
     const resp = await fetch(url);
     if (!resp.ok) return JSON.stringify({{error: true, message: "HTTP " + resp.status}});
     const data = await resp.json();
-    if (data.status !== 'success' || !data.body) return JSON.stringify({{error: true, message: "Unexpected response: " + (data.status || "unknown")}});
+    if (data.status !== 'success' || !data.body) {{
+      return JSON.stringify({{
+        error: true, message: "Unexpected response: " + (data.status || "unknown")
+      }});
+    }}
     const body = data.body;
     const info = body.jobInfoWrapperModel && body.jobInfoWrapperModel.jobInfoModel;
     const header = info && info.jobInfoHeaderModel;
@@ -31,8 +35,10 @@ def main():
       positionName: header ? header.jobTitle : null,
       company: header ? header.companyName : null,
       location: header ? header.formattedLocation : null,
-      rating: header && header.companyReviewModel && header.companyReviewModel.ratingsModel ? header.companyReviewModel.ratingsModel.rating : null,
-      reviewsCount: header && header.companyReviewModel && header.companyReviewModel.ratingsModel ? header.companyReviewModel.ratingsModel.count : null,
+      rating: header && header.companyReviewModel && header.companyReviewModel.ratingsModel
+        ? header.companyReviewModel.ratingsModel.rating : null,
+      reviewsCount: header && header.companyReviewModel && header.companyReviewModel.ratingsModel
+        ? header.companyReviewModel.ratingsModel.count : null,
       companyLogo: header && header.companyImagesModel ? header.companyImagesModel.logoUrl : null,
       salary: salary ? salary.salaryText : null,
       salaryMin: salary ? salary.salaryMin : null,
@@ -41,7 +47,8 @@ def main():
       salaryType: salary ? salary.salaryType : null,
       jobType: metaHeader ? metaHeader.jobType : null,
       description: description || null,
-      benefits: benefits && benefits.benefits ? benefits.benefits.map(function(b) {{ return b.label; }}) : null,
+      benefits: benefits && benefits.benefits
+        ? benefits.benefits.map(function(b) {{ return b.label; }}) : null,
       postedAt: hiring ? hiring.age : null,
       isExpired: body.isJobExpired || false,
       url: "https://www.indeed.com/viewjob?jk=" + jk

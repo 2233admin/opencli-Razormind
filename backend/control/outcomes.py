@@ -32,8 +32,7 @@ executes anything. Deterministic given ``now``: tests inject it explicitly.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -50,9 +49,9 @@ from backend.models.source_measurement import SourceMeasurement as SourceMeasure
 async def evaluate_pending_outcomes(
     session: AsyncSession,
     *,
-    now: Optional[datetime] = None,
-    min_age_seconds: Optional[int] = None,
-    stale_after_seconds: Optional[int] = None,
+    now: datetime | None = None,
+    min_age_seconds: int | None = None,
+    stale_after_seconds: int | None = None,
     window: int = 5,
 ) -> dict:
     """Judge every ripe pending ledger row; return the count per verdict.
@@ -69,7 +68,7 @@ async def evaluate_pending_outcomes(
     Flushes but never commits — the caller's session/transaction decides.
     """
     settings = get_settings()
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     if min_age_seconds is None:
         min_age_seconds = settings.control_outcome_min_age_seconds
     if stale_after_seconds is None:

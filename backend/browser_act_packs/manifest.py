@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -29,8 +29,8 @@ class ParamSpec(BaseModel):
 
     name: str
     required: bool = False
-    default: Optional[str] = None
-    enum: Optional[list[str]] = None
+    default: str | None = None
+    enum: list[str] | None = None
 
 
 #: The browser-act operations a manifest step can drive. See Browser Act integration decision
@@ -55,13 +55,13 @@ class Step(BaseModel):
     """
 
     op: StepOp
-    url_template: Optional[str] = None
-    wait_mode: Optional[str] = None
-    script: Optional[str] = None
-    args: Optional[list[str]] = None
-    selector: Optional[str] = None
-    index: Optional[int] = None
-    value: Optional[str] = None
+    url_template: str | None = None
+    wait_mode: str | None = None
+    script: str | None = None
+    args: list[str] | None = None
+    selector: str | None = None
+    index: int | None = None
+    value: str | None = None
 
 
 class Pagination(BaseModel):
@@ -71,16 +71,16 @@ class Pagination(BaseModel):
     change."""
 
     mode: str
-    url_template: Optional[str] = None
-    page_param: Optional[str] = None
-    stop_when: Optional[str] = None
+    url_template: str | None = None
+    page_param: str | None = None
+    stop_when: str | None = None
 
 
 class SuccessCriteria(BaseModel):
     """When a collected batch counts as a successful result."""
 
     min_count: int = 1
-    required_field: Optional[str] = None
+    required_field: str | None = None
 
 
 class PackManifest(BaseModel):

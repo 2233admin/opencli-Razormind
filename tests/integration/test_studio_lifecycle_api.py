@@ -327,9 +327,7 @@ async def test_published_question_bank_run_is_managed_idempotent_and_path_privat
         for event in trace.json()["data"]["trace"]["events"]
         if event["nodeId"] == "batch::tool" and event["eventType"] == "waiting"
     )
-    assert "gaojixing.collection-run.v1" in json.dumps(
-        batch_waiting["details"], ensure_ascii=False
-    )
+    assert "gaojixing.collection-run.v1" in json.dumps(batch_waiting["details"], ensure_ascii=False)
 
     changed = json.dumps(
         {
@@ -343,9 +341,7 @@ async def test_published_question_bank_run_is_managed_idempotent_and_path_privat
 
 
 @pytest.mark.asyncio
-async def test_concurrent_published_idempotent_requests_return_the_same_run(
-    tmp_path, monkeypatch
-):
+async def test_concurrent_published_idempotent_requests_return_the_same_run(tmp_path, monkeypatch):
     engine = create_async_engine(
         f"sqlite+aiosqlite:///{tmp_path / 'published-idempotency.db'}",
         connect_args={"check_same_thread": False},
@@ -623,6 +619,17 @@ async def test_studio_api_run_is_version_bound_idempotent_and_visible_in_logs(
         "limit": 1,
     }
     assert paged_trace.json()["data"]["trace"]["nextAfterSequence"] == paged_events[0]["sequence"]
+    empty_evidence_batches = await client.get(
+        f"{created['base_url']}/runs/{projection['runId']}/evidence-batches",
+        params={"node_id": "missing-node"},
+    )
+    assert empty_evidence_batches.status_code == 200, empty_evidence_batches.text
+    assert empty_evidence_batches.json()["data"]["batches"] == []
+    empty_evidence_projection = await client.get(
+        f"{created['base_url']}/runs/{projection['runId']}/evidence-batches/projection",
+    )
+    assert empty_evidence_projection.status_code == 200, empty_evidence_projection.text
+    assert empty_evidence_projection.json()["data"]["runId"] == projection["runId"]
 
     scoped_run_url = f"{created['base_url']}/runs/{projection['runId']}"
     scoped_projection = await client.get(scoped_run_url)

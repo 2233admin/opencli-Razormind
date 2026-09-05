@@ -15,7 +15,6 @@ needs both (see ``backend.control.recorder``).
 """
 
 from datetime import datetime
-from typing import Optional
 
 from sqlalchemy import JSON, Boolean, DateTime, Float, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
@@ -57,18 +56,24 @@ class SourceMeasurement(TimestampMixin):
     #: histogram. See backend/control/error_kinds.py.
     error_kinds: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
 
-    fetch_latency_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    ingest_latency_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    store_latency_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    fetch_latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    ingest_latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    store_latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     #: The REAL commit result (backend.pipeline.cursor_store.CommitResult.advanced),
     #: not a guess — False for non-incremental channels and for runs where the
     #: store returned no new value.
     cursor_advanced: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
-    newest_source_ts: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    newest_observed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    freshness_lag_seconds: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    newest_source_ts: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    newest_observed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    freshness_lag_seconds: Mapped[int | None] = mapped_column(
+        Integer, nullable=True
+    )
     #: source | observed_fallback | missing | invalid | synthetic — see
     #: docs/CONTROL_THEORY_ARCHITECTURE.md and TASK item 5. "missing" is the
     #: honest default when item timestamps aren't wired through for a channel,

@@ -32,8 +32,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -42,10 +41,10 @@ from backend.config import get_settings
 from backend.control import actuator
 from backend.control.gate import evaluate_gate
 from backend.control.ledger import record_executed_action
-from backend.control.objectives import resolve_objective
-from backend.control.outcomes import evaluate_pending_outcomes
 from backend.control.measurements import SourceMeasurement
 from backend.control.models import SourceControlState
+from backend.control.objectives import resolve_objective
+from backend.control.outcomes import evaluate_pending_outcomes
 from backend.control.service import decide_for_source
 from backend.control.system_context import build_system_context
 from backend.models.source import DataSource
@@ -69,16 +68,18 @@ class CycleResult:
 async def run_control_cycle_once(
     session: AsyncSession,
     *,
-    now: Optional[datetime] = None,
+    now: datetime | None = None,
 ) -> CycleResult:
     """Run one full Control Cycle tick. Flushes but never commits — callers
     (the asyncio wrapper) own the session's commit/rollback lifecycle, same
     convention as every other control-layer write path."""
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     settings = get_settings()
     result = CycleResult()
 
-    sources = (await session.execute(select(DataSource).where(DataSource.enabled.is_(True)))).scalars().all()
+    sources = (
+        await session.execute(select(DataSource).where(DataSource.enabled.is_(True)))
+    ).scalars().all()
 
     for source in sources:
         objective = resolve_objective(source.objective_override)

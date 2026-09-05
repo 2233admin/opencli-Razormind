@@ -8,6 +8,7 @@ exception, bounded trigger-kind recognition, and authored-order determinism.
 
 import pytest
 
+from backend.models.workflow_run import WorkflowRun, WorkflowRunEvent
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -171,7 +172,12 @@ async def _bootstrap_workflow(client, *, graph: dict) -> dict:
         f"/api/v1/workspaces/{workspace_id}/projects/{project['id']}"
         f"/workflows/{workflow['id']}"
     )
-    return {"workspace_id": workspace_id, "project": project, "workflow": workflow, "base_url": base_url}
+    return {
+        "workspace_id": workspace_id,
+        "project": project,
+        "workflow": workflow,
+        "base_url": base_url,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -220,8 +226,8 @@ async def test_bounded_trigger_kind_recognition(client):
     """Only manual, schedule, and webhook binding ids are recognised;
     ai is normalized to manual; legacy-origin nodes are excluded."""
 
-    from backend.workflow.trigger_scope import _resolve_trigger_kind
     from backend.schemas.workflow import WorkflowProjectNode
+    from backend.workflow.trigger_scope import _resolve_trigger_kind
 
     def node(**kw) -> WorkflowProjectNode:
         return WorkflowProjectNode(
@@ -232,16 +238,37 @@ async def test_bounded_trigger_kind_recognition(client):
         )
 
     # manual (primitive)
-    assert _resolve_trigger_kind(node(id="man", kind="schedule", capability="trigger",
-                                       params={"mode": "manual"},
-                                       ui={"primitiveId": "primitive.core.manual-trigger"}), None) == "manual"
+    assert _resolve_trigger_kind(
+        node(
+            id="man",
+            kind="schedule",
+            capability="trigger",
+            params={"mode": "manual"},
+            ui={"primitiveId": "primitive.core.manual-trigger"},
+        ),
+        None,
+    ) == "manual"
     # schedule (catalog)
-    assert _resolve_trigger_kind(node(id="sched", kind="schedule", capability="trigger",
-                                       params={"interval": "1d"},
-                                       ui={"catalogId": "intelligence.schedule.cron"}), None) == "schedule"
+    assert _resolve_trigger_kind(
+        node(
+            id="sched",
+            kind="schedule",
+            capability="trigger",
+            params={"interval": "1d"},
+            ui={"catalogId": "intelligence.schedule.cron"},
+        ),
+        None,
+    ) == "schedule"
     # webhook
-    assert _resolve_trigger_kind(node(id="wh", kind="schedule", capability="trigger",
-                                       ui={"primitiveId": "primitive.core.webhook-trigger"}), None) == "webhook"
+    assert _resolve_trigger_kind(
+        node(
+            id="wh",
+            kind="schedule",
+            capability="trigger",
+            ui={"primitiveId": "primitive.core.webhook-trigger"},
+        ),
+        None,
+    ) == "webhook"
     # legacy origin excluded
     orphan = node(id="legacy", kind="agent", capability="normalize",
                   ui={"catalogId": "unknown.fake.id"})
@@ -281,7 +308,9 @@ async def test_scoped_validation_passes_with_six_parked_and_four_config_warnings
     parked_ids = {w["node_id"] for w in parked}
     assert parked_ids == {"llm-a", "llm-b", "plugin", "review", "document", "notify"}
     # authored order membership
-    assert [w["node_id"] for w in parked] == ["llm-a", "llm-b", "plugin", "review", "document", "notify"]
+    assert [w["node_id"] for w in parked] == [
+        "llm-a", "llm-b", "plugin", "review", "document", "notify"
+    ]
 
     config = [w for w in warnings if w["code"] == "unknown_node_library_binding"]
     assert len(config) == 4
@@ -305,17 +334,23 @@ async def test_no_trigger_graph_preserves_full_compilation_path(client):
     # no unknown-binding parked nodes that would fail full-graph compile
     keep_ids = {"source", "hygiene", "records"}
     graph["nodes"] = [n for n in graph["nodes"] if n["id"] in keep_ids]
-    graph["edges"] = [e for e in graph["edges"] if e["source"] in keep_ids and e["target"] in keep_ids]
+    graph["edges"] = [
+        e for e in graph["edges"]
+        if e["source"] in keep_ids and e["target"] in keep_ids
+    ]
     graph["id"] = "wf-no-trigger-clean"
     graph["name"] = "No Trigger Clean"
 
     created = await _bootstrap_workflow(client, graph=graph)
     v = (await client.post(f"{created['base_url']}/draft/validation-runs", json={})).json()["data"]
     # Full-graph path: valid nodes pass, no parked diagnostics emitted
-    assert v["valid"] is True, f"Expected valid=true for clean full graph, got errors={v.get('errors')}"
+    assert v["valid"] is True, (
+        f"Expected valid=true for clean full graph, got errors={v.get('errors')}"
+    )
     parked_warnings = [w for w in v.get("warnings", []) if w.get("code") == "parked_node"]
     assert len(parked_warnings) == 0, (
-        f"No trigger means no trigger scope — parked classification must not activate: {parked_warnings}"
+        f"No trigger means no trigger scope — parked classification must not "
+        f"activate: {parked_warnings}"
     )
 
 
@@ -440,8 +475,14 @@ async def test_empty_external_workflow_dict_is_included(client):
     created = await _bootstrap_workflow(client, graph=graph)
     v = (await client.post(f"{created['base_url']}/draft/validation-runs", json={})).json()["data"]
     assert v["valid"] is True
-    parked = {w["node_id"] for w in v.get("warnings", []) if w.get("code") == "parked_node" and w.get("node_id")}
-    assert "lg-empty" not in parked, f"externalWorkflow={{}} node should not be parked, got {parked}"
+    parked = {
+        w["node_id"]
+        for w in v.get("warnings", [])
+        if w.get("code") == "parked_node" and w.get("node_id")
+    }
+    assert "lg-empty" not in parked, (
+        f"externalWorkflow={{}} node should not be parked, got {parked}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -451,7 +492,8 @@ async def test_empty_external_workflow_dict_is_included(client):
 @pytest.mark.asyncio
 async def test_scoped_nodes_preserve_authored_order(client):
     from backend.schemas.workflow import WorkflowProject
-    from backend.workflow.trigger_scope import scoped_project as _scoped_project, select_active_union
+    from backend.workflow.trigger_scope import scoped_project as _scoped_project
+    from backend.workflow.trigger_scope import select_active_union
 
     project = WorkflowProject.model_validate(_trigger_scope_acceptance_fixture())
     active_union = select_active_union(project)
@@ -506,7 +548,9 @@ async def test_run_projection_excludes_parked_from_all_surfaces(client):
     events = trace.json()["data"]["trace"]["events"]
     event_ids = {e["nodeId"] for e in events}
     assert not (event_ids & parked_expected), f"Parked ids in events: {event_ids & parked_expected}"
-    assert active_expected.issubset(event_ids) or event_ids == active_expected, f"Missing active: {active_expected - event_ids}"
+    assert (
+        active_expected.issubset(event_ids) or event_ids == active_expected
+    ), f"Missing active: {active_expected - event_ids}"
 
     # checkpoint node states
     checkpoint = trace.json()["data"]["trace"]["checkpoint"]["nodeStates"]
@@ -536,7 +580,10 @@ async def test_reconnecting_parked_node_makes_invalid_config_active_error(client
     draft_url = f"{created['base_url']}/draft"
     draft = (await client.get(draft_url)).json()["data"]
     graph = {**draft["graph"]}
-    graph["edges"] = [*graph["edges"], {"id": "e-hygiene-llma", "source": "hygiene", "target": "llm-a"}]
+    graph["edges"] = [
+        *graph["edges"],
+        {"id": "e-hygiene-llma", "source": "hygiene", "target": "llm-a"},
+    ]
     upd = await client.put(draft_url, json={"graph": graph, "revision": draft["revision"]})
     assert upd.status_code == 200, upd.text
 
@@ -571,10 +618,11 @@ async def test_parked_nodes_have_zero_dispatch_events_batches_items(client):
     )
     proj = rr.json()["data"]
     parked = {"llm-a", "llm-b", "plugin", "review", "document", "notify"}
-    active = {"trigger", "source", "hygiene", "records"}
 
     # projection-level: valid=true, errors empty
-    assert proj["valid"] is True, f"proj valid={proj['valid']}, errors={proj.get('errors')}"
+    assert proj["valid"] is True, (
+        f"proj valid={proj['valid']}, errors={proj.get('errors')}"
+    )
     assert proj.get("errors", []) == []
 
     # trace events
@@ -613,13 +661,15 @@ async def test_rollback_compatibility_pre_change_and_scoped_versions(
     errors — no model_validate-only shortcut."""
 
     import uuid
+
     from sqlalchemy import select
-    from backend.schemas.workflow import WORKFLOW_COMPILE_VERSION
+
     from backend.models.studio import (
         StudioWorkflow,
-        StudioWorkflowVersion,
         StudioWorkflowValidationRun,
+        StudioWorkflowVersion,
     )
+    from backend.schemas.workflow import WORKFLOW_COMPILE_VERSION
 
     full_fixture = _trigger_scope_acceptance_fixture()
     active_ids = {"trigger", "source", "hygiene", "records"}
@@ -763,3 +813,108 @@ async def test_rollback_compatibility_pre_change_and_scoped_versions(
     assert v2_read["version"] == 2
     assert v1_read["graph"]["nodes"] == v2_read["graph"]["nodes"]
     assert v1_read["graph"]["edges"] == v2_read["graph"]["edges"]
+
+@pytest.mark.asyncio
+async def test_scoped_research_graph_route_ownership_prefix_and_bounds(client, db_session):
+    created = await _bootstrap_workflow(client, graph=_trigger_scope_acceptance_fixture())
+    workspace_id = created["workspace_id"]
+    project_id = created["project"]["id"]
+    workflow_id = created["workflow"]["id"]
+    run_id = "scoped-research-graph-run"
+    trace_id = "scoped-research-graph-trace"
+    db_session.add(
+        WorkflowRun(
+            id=run_id,
+            workflow_id=workflow_id,
+            trace_id=trace_id,
+            status="completed",
+            valid=True,
+            request={"project": _trigger_scope_acceptance_fixture(), "traceId": trace_id},
+            projection={
+                "workflowId": workflow_id, "runId": run_id, "traceId": trace_id,
+                "valid": True, "status": "completed",
+                "startedAt": "2026-08-29T00:00:00Z", "updatedAt": "2026-08-29T00:00:00Z",
+                "eventCount": 3, "nodeStates": [], "errors": [],
+            },
+            next_event_sequence=4,
+        )
+    )
+    for sequence, event_type, entity in [
+        (1, "source/recorded", {"id": "src", "kind": "source"}),
+        (2, "evidence/linked", {"id": "ev", "kind": "evidence", "sourceIds": ["src"]}),
+        (3, "claim/projected", {"id": "claim", "kind": "claim", "evidenceIds": ["ev"]}),
+    ]:
+        event_id = f"graph-event-{sequence}"
+        db_session.add(
+            WorkflowRunEvent(
+                payload={"id": event_id, "sequence": sequence, "workflowId": workflow_id,
+                         "workflowRunId": run_id, "traceId": trace_id, "nodeId": "research-node",
+                         "eventType": "partial", "createdAt": "2026-08-29T00:00:00Z",
+                         "details": {"researchGraph": {
+                    "schemaVersion": 1, "eventId": event_id, "idempotencyKey": event_id,
+                    "eventType": event_type, "runId": run_id, "traceId": trace_id,
+                    "nodeId": "research-node", "lineage": {"source": "test"}, "entity": entity,
+                }}},
+                run_id=run_id,
+                workflow_id=workflow_id,
+                trace_id=trace_id,
+                event_id=event_id,
+                node_id="research-node",
+                sequence=sequence,
+                event_type="partial",
+            )
+        )
+    await db_session.commit()
+    base = (
+        f"/api/v1/workspaces/{workspace_id}/projects/{project_id}"
+        f"/workflows/{workflow_id}/runs/{run_id}/research-graph"
+    )
+    response = await client.get(base, params={"upToSequence": 2, "limit": 1})
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["runId"] == run_id
+    assert data["lastSequence"] == 2
+    assert data["eventCount"] == 1
+    assert len(data["entities"]) == 1
+    assert (await client.get(base.replace(workspace_id, "wrong-workspace"))).status_code == 404
+    assert (await client.get(base.replace(project_id, "wrong-project"))).status_code == 404
+    assert (await client.get(base.replace(workflow_id, "wrong-workflow"))).status_code == 404
+    mutation_url = f"{base}/mutations"
+    proposal = {
+        "schemaVersion": 1,
+        "idempotencyKey": "scoped-proposal-1",
+        "expectedRevision": None,
+        "expectedSequence": 3,
+        "action": "propose",
+        "traceId": trace_id,
+        "nodeId": "research-node",
+        "revisionId": "rev-1",
+        "entity": {"id": "claim-proposed", "kind": "claim", "evidenceIds": ["ev"]},
+    }
+    first = await client.post(mutation_url, json=proposal)
+    assert first.status_code == 200
+    assert first.json()["data"]["graph"]["entities"][-1]["state"] == "proposed"
+    replay = await client.post(mutation_url, json=proposal)
+    assert replay.status_code == 200
+    verified = await client.post(
+        mutation_url,
+        json={
+            "schemaVersion": 1,
+            "idempotencyKey": "scoped-verify-1",
+            "expectedRevision": "rev-1",
+            "expectedSequence": 4,
+            "action": "verify",
+            "traceId": trace_id,
+            "nodeId": "research-node",
+            "targetId": "claim-proposed",
+        },
+    )
+    assert verified.status_code == 200
+    assert verified.json()["data"]["graph"]["entities"][-1]["authoritative"] is True
+    assert (
+        await client.post(
+            f"/api/v1/workflows/runs/{run_id}/research-graph/mutations",
+            json=proposal,
+        )
+    ).status_code == 404
+    assert (await client.get(base.replace(run_id, "wrong-run"))).status_code == 404

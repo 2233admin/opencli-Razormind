@@ -11,7 +11,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from backend.schemas.workflow import WorkflowNodeRunEventType, WorkflowRunStatus
+from backend.schemas.workflow_runtime import WorkflowNodeRunEventType, WorkflowRunStatus
 from backend.workflow.block_reasons import BlockReasonCategory, block_reason_category
 
 

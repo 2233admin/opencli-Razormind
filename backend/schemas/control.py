@@ -10,7 +10,7 @@ authoritative JSON shape.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Literal, Optional, Union
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -66,8 +66,8 @@ class SystemContextRead(BaseModel):
     """
 
     odp_backpressured: bool
-    stream_lag: Optional[int] = None
-    pending: Optional[int] = None
+    stream_lag: int | None = None
+    pending: int | None = None
     available: bool
 
 
@@ -96,7 +96,7 @@ class KillSwitchRead(BaseModel):
     """
 
     engaged: bool
-    runtime_override: Optional[bool] = None
+    runtime_override: bool | None = None
     config_default: bool
 
 
@@ -138,7 +138,7 @@ class AdvisoryReportTotalsRead(BaseModel):
     recovered: int
     persisted: int
     insufficient_data: int
-    recovery_rate: Optional[float] = None
+    recovery_rate: float | None = None
 
 
 class AdvisoryReportBucketRead(AdvisoryReportTotalsRead):
@@ -195,16 +195,16 @@ class SourceControlStateRead(BaseModel):
     """
 
     source_id: str
-    control_state: Optional[SourceControlState] = None
-    confidence: Optional[str] = None
-    sensor_coverage: Optional[SensorCoverage] = None
+    control_state: SourceControlState | None = None
+    confidence: str | None = None
+    sensor_coverage: SensorCoverage | None = None
     missing_signals: list[str] = Field(default_factory=list)
-    measurement: Optional[SourceMeasurement] = None
+    measurement: SourceMeasurement | None = None
     objective: SourceObjective
     # FallbackTrendRead FIRST: it is the stricter member (requires the
     # provenance key), so union resolution can never silently drop a fallback
     # trend's provenance into the plain TrendRead shape.
-    trend: Optional[Union[FallbackTrendRead, TrendRead]] = None
+    trend: FallbackTrendRead | TrendRead | None = None
     system_context: SystemContextRead
     suggested_actions: list[SuggestedActionRead] = Field(default_factory=list)
     control_mode: str
@@ -236,15 +236,15 @@ class SourceMeasurementRecordRead(BaseModel):
     duplicate_rate: float
     error_kinds: dict[str, int] = Field(default_factory=dict)
 
-    fetch_latency_ms: Optional[int] = None
-    ingest_latency_ms: Optional[int] = None
-    store_latency_ms: Optional[int] = None
+    fetch_latency_ms: int | None = None
+    ingest_latency_ms: int | None = None
+    store_latency_ms: int | None = None
 
     cursor_advanced: bool
 
-    newest_source_ts: Optional[datetime] = None
-    newest_observed_at: Optional[datetime] = None
-    freshness_lag_seconds: Optional[int] = None
+    newest_source_ts: datetime | None = None
+    newest_observed_at: datetime | None = None
+    freshness_lag_seconds: int | None = None
     source_ts_quality: str
 
     raw: dict[str, Any] = Field(default_factory=dict)
@@ -272,17 +272,17 @@ class ControlActionRecordRead(BaseModel):
 
     id: str
     source_id: str
-    run_id: Optional[str] = None
-    measurement_id: Optional[str] = None
+    run_id: str | None = None
+    measurement_id: str | None = None
     mode: str
     state: str
     action_type: str
-    reason: Optional[str] = None
+    reason: str | None = None
     payload: dict[str, Any] = Field(default_factory=dict)
     executed: bool
-    evaluated_at: Optional[datetime] = None
-    outcome: Optional[str] = None
-    outcome_detail: Optional[dict[str, Any]] = None
+    evaluated_at: datetime | None = None
+    outcome: str | None = None
+    outcome_detail: dict[str, Any] | None = None
     created_at: datetime
     updated_at: datetime
 

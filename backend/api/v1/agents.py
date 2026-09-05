@@ -1,6 +1,5 @@
 """CRUD endpoints for AI agents."""
 
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
@@ -21,7 +20,7 @@ router = APIRouter(prefix="/agents", tags=["agents"])
 
 @router.get("", response_model=ApiResponse[list[AIAgentRead]])
 async def list_agents(
-    enabled: Optional[bool] = None,
+    enabled: bool | None = None,
     db: AsyncSession = Depends(get_db),
 ):
     query = select(AIAgent).order_by(AIAgent.created_at.desc())

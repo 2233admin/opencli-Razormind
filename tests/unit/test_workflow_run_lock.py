@@ -8,7 +8,9 @@ from backend.workflow.workflow_run_events import lock_scoped_workflow_run
 
 
 @pytest.mark.asyncio
-async def test_sqlite_run_barrier_commits_authorization_before_concurrent_pin_retraction(tmp_path) -> None:
+async def test_sqlite_run_barrier_commits_authorization_before_concurrent_pin_retraction(
+    tmp_path,
+) -> None:
     engine = create_async_engine(
         f"sqlite+aiosqlite:///{tmp_path / 'workflow-lock.db'}",
         connect_args={"timeout": 5},

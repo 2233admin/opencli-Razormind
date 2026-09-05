@@ -6,12 +6,15 @@ import pytest
 from sqlalchemy import func, select
 
 from backend.main import app
-from backend.models.delivery_authorization import DeliveryAuthorizationDecisionV1, DeliveryTargetRevision
-from backend.models.iii_collection import EvidenceBatchMaterializationManifestV1
+from backend.models.delivery_authorization import (
+    DeliveryAuthorizationDecisionV1,
+    DeliveryTargetRevision,
+)
 from backend.models.identity import User, Workspace, WorkspaceMembership, WorkspaceRole
+from backend.models.iii_collection import EvidenceBatchMaterializationManifestV1
 from backend.models.notification import NotificationLog
-from backend.workflow import delivery_authorization
 from backend.security.identity import RequestIdentity, get_request_identity
+from backend.workflow import delivery_authorization
 from tests.integration.iii_collection_test_support import create_scoped_run
 
 
@@ -47,7 +50,9 @@ def controlled_receiver_registry(monkeypatch):
     )
 
 @pytest.mark.asyncio
-async def test_authenticated_authorization_freezes_pinned_claims_replays_and_redacts(client, db_session, monkeypatch):
+async def test_authenticated_authorization_freezes_pinned_claims_replays_and_redacts(
+    client, db_session, monkeypatch
+):
     scope = await create_scoped_run(db_session)
     workspace = Workspace(id=scope["workspace"].id, name="Delivery", slug="delivery")
     proposer = User(id="delivery-proposer", subject="delivery-proposer")
@@ -59,9 +64,15 @@ async def test_authenticated_authorization_freezes_pinned_claims_replays_and_red
             proposer,
             approver,
             manager,
-            WorkspaceMembership(workspace_id=workspace.id, user_id=proposer.id, role=WorkspaceRole.OPERATOR),
-            WorkspaceMembership(workspace_id=workspace.id, user_id=approver.id, role=WorkspaceRole.OPERATOR),
-            WorkspaceMembership(workspace_id=workspace.id, user_id=manager.id, role=WorkspaceRole.MAINTAINER),
+            WorkspaceMembership(
+                workspace_id=workspace.id, user_id=proposer.id, role=WorkspaceRole.OPERATOR
+            ),
+            WorkspaceMembership(
+                workspace_id=workspace.id, user_id=approver.id, role=WorkspaceRole.OPERATOR
+            ),
+            WorkspaceMembership(
+                workspace_id=workspace.id, user_id=manager.id, role=WorkspaceRole.MAINTAINER
+            ),
             EvidenceBatchMaterializationManifestV1(
                 version="v1",
                 batch_id="delivery-batch",
@@ -225,18 +236,30 @@ async def test_authenticated_authorization_freezes_pinned_claims_replays_and_red
         decision = created.json()["data"]
         assert decision["targetRevision"] == current_target["revision"]
         serialized = json.dumps(decision)
-        for private_field in ("endpointIdentity", "credentialReference", "policySnapshot", "payloadReference", "odpRecordId"):
+        for private_field in (
+            "endpointIdentity",
+            "credentialReference",
+            "policySnapshot",
+            "payloadReference",
+            "odpRecordId",
+        ):
             assert private_field not in serialized
         assert "execution" not in serialized.lower() and "outcome" not in serialized.lower()
-        read_decision = await client.get(f"{route}/delivery-authorizations/{decision['decisionId']}")
+        read_decision = await client.get(
+            f"{route}/delivery-authorizations/{decision['decisionId']}"
+        )
         assert read_decision.status_code == 200
-        stored_decision = await db_session.get(DeliveryAuthorizationDecisionV1, decision["decisionId"])
+        stored_decision = await db_session.get(
+            DeliveryAuthorizationDecisionV1, decision["decisionId"]
+        )
         assert stored_decision is not None
         read_decision_data = read_decision.json()["data"]
         assert read_decision_data["decisionId"] == decision["decisionId"]
         assert read_decision_data["decisionHash"] == decision["decisionHash"]
         assert read_decision_data["claims"] == decision["claims"]
-        assert stored_decision.selected_claims == [{"claimId": "delivery-claim", "contentHash": "h" * 64}]
+        assert stored_decision.selected_claims == [
+            {"claimId": "delivery-claim", "contentHash": "h" * 64}
+        ]
         assert stored_decision.manifest_set == [
             {
                 "batchId": "delivery-batch",
@@ -269,7 +292,9 @@ async def test_authenticated_authorization_freezes_pinned_claims_replays_and_red
         with pytest.raises(ValueError, match="append-only"):
             await db_session.flush()
         await db_session.rollback()
-        stored_decision = await db_session.get(DeliveryAuthorizationDecisionV1, decision["decisionId"])
+        stored_decision = await db_session.get(
+            DeliveryAuthorizationDecisionV1, decision["decisionId"]
+        )
         assert stored_decision is not None
         await db_session.delete(stored_decision)
         with pytest.raises(ValueError, match="append-only"):
@@ -404,7 +429,9 @@ async def test_authorization_rejects_self_approval_and_unpinned_graph(client, db
         [
             workspace,
             member,
-            WorkspaceMembership(workspace_id=workspace.id, user_id=member.id, role=WorkspaceRole.MAINTAINER),
+            WorkspaceMembership(
+                workspace_id=workspace.id, user_id=member.id, role=WorkspaceRole.MAINTAINER
+            ),
         ]
     )
     await db_session.commit()
@@ -458,7 +485,9 @@ async def test_delivery_routes_enforce_mutation_permissions(client, db_session):
             workspace,
             viewer,
             outsider,
-            WorkspaceMembership(workspace_id=workspace.id, user_id=viewer.id, role=WorkspaceRole.VIEWER),
+            WorkspaceMembership(
+                workspace_id=workspace.id, user_id=viewer.id, role=WorkspaceRole.VIEWER
+            ),
         ]
     )
     await db_session.commit()

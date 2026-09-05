@@ -9,7 +9,7 @@ PR-Control-3 adds: build_measurement now PREFERS the latest persisted
 fallback, and a new ``build_trend`` rolling-window query.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime
 
 import pytest
 
@@ -68,8 +68,8 @@ async def test_completed_run_with_complete_event(db_session):
     run = TaskRun(
         task_id=task.id,
         status="completed",
-        started_at=datetime(2026, 7, 2, 10, 0, tzinfo=timezone.utc),
-        finished_at=datetime(2026, 7, 2, 10, 1, tzinfo=timezone.utc),
+        started_at=datetime(2026, 7, 2, 10, 0, tzinfo=datetime.UTC),
+        finished_at=datetime(2026, 7, 2, 10, 1, tzinfo=datetime.UTC),
         duration_ms=60_000,
         records_collected=8,  # == stored
     )
@@ -120,8 +120,8 @@ async def test_failed_run_without_complete_event_still_returns_measurement(db_se
     run = TaskRun(
         task_id=task.id,
         status="failed",
-        started_at=datetime(2026, 7, 2, 11, 0, tzinfo=timezone.utc),
-        finished_at=datetime(2026, 7, 2, 11, 0, 5, tzinfo=timezone.utc),
+        started_at=datetime(2026, 7, 2, 11, 0, tzinfo=datetime.UTC),
+        finished_at=datetime(2026, 7, 2, 11, 0, 5, tzinfo=datetime.UTC),
         duration_ms=5_000,
         records_collected=0,
         error_message="boom",
@@ -149,8 +149,8 @@ async def test_picks_most_recent_run(db_session):
     old = TaskRun(
         task_id=task.id,
         status="completed",
-        created_at=datetime(2026, 7, 1, tzinfo=timezone.utc),
-        finished_at=datetime(2026, 7, 1, tzinfo=timezone.utc),
+        created_at=datetime(2026, 7, 1, tzinfo=datetime.UTC),
+        finished_at=datetime(2026, 7, 1, tzinfo=datetime.UTC),
         duration_ms=1000,
         records_collected=1,
     )
@@ -166,8 +166,8 @@ async def test_picks_most_recent_run(db_session):
     new = TaskRun(
         task_id=task.id,
         status="completed",
-        created_at=datetime(2026, 7, 2, tzinfo=timezone.utc),
-        finished_at=datetime(2026, 7, 2, tzinfo=timezone.utc),
+        created_at=datetime(2026, 7, 2, tzinfo=datetime.UTC),
+        finished_at=datetime(2026, 7, 2, tzinfo=datetime.UTC),
         duration_ms=2000,
         records_collected=5,
     )
@@ -197,7 +197,7 @@ async def _make_measurement_row(session, source_id: str, **overrides) -> SourceM
     kwargs = dict(
         source_id=source_id,
         run_id=overrides.pop("run_id", "run-row-1"),
-        measured_at=datetime(2026, 7, 2, 12, 0, tzinfo=timezone.utc),
+        measured_at=datetime(2026, 7, 2, 12, 0, tzinfo=datetime.UTC),
         accepted=5,
         duplicates=1,
         rejected=0,
@@ -229,7 +229,7 @@ async def test_build_measurement_prefers_source_measurements_row_over_task_event
     run = TaskRun(
         task_id=task.id,
         status="completed",
-        finished_at=datetime(2026, 7, 1, tzinfo=timezone.utc),
+        finished_at=datetime(2026, 7, 1, tzinfo=datetime.UTC),
         duration_ms=1000,
         records_collected=1,
     )
@@ -263,7 +263,7 @@ async def test_build_measurement_falls_back_to_task_events_when_no_row(db_sessio
     run = TaskRun(
         task_id=task.id,
         status="completed",
-        finished_at=datetime(2026, 7, 1, tzinfo=timezone.utc),
+        finished_at=datetime(2026, 7, 1, tzinfo=datetime.UTC),
         duration_ms=1000,
         records_collected=4,
     )
@@ -291,11 +291,11 @@ async def test_build_measurement_picks_latest_row_by_measured_at(db_session):
     source = await _make_source(db_session)
     await _make_measurement_row(
         db_session, source.id, run_id="old-row",
-        measured_at=datetime(2026, 7, 1, tzinfo=timezone.utc), accepted=1,
+        measured_at=datetime(2026, 7, 1, tzinfo=datetime.UTC), accepted=1,
     )
     await _make_measurement_row(
         db_session, source.id, run_id="new-row",
-        measured_at=datetime(2026, 7, 2, tzinfo=timezone.utc), accepted=9,
+        measured_at=datetime(2026, 7, 2, tzinfo=datetime.UTC), accepted=9,
     )
 
     m = await build_measurement(db_session, source.id)
@@ -322,15 +322,15 @@ async def test_build_trend_zero_accepted_streak_from_newest(db_session):
     # oldest -> newest: accepted=5 (not zero), then two zero-accepted rows.
     await _make_measurement_row(
         db_session, source.id, run_id="r1",
-        measured_at=datetime(2026, 7, 1, tzinfo=timezone.utc), accepted=5,
+        measured_at=datetime(2026, 7, 1, tzinfo=datetime.UTC), accepted=5,
     )
     await _make_measurement_row(
         db_session, source.id, run_id="r2",
-        measured_at=datetime(2026, 7, 2, tzinfo=timezone.utc), accepted=0,
+        measured_at=datetime(2026, 7, 2, tzinfo=datetime.UTC), accepted=0,
     )
     await _make_measurement_row(
         db_session, source.id, run_id="r3",
-        measured_at=datetime(2026, 7, 3, tzinfo=timezone.utc), accepted=0,
+        measured_at=datetime(2026, 7, 3, tzinfo=datetime.UTC), accepted=0,
     )
 
     trend = await build_trend(db_session, source.id, window=5)
@@ -346,15 +346,15 @@ async def test_build_trend_streak_stops_at_first_nonzero_going_backwards(db_sess
     # must stop counting at the first non-zero encountered from the newest.
     await _make_measurement_row(
         db_session, source.id, run_id="r1",
-        measured_at=datetime(2026, 7, 1, tzinfo=timezone.utc), accepted=0,
+        measured_at=datetime(2026, 7, 1, tzinfo=datetime.UTC), accepted=0,
     )
     await _make_measurement_row(
         db_session, source.id, run_id="r2",
-        measured_at=datetime(2026, 7, 2, tzinfo=timezone.utc), accepted=3,
+        measured_at=datetime(2026, 7, 2, tzinfo=datetime.UTC), accepted=3,
     )
     await _make_measurement_row(
         db_session, source.id, run_id="r3",
-        measured_at=datetime(2026, 7, 3, tzinfo=timezone.utc), accepted=0,
+        measured_at=datetime(2026, 7, 3, tzinfo=datetime.UTC), accepted=0,
     )
 
     trend = await build_trend(db_session, source.id, window=5)
@@ -367,11 +367,11 @@ async def test_build_trend_avg_error_rate(db_session):
     source = await _make_source(db_session)
     await _make_measurement_row(
         db_session, source.id, run_id="r1",
-        measured_at=datetime(2026, 7, 1, tzinfo=timezone.utc), error_rate=0.2,
+        measured_at=datetime(2026, 7, 1, tzinfo=datetime.UTC), error_rate=0.2,
     )
     await _make_measurement_row(
         db_session, source.id, run_id="r2",
-        measured_at=datetime(2026, 7, 2, tzinfo=timezone.utc), error_rate=0.4,
+        measured_at=datetime(2026, 7, 2, tzinfo=datetime.UTC), error_rate=0.4,
     )
 
     trend = await build_trend(db_session, source.id, window=5)
@@ -384,15 +384,15 @@ async def test_build_trend_rate_limited_runs_count(db_session):
     source = await _make_source(db_session)
     await _make_measurement_row(
         db_session, source.id, run_id="r1",
-        measured_at=datetime(2026, 7, 1, tzinfo=timezone.utc), error_kinds={"rate_limited": 1},
+        measured_at=datetime(2026, 7, 1, tzinfo=datetime.UTC), error_kinds={"rate_limited": 1},
     )
     await _make_measurement_row(
         db_session, source.id, run_id="r2",
-        measured_at=datetime(2026, 7, 2, tzinfo=timezone.utc), error_kinds={},
+        measured_at=datetime(2026, 7, 2, tzinfo=datetime.UTC), error_kinds={},
     )
     await _make_measurement_row(
         db_session, source.id, run_id="r3",
-        measured_at=datetime(2026, 7, 3, tzinfo=timezone.utc), error_kinds={"rate_limited": 1},
+        measured_at=datetime(2026, 7, 3, tzinfo=datetime.UTC), error_kinds={"rate_limited": 1},
     )
 
     trend = await build_trend(db_session, source.id, window=5)
@@ -406,7 +406,7 @@ async def test_build_trend_respects_window_size(db_session):
     for i in range(10):
         await _make_measurement_row(
             db_session, source.id, run_id=f"r{i}",
-            measured_at=datetime(2026, 7, 1 + i, tzinfo=timezone.utc), accepted=1,
+            measured_at=datetime(2026, 7, 1 + i, tzinfo=datetime.UTC), accepted=1,
         )
 
     trend = await build_trend(db_session, source.id, window=5)
@@ -466,17 +466,17 @@ async def test_fallback_trend_derived_from_run_history_when_no_rows(db_session):
     # oldest -> newest: a healthy run, then two zero-accepted runs with errors.
     await _make_run_with_complete(
         db_session, task.id,
-        created_at=datetime(2026, 7, 1, tzinfo=timezone.utc),
+        created_at=datetime(2026, 7, 1, tzinfo=datetime.UTC),
         collected=10, stored=8, skipped=2,  # accepted=8, error_rate=0.0
     )
     await _make_run_with_complete(
         db_session, task.id,
-        created_at=datetime(2026, 7, 2, tzinfo=timezone.utc),
+        created_at=datetime(2026, 7, 2, tzinfo=datetime.UTC),
         collected=10, stored=0, skipped=0,  # accepted=0, error_rate=1.0
     )
     await _make_run_with_complete(
         db_session, task.id,
-        created_at=datetime(2026, 7, 3, tzinfo=timezone.utc),
+        created_at=datetime(2026, 7, 3, tzinfo=datetime.UTC),
         collected=10, stored=0, skipped=5,  # accepted=0, error_rate=0.5
     )
 
@@ -499,17 +499,17 @@ async def test_fallback_trend_streak_stops_at_first_nonzero_run(db_session):
 
     await _make_run_with_complete(
         db_session, task.id,
-        created_at=datetime(2026, 7, 1, tzinfo=timezone.utc),
+        created_at=datetime(2026, 7, 1, tzinfo=datetime.UTC),
         collected=3, stored=0,  # zero-accepted, but older than the accepting run
     )
     await _make_run_with_complete(
         db_session, task.id,
-        created_at=datetime(2026, 7, 2, tzinfo=timezone.utc),
+        created_at=datetime(2026, 7, 2, tzinfo=datetime.UTC),
         collected=3, stored=3,
     )
     await _make_run_with_complete(
         db_session, task.id,
-        created_at=datetime(2026, 7, 3, tzinfo=timezone.utc),
+        created_at=datetime(2026, 7, 3, tzinfo=datetime.UTC),
         collected=3, stored=0,
     )
 
@@ -525,7 +525,7 @@ async def test_fallback_trend_respects_window_size(db_session):
     for i in range(7):
         await _make_run_with_complete(
             db_session, task.id,
-            created_at=datetime(2026, 7, 1 + i, tzinfo=timezone.utc),
+            created_at=datetime(2026, 7, 1 + i, tzinfo=datetime.UTC),
             collected=1, stored=1,
         )
 
@@ -545,7 +545,7 @@ async def test_fallback_trend_not_used_when_measurement_rows_exist(db_session):
     # Run history that would trend very differently (zero accepted).
     await _make_run_with_complete(
         db_session, task.id,
-        created_at=datetime(2026, 7, 1, tzinfo=timezone.utc),
+        created_at=datetime(2026, 7, 1, tzinfo=datetime.UTC),
         collected=10, stored=0,
     )
     # One real measurement row: accepted=5 (from _make_measurement_row defaults).

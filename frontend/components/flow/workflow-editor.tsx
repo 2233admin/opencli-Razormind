@@ -43,6 +43,7 @@ import { useWorkflowNodeMenuActions, type NodeMenuState } from "./workflow-node-
 import { selectEditorCanvasState } from "./workflow-editor-selectors"
 import { WorkflowCanvasSurface } from "./workflow-canvas-surface"
 import type { WorkflowWorkbenchMode } from "./workflow-workbench-panel"
+import type { RunPanelScope } from "@/lib/workflow/run-panel-extensions"
 import {
   isNetworkLocked,
   useApplyWorkflowCapabilities,
@@ -64,9 +65,11 @@ type PendingConnection = {
 function EditorCanvas({
   documentState,
   workspaceId,
+  runPanelScope,
 }: {
   documentState?: "loading" | "saving" | "saved" | "error" | "conflict"
   workspaceId?: string | null
+  runPanelScope?: RunPanelScope | null
 }) {
   const {
     addNodeFromPalette,
@@ -565,6 +568,7 @@ function EditorCanvas({
           onNodeDragStop={onNodeDragStop}
           onNodesChange={onNodesChange}
           onProfileChange={updateWorkflowProfile}
+          runPanelScope={runPanelScope}
           primitiveMenuGroups={primitiveMenuGroups}
           projectSettingsOpen={projectSettingsOpen}
           runTraceOpen={runTraceOpen}
@@ -611,13 +615,15 @@ function EditorCanvas({
 export function WorkflowEditor({
   documentState,
   workspaceId,
+  runPanelScope,
 }: {
   documentState?: "loading" | "saving" | "saved" | "error" | "conflict"
   workspaceId?: string | null
+  runPanelScope?: RunPanelScope | null
 } = {}) {
   return (
     <ReactFlowProvider>
-      <EditorCanvas documentState={documentState} workspaceId={workspaceId} />
+      <EditorCanvas documentState={documentState} workspaceId={workspaceId} runPanelScope={runPanelScope} />
     </ReactFlowProvider>
   )
 }

@@ -128,7 +128,10 @@ def fold_authorized_research_graph_events(events: list[WorkflowNodeRunEvent]) ->
                 not envelope.claim_id
                 and not envelope.claim_content_hash
                 and envelope.manifest_refs
-                and all(ref.materialization_status == "completed_empty" for ref in envelope.manifest_refs)
+                and all(
+                    ref.materialization_status == "completed_empty"
+                    for ref in envelope.manifest_refs
+                )
             ):
                 accepted = True
         elif envelope.action == "propose":
@@ -187,7 +190,11 @@ def fold_authorized_research_graph_events(events: list[WorkflowNodeRunEvent]) ->
             else:
                 folded.blocker = "review_not_verified"
         elif envelope.action == "supersede":
-            if claim is not None and claim.state in {"proposed", "verified", "superseded"} and envelope.manifest_refs:
+            if (
+                claim is not None
+                and claim.state in {"proposed", "verified", "superseded"}
+                and envelope.manifest_refs
+            ):
                 claim.manifest_refs = envelope.manifest_refs
                 claim.proposer_actor_id = envelope.actor.actor_id
                 claim.state = "superseded"
@@ -208,7 +215,15 @@ def _read(folded: _Fold, *, cursor: str | None = None, limit: int = 50) -> Resea
     if cursor is not None:
         claims = [claim for claim in claims if claim.claim_id > cursor]
     page = claims[:limit]
-    recovery = "re_review" if folded.blocker in {"independent_review_required", "manifest_superseded", "review_not_verified"} else "none"
+    recovery = (
+        "re_review"
+        if folded.blocker in {
+            "independent_review_required",
+            "manifest_superseded",
+            "review_not_verified",
+        }
+        else "none"
+    )
     return ResearchGraphV2Read(
         sequence=folded.tail_sequence,
         research_revision_id=folded.research_revision_id,
@@ -339,7 +354,9 @@ async def _validate_manifest_refs(
             )
         ).scalar_one_or_none()
         if latest is None or latest.id != manifest.id:
-            raise ResearchGraphV2ConflictError("Manifest revision is stale; append an explicit supersession")
+            raise ResearchGraphV2ConflictError(
+                "Manifest revision is stale; append an explicit supersession"
+            )
         if (
             manifest.derivation != ref.derivation
             or manifest.manifest_hash != ref.manifest_hash
@@ -361,7 +378,9 @@ async def _validate_manifest_refs(
         }
         supplied = {(item.source_id, item.event_id, item.odp_record_id) for item in ref.record_refs}
         if supplied != present:
-            raise ResearchGraphV2ConflictError("Claim record references must exactly match the manifest")
+            raise ResearchGraphV2ConflictError(
+                "Claim record references must exactly match the manifest"
+            )
         if manifest.materialization_status == "completed_empty" and ref.record_refs:
             raise ResearchGraphV2ConflictError("Empty manifest cannot contribute claim evidence")
         if manifest.materialization_status == "partial":
@@ -373,8 +392,12 @@ async def _validate_manifest_refs(
                 )
             ).scalar_one_or_none()
             if report is None:
-                raise ResearchGraphV2ConflictError("Partial manifest has no final expected-key report")
-            missing = _key_set(report.expected_keys) - {(source_id, event_id) for source_id, event_id, _ in present}
+                raise ResearchGraphV2ConflictError(
+                    "Partial manifest has no final expected-key report"
+                )
+            missing = _key_set(report.expected_keys) - {
+                (source_id, event_id) for source_id, event_id, _ in present
+            }
             excluded = {(item.source_id, item.event_id) for item in ref.excluded_item_keys}
             if excluded != missing:
                 raise ResearchGraphV2ConflictError("Partial manifest exclusions are incomplete")
@@ -518,10 +541,15 @@ async def append_research_graph_v2_mutation(
             or envelope.actor.actor_id != actor.actor_id
             or envelope.actor.capability != actor.capability
         ):
-            raise ResearchGraphV2ConflictError("Idempotency key was reused with changed content or authority")
+            raise ResearchGraphV2ConflictError(
+                "Idempotency key was reused with changed content or authority"
+            )
         return await _read_with_manifest_freshness(db, scope=scope, folded=folded)
     tail_sequence = events[-1].sequence if events else 0
-    if request.expected_sequence != tail_sequence or request.expected_revision != folded.research_revision_id:
+    if (
+        request.expected_sequence != tail_sequence
+        or request.expected_revision != folded.research_revision_id
+    ):
         raise ResearchGraphV2ConflictError("ResearchGraph V2 sequence or revision is stale")
     if request.action == "context":
         if request.claim_id or request.claim_content_hash:
@@ -533,10 +561,14 @@ async def append_research_graph_v2_mutation(
             raise ResearchGraphV2ConflictError("Context requires completed-empty manifests only")
     elif request.action == "propose":
         if not request.claim_id or not request.claim_content_hash:
-            raise ResearchGraphV2ConflictError("Proposal requires a claim identity and content hash")
+            raise ResearchGraphV2ConflictError(
+                "Proposal requires a claim identity and content hash"
+            )
         await _validate_manifest_refs(db, scope=scope, refs=request.manifest_refs)
         if any(ref.materialization_status == "completed_empty" for ref in request.manifest_refs):
-            raise ResearchGraphV2ConflictError("Empty manifests cannot create a ResearchGraph claim")
+            raise ResearchGraphV2ConflictError(
+                "Empty manifests cannot create a ResearchGraph claim"
+            )
     elif request.action in {"verify", "reject", "retract", "supersede"}:
         claim = folded.claims.get(request.claim_id or "")
         if claim is None:
@@ -558,14 +590,27 @@ async def append_research_graph_v2_mutation(
             await _validate_manifest_refs(db, scope=scope, refs=claim.manifest_refs)
         if request.action == "supersede":
             if request.supersedes_event_id is None:
-                raise ResearchGraphV2ConflictError("Supersession requires its prior graph event identity")
-            prior = next((event for event in events if event.id == request.supersedes_event_id), None)
-            if prior is None or (_envelope(prior) is None) or _envelope(prior).claim_id != claim.claim_id:
-                raise ResearchGraphV2ConflictError("Supersession does not bind the claimed prior event")
+                raise ResearchGraphV2ConflictError(
+                    "Supersession requires its prior graph event identity"
+                )
+            prior = next(
+                (event for event in events if event.id == request.supersedes_event_id),
+                None,
+            )
+            if (
+                prior is None
+                or (_envelope(prior) is None)
+                or _envelope(prior).claim_id != claim.claim_id
+            ):
+                raise ResearchGraphV2ConflictError(
+                    "Supersession does not bind the claimed prior event"
+                )
             if {ref.batch_id for ref in request.manifest_refs} != {
                 ref.batch_id for ref in claim.manifest_refs
             } or request.manifest_refs == claim.manifest_refs:
-                raise ResearchGraphV2ConflictError("Supersession requires changed evidence for the same manifest batch")
+                raise ResearchGraphV2ConflictError(
+                    "Supersession requires changed evidence for the same manifest batch"
+                )
             await _validate_manifest_refs(db, scope=scope, refs=request.manifest_refs)
     elif request.action == "pin":
         active_claims = [
@@ -574,11 +619,17 @@ async def append_research_graph_v2_mutation(
             if claim.state in {"proposed", "verified", "superseded"}
         ]
         if not active_claims or any(claim.state != "verified" for claim in active_claims):
-            raise ResearchGraphV2ConflictError("Only a fully independently reviewed fold may be pinned")
+            raise ResearchGraphV2ConflictError(
+                "Only a fully independently reviewed fold may be pinned"
+            )
         for claim in active_claims:
             await _validate_manifest_refs(db, scope=scope, refs=claim.manifest_refs)
     next_revision = _canonical_hash(
-        {"previous": folded.research_revision_id, "event": request.idempotency_key, "action": request.action}
+        {
+            "previous": folded.research_revision_id,
+            "event": request.idempotency_key,
+            "action": request.action,
+        }
     )
     envelope = AuthorizedResearchGraphEventV2(
         event_id=request.idempotency_key,
@@ -600,7 +651,9 @@ async def append_research_graph_v2_mutation(
         pinned_sequence=tail_sequence + 1 if request.action == "pin" else None,
     )
     appended = await append_workflow_run_events(
-        db, run_id=run.id, events=[_event_from_envelope(run=run, node_id=request.node_id, envelope=envelope)]
+        db,
+        run_id=run.id,
+        events=[_event_from_envelope(run=run, node_id=request.node_id, envelope=envelope)],
     )
     result_events = [*events, *appended.appended_events]
     return await _read_with_manifest_freshness(
@@ -608,7 +661,9 @@ async def append_research_graph_v2_mutation(
     )
 
 
-def actor_evidence(*, actor_id: str, principal: str, capability: str) -> ResearchGraphV2ActorEvidence:
+def actor_evidence(
+    *, actor_id: str, principal: str, capability: str
+) -> ResearchGraphV2ActorEvidence:
     return ResearchGraphV2ActorEvidence(
         actor_type="user",
         actor_id=actor_id,

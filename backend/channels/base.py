@@ -69,11 +69,16 @@ class FetchContext:
 
     config: dict[str, Any]
     params: dict[str, Any]
-    cursor: dict[str, Any] | None = None  # persisted "where we left off" (etag / since_id / page_token)
-    source_id: str | None = None          # the DataSource id, for channels that need their own credential lookup
-    auth: AuthContext | None = None       # resolved credentials (Phase 2)
-    http: Any = None                      # shared httpx.AsyncClient, rate-limit + retry built in (Phase 1)
-    log: Any = None                       # logger injected by the runner
+    # Persisted "where we left off" (etag / since_id / page_token).
+    cursor: dict[str, Any] | None = None
+    # The DataSource id, for channels that need credential lookup.
+    source_id: str | None = None
+    # Resolved credentials (Phase 2).
+    auth: AuthContext | None = None
+    # Shared httpx.AsyncClient, with rate-limit + retry built in (Phase 1).
+    http: Any = None
+    # Logger injected by the runner.
+    log: Any = None
 
 
 @dataclass

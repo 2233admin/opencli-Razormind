@@ -14,7 +14,6 @@ docstring precedent).
 """
 
 import logging
-from typing import Optional
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -55,7 +54,7 @@ async def trigger_incremental_shared_segments(
     *,
     source_id: str,
     task_id: str,
-    parameters: Optional[dict] = None,
+    parameters: dict | None = None,
 ) -> list[IncrementalTriggerResult]:
     """Entry point called after a source's own collection run has already
     completed and durably stored its outcome (``run_collection_pipeline``

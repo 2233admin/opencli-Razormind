@@ -3,7 +3,7 @@
 import asyncio
 import base64
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -196,7 +196,7 @@ async def test_empty_execution_table_claim_race_preserves_one_result_and_stable_
                 payload_hash=request["payloadHash"],
                 durable_status=endpoint.durable_status,
                 receipt_id=f"race-{len(posts)}",
-                issued_at=datetime.now(timezone.utc),
+                issued_at=datetime.now(UTC),
             )
             return Response(
                 200,

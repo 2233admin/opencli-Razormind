@@ -6,7 +6,7 @@ functions return data, they never touch a DataSource, a DB session, or any
 scheduler/executor.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -27,7 +27,7 @@ def _measurement(**overrides) -> SourceMeasurement:
         error_rate=0.0,
         duplicate_rate=0.0,
         cursor_advanced=False,
-        observed_at=datetime(2026, 7, 2, tzinfo=timezone.utc),
+        observed_at=datetime(2026, 7, 2, tzinfo=UTC),
     )
     kwargs.update(overrides)
     return SourceMeasurement(**kwargs)

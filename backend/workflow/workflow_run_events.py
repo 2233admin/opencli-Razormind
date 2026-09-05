@@ -11,9 +11,42 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.models.workflow_run import WorkflowRun, WorkflowRunEvent
 from backend.schemas.workflow import WorkflowNodeRunEvent
+from backend.workflow.workflow_plugins import (
+    WorkflowPluginCapability,
+    WorkflowPluginRegistry,
+)
 
 MAX_SEQUENCE_RESERVATION_ATTEMPTS = 8
 MAX_EVENT_APPEND_ATTEMPTS = 3
+
+
+async def lock_scoped_workflow_run(
+    session: AsyncSession,
+    *,
+    workflow_id: str,
+    studio_workflow_version_id: str,
+    run_id: str,
+) -> WorkflowRun | None:
+    """Lock one scoped run before reading or mutating freshness-sensitive facts.
+
+    PostgreSQL uses a row write lock. SQLite ignores ``FOR UPDATE``, so a
+    no-op update acquires its transaction-wide write barrier without changing
+    the persisted run projection.
+    """
+    filters = (
+        WorkflowRun.id == run_id,
+        WorkflowRun.workflow_id == workflow_id,
+        WorkflowRun.studio_workflow_version_id == studio_workflow_version_id,
+    )
+    bind = session.get_bind()
+    if bind.dialect.name == "sqlite":
+        result = await session.execute(
+            update(WorkflowRun).where(*filters).values(updated_at=WorkflowRun.updated_at)
+        )
+        if result.rowcount != 1:
+            return None
+        return await session.scalar(select(WorkflowRun).where(*filters))
+    return await session.scalar(select(WorkflowRun).where(*filters).with_for_update())
 
 
 class WorkflowRunEventAppendError(RuntimeError):
@@ -51,6 +84,7 @@ async def append_workflow_run_events(
     *,
     run_id: str,
     events: list[WorkflowNodeRunEvent],
+    plugins: WorkflowPluginRegistry | None = None,
 ) -> WorkflowRunEventAppendResult:
     """Append only the unseen suffix of a replayable event transcript.
 
@@ -88,6 +122,47 @@ async def append_workflow_run_events(
                 events=accepted,
                 appended_events=[],
             )
+
+        if (
+            plugins is not None
+            and plugins.has_capability(WorkflowPluginCapability.EVENT_VALIDATION)
+        ):
+            persisted_events = [
+                WorkflowNodeRunEvent.model_validate(row.payload)
+                for row in (
+                    (
+                        await session.execute(
+                            select(WorkflowRunEvent)
+                            .where(WorkflowRunEvent.run_id == run_id)
+                            .order_by(WorkflowRunEvent.sequence)
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+            ]
+            next_sequence = max(
+                (event.sequence for event in persisted_events),
+                default=0,
+            )
+            candidate_events = [
+                *persisted_events,
+                *[
+                    event.model_copy(
+                        update={"sequence": next_sequence + offset},
+                        deep=True,
+                    )
+                    for offset, event in enumerate(unseen, start=1)
+                ],
+            ]
+            try:
+                plugins.validate_events(
+                    candidate_events,
+                    run_id=run_id,
+                    trace_id=events[0].traceId,
+                )
+            except ValueError as exc:
+                raise WorkflowRunEventConflictError(str(exc)) from exc
 
         try:
             async with session.begin_nested():
@@ -127,6 +202,8 @@ async def append_workflow_run_events(
 
     assert last_integrity_error is not None
     raise last_integrity_error
+
+
 
 
 async def reconcile_workflow_run_event_counters(session: AsyncSession) -> int:
@@ -330,38 +407,8 @@ def _counter_reconciliation_statement(next_sequence):
 __all__ = [
     "WorkflowRunEventAppendError",
     "WorkflowRunEventAppendResult",
-    "WorkflowRunEventConflictError",
     "WorkflowRunEventMigrationError",
     "WorkflowRunEventSequenceConflictError",
     "append_workflow_run_events",
     "reconcile_workflow_run_event_counters",
 ]
-
-
-async def lock_scoped_workflow_run(
-    session: AsyncSession,
-    *,
-    workflow_id: str,
-    studio_workflow_version_id: str,
-    run_id: str,
-) -> WorkflowRun | None:
-    """Lock one scoped run before reading or mutating freshness-sensitive facts.
-
-    PostgreSQL uses a row write lock. SQLite ignores ``FOR UPDATE``, so a
-    no-op update acquires its transaction-wide write barrier without changing
-    the persisted run projection.
-    """
-    filters = (
-        WorkflowRun.id == run_id,
-        WorkflowRun.workflow_id == workflow_id,
-        WorkflowRun.studio_workflow_version_id == studio_workflow_version_id,
-    )
-    bind = session.get_bind()
-    if bind.dialect.name == "sqlite":
-        result = await session.execute(
-            update(WorkflowRun).where(*filters).values(updated_at=WorkflowRun.updated_at)
-        )
-        if result.rowcount != 1:
-            return None
-        return await session.scalar(select(WorkflowRun).where(*filters))
-    return await session.scalar(select(WorkflowRun).where(*filters).with_for_update())

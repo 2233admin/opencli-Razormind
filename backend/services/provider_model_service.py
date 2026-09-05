@@ -11,7 +11,7 @@ module) to patch instead of reaching into the router.
 
 from __future__ import annotations
 
-from typing import Any, Optional, TypedDict
+from typing import Any, TypedDict
 
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -44,7 +44,7 @@ class SyncResult(TypedDict):
 # ---------------------------------------------------------------------------
 
 
-async def get_provider(db: AsyncSession, provider_id: str) -> Optional[ModelProvider]:
+async def get_provider(db: AsyncSession, provider_id: str) -> ModelProvider | None:
     return await db.get(ModelProvider, provider_id)
 
 
@@ -62,7 +62,7 @@ async def list_models(db: AsyncSession, provider_id: str) -> list[ProviderModel]
     return list(result.scalars().all())
 
 
-async def get_model(db: AsyncSession, model_row_id: str) -> Optional[ProviderModel]:
+async def get_model(db: AsyncSession, model_row_id: str) -> ProviderModel | None:
     return await db.get(ProviderModel, model_row_id)
 
 
@@ -92,7 +92,7 @@ async def add_manual_model(db: AsyncSession, provider_id: str, body: Any) -> Pro
 
 async def update_model(
     db: AsyncSession, model_row_id: str, body: Any
-) -> Optional[ProviderModel]:
+) -> ProviderModel | None:
     """Partial-update a catalog row (``enabled``/``capabilities``/``model_type``).
 
     Returns ``None`` if ``model_row_id`` doesn't exist — callers decide
@@ -140,7 +140,7 @@ async def delete_provider_models(db: AsyncSession, provider_id: str) -> int:
 # ---------------------------------------------------------------------------
 
 
-async def sync_models(db: AsyncSession, provider_id: str) -> Optional[SyncResult]:
+async def sync_models(db: AsyncSession, provider_id: str) -> SyncResult | None:
     """Discover a provider's models via its adapter and upsert them into the
     catalog as ``source="discovered"`` rows.
 
@@ -221,7 +221,7 @@ async def sync_models(db: AsyncSession, provider_id: str) -> Optional[SyncResult
 # ---------------------------------------------------------------------------
 
 
-async def test_connection(db: AsyncSession, provider_id: str) -> Optional[dict]:
+async def test_connection(db: AsyncSession, provider_id: str) -> dict | None:
     """Probe a provider via its adapter. Returns ``None`` if ``provider_id``
     doesn't exist (router 404s); otherwise the
     :class:`~backend.llm.base.ConnectionTestResult` dict as-is —

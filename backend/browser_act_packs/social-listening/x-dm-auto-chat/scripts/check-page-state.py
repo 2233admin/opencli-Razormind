@@ -1,17 +1,24 @@
 import argparse
 import sys
 
+
 def main():
-    sys.stdout.reconfigure(encoding='utf-8', newline='\n')
-    parser = argparse.ArgumentParser(description='Check X DM page state: URL, login status, passcode requirement, conversation panel availability')
-    args = parser.parse_args()
+    sys.stdout.reconfigure(encoding="utf-8", newline="\n")
+    parser = argparse.ArgumentParser(
+        description=(
+            "Check X DM page state: URL, login status, passcode requirement, "
+            "conversation panel availability"
+        )
+    )
+    parser.parse_args()
 
     js = """
     (() => {
       try {
         return JSON.stringify({
           url: location.href,
-          logged_in: !!document.querySelector('[aria-label="Account menu"]') || !!document.cookie.split('; ').find(c => c.startsWith('twid=')),
+          logged_in: !!document.querySelector('[aria-label="Account menu"]') ||
+            !!document.cookie.split('; ').find(c => c.startsWith('twid=')),
           need_passcode: !!document.querySelector('input[pattern="[0-9]*"][maxlength="1"]'),
           on_inbox: /\\/i\\/chat\\/?$/.test(location.pathname),
           on_conversation: /\\/i\\/chat\\/\\d+-\\d+/.test(location.pathname),

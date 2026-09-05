@@ -1,4 +1,12 @@
+from copy import deepcopy
+
+from backend.schemas.workflow import WorkflowProject, WorkflowProjectNode
 from backend.workflow.capability_projection import build_workflow_capabilities
+from backend.workflow.compiler import compile_workflow_project
+from backend.workflow.runtime_registry import (
+    EXTERNAL_TOOL_BINDING_ID,
+    resolve_runtime_metadata,
+)
 from backend.workflow.tool_capabilities import list_workflow_tool_capabilities
 
 
@@ -58,16 +66,6 @@ def test_tool_capability_catalog_projection_is_explicit_and_executable(monkeypat
     }
     assert "resource.tool-capability.tool.osint.metasearch" in resources
     assert "resource.tool-capability.tool.osint.hidden" in resources
-
-
-from copy import deepcopy
-
-from backend.schemas.workflow import WorkflowProject, WorkflowProjectNode
-from backend.workflow.compiler import compile_workflow_project
-from backend.workflow.runtime_registry import (
-    EXTERNAL_TOOL_BINDING_ID,
-    resolve_runtime_metadata,
-)
 
 
 TOOL_ID = "tool.intelligence.situation-awareness"

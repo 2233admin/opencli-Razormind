@@ -3,7 +3,18 @@
 import json
 import uuid
 
-from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    Header,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+    status,
+)
 from pydantic import ValidationError
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
@@ -32,6 +43,8 @@ from backend.api.v1.workflows import (
     list_evidence_batches,
     parse_projection_includes,
 )
+from backend.models.gaojixing_collection_run import GaojixingCollectionRun
+from backend.schemas.workflow_runtime import WorkflowRunStatus, WorkflowRunTraceResponse
 from backend.database import get_db, rollback_session
 from backend.models.studio import (
     StudioProject,
@@ -179,6 +192,20 @@ async def _project_runtime_scope(
     return workflow_names, {version.id: version.version for version in versions}
 
 
+async def _get_project_workflow_run(
+    db: AsyncSession,
+    *,
+    workspace_id: str,
+    project_id: str,
+    workflow_id: str,
+    run_id: str,
+) -> WorkflowRun:
+    await get_workflow(db, workspace_id, project_id, workflow_id)
+    row = await db.get(WorkflowRun, run_id)
+    if row is None or row.workflow_id != workflow_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Workflow run not found")
+    return row
+
 
 @router.get(
     "/workspaces/{workspace_id}/projects/{project_id}/workflows",
@@ -291,7 +318,7 @@ async def get_project_runtime_summary(
 async def list_project_runtime_logs(
     workspace_id: str,
     project_id: str,
-    run_status: workflow_schemas.WorkflowRunStatus | None = Query(
+    run_status: WorkflowRunStatus | None = Query(
         default=None,
         alias="status",
     ),
@@ -487,6 +514,7 @@ async def _start_published_version_run(
     trigger_node_id: str | None = None,
     idempotency_key: str | None = None,
     run_id: str | None = None,
+    plugins=None,
 ) -> ApiResponse:
     version_id = version.id
     resolved_run_id = run_id or _published_run_id(
@@ -533,6 +561,7 @@ async def _start_published_version_run(
             ),
             session=db,
             studio_workflow_version_id=version_id,
+            plugins=plugins,
         )
     except IntegrityError:
         if not idempotency_key:
@@ -562,6 +591,7 @@ async def start_published_workflow_run(
     project_id: str,
     workflow_id: str,
     body: PublishedWorkflowRunStart,
+    request: Request,
     idempotency_header: str | None = Header(default=None, alias="Idempotency-Key"),
     request_id_header: str | None = Header(default=None, alias="X-Request-ID"),
     db: AsyncSession = Depends(get_db),
@@ -577,6 +607,7 @@ async def start_published_workflow_run(
     request_id = body.request_id or request_id_header or str(uuid.uuid4())
     idempotency_key = body.idempotency_key or idempotency_header
     return await _start_published_version_run(
+        plugins=request.app.state.workflow_plugins,
         db=db,
         workspace_id=workspace_id,
         project_id=project_id,
@@ -774,7 +805,7 @@ async def get_project_runtime_trace(
             inputs=input_payload.get("payload") or {},
             user=input_payload.get("sourceId"),
             response_mode=request.get("responseMode") or "async",
-            trace=workflow_schemas.WorkflowRunTraceResponse(
+            trace=WorkflowRunTraceResponse(
                 projection=projection,
                 checkpoint=checkpoint,
                 events=events,
@@ -944,7 +975,6 @@ async def get_project_workflow_evidence_projection(
     )
 
 
-
 @router.post(
     (
         "/workspaces/{workspace_id}/projects/{project_id}/workflows/{workflow_id}"
@@ -967,9 +997,7 @@ async def resume_published_gaojixing_run(
     if row is None or row.workflow_id != workflow_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Workflow run not found")
     job = await db.scalar(
-        select(GaojixingCollectionRun).where(
-            GaojixingCollectionRun.workflow_run_id == run_id
-        )
+        select(GaojixingCollectionRun).where(GaojixingCollectionRun.workflow_run_id == run_id)
     )
     if job is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Gaojixing collection not found")

@@ -1,12 +1,17 @@
 import argparse
-import sys
 import json
 
+
 def main():
-    sys.stdout.reconfigure(encoding='utf-8', newline='\n')
     parser = argparse.ArgumentParser()
-    parser.add_argument('--sort', default='',
-                        help='Sort option: "" (default), "reduce" (price-drop), "create" (newest), "price-asc", "price-desc"')
+    parser.add_argument(
+        '--sort',
+        default='',
+        help=(
+            'Sort option: "" (default), "reduce" (price-drop), '
+            '"create" (newest), "price-asc", "price-desc"'
+        ),
+    )
     parser.add_argument('--publish-days', default='',
                         help='Filter by publish date: "" (all), "1", "3", "7", "14"')
     parser.add_argument('--price-min', default='', help='Min price filter (e.g., 500)')
@@ -96,7 +101,9 @@ def main():
         if (priceMin && priceMax) {{
           var inputs = document.querySelectorAll('[class*="search-price-input"] input');
           if (inputs.length >= 2) {{
-            var setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+            var setter = Object.getOwnPropertyDescriptor(
+              window.HTMLInputElement.prototype, 'value'
+            ).set;
             setter.call(inputs[0], priceMin);
             inputs[0].dispatchEvent(new Event('input', {{bubbles: true}}));
             setter.call(inputs[1], priceMax);

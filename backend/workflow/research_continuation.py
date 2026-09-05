@@ -1,6 +1,5 @@
 """Governed cross-run continuation and ledger projection for research workflows."""
 
-from __future__ import annotations
 
 import hashlib
 import json
@@ -12,17 +11,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.models.workflow_run import WorkflowRun, WorkflowRunEvent
 from backend.schemas.workflow import (
-    WorkflowNodeRunEvent,
     WorkflowProject,
     WorkflowProjectNode,
+    WorkflowRunInput,
+    WorkflowRunStartRequest,
+    WorkflowRunTrigger,
+)
+from backend.schemas.workflow_research import (
     WorkflowResearchContinuationRequest,
     WorkflowResearchContinuationResponse,
     WorkflowResearchLedgerEntry,
     WorkflowResearchLedgerResponse,
-    WorkflowRunInput,
+)
+from backend.schemas.workflow_runtime import (
+    WorkflowNodeRunEvent,
     WorkflowRunProjection,
-    WorkflowRunStartRequest,
-    WorkflowRunTrigger,
 )
 from backend.workflow.opencli_hda_tracer import start_workflow_run
 

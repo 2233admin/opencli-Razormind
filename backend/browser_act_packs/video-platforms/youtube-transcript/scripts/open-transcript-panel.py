@@ -14,7 +14,9 @@ def main():
           if (btn) break;
         }
         if (!btn) {
-          const tracks = window.ytInitialPlayerResponse?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
+          const playerResponse = window.ytInitialPlayerResponse;
+          const tracks =
+            playerResponse?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
           const hasTranscripts = tracks && tracks.length > 0;
           return JSON.stringify({
             error: true,

@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -17,7 +17,7 @@ class ProviderModelCreate(BaseModel):
     provider_id: str
     model_id: str = Field(..., min_length=1, max_length=255)
     model_type: str = "llm"
-    capabilities: Optional[dict[str, Any]] = None
+    capabilities: dict[str, Any] | None = None
     source: str = "manual"
     enabled: bool = True
 
@@ -49,7 +49,7 @@ class ProviderModelManualCreate(BaseModel):
 
     model_id: str = Field(..., min_length=1, max_length=255)
     model_type: str = "llm"
-    capabilities: Optional[dict[str, Any]] = None
+    capabilities: dict[str, Any] | None = None
     enabled: bool = True
 
     @field_validator("model_type")
@@ -68,13 +68,13 @@ class ProviderModelUpdate(BaseModel):
     it's decided entirely by which endpoint created the row (decision #3).
     """
 
-    model_type: Optional[str] = None
-    capabilities: Optional[dict[str, Any]] = None
-    enabled: Optional[bool] = None
+    model_type: str | None = None
+    capabilities: dict[str, Any] | None = None
+    enabled: bool | None = None
 
     @field_validator("model_type")
     @classmethod
-    def _validate_model_type(cls, v: Optional[str]) -> Optional[str]:
+    def _validate_model_type(cls, v: str | None) -> str | None:
         if v is not None and not is_valid_model_type(v):
             raise ValueError(f"invalid model_type: {v!r}")
         return v
@@ -85,7 +85,7 @@ class ProviderModelRead(UTCModel):
     provider_id: str
     model_id: str
     model_type: str
-    capabilities: Optional[dict[str, Any]]
+    capabilities: dict[str, Any] | None
     source: str
     enabled: bool
     created_at: datetime

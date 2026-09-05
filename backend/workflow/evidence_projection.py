@@ -1,11 +1,10 @@
 """Read-only EvidenceBatch projections derived from replayable workflow runs."""
 
-from __future__ import annotations
 
 import uuid
 from collections.abc import Iterable
 
-from backend.schemas.workflow import (
+from backend.schemas.workflow_evidence import (
     EvidenceBatchSummary,
     WorkflowEvidenceBatchDetail,
     WorkflowEvidenceBatchListResponse,
@@ -13,10 +12,12 @@ from backend.schemas.workflow import (
     WorkflowEvidenceSummary,
     WorkflowMissingSource,
     WorkflowProjectionArtifact,
+    WorkflowSourceCoverage,
+)
+from backend.schemas.workflow_runtime import (
     WorkflowRunNodeState,
     WorkflowRunProjection,
     WorkflowRunStatus,
-    WorkflowSourceCoverage,
 )
 
 EVIDENCE_PROJECTION_INCLUDES = frozenset(

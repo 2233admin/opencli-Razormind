@@ -5,8 +5,8 @@ chat/list_models/test_connection dispatch across ``model_providers`` rows.
 PR-A shipped the closed-set vocabulary shared by the data layer
 (``backend.models.provider_model``, ``backend.models.model_default``) and
 their Pydantic schemas, plus the Anthropic model catalog
-(``backend.llm.catalog``). PR-B added the runtime itself: ``ProviderAdapter`` (``backend.llm.base``),
-``OpenAICompatAdapter`` (``backend.llm.openai_compat``, ``provider_type in
+(``backend.llm.catalog``). PR-B added the runtime itself:
+``ProviderAdapter`` (``backend.llm.base``),
 {"openai", "local"}``), ``AnthropicAdapter`` (``backend.llm.anthropic``,
 ``provider_type == "claude"``), and ``factory.get_adapter()``
 (``backend.llm.factory``) to dispatch a

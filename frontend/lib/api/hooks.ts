@@ -993,7 +993,6 @@ export function useDeleteRecord() {
       queryClient.removeQueries({ queryKey: ['records', id] })
       void queryClient.invalidateQueries({ queryKey: ['records'] })
     },
-    enabled: options?.enabled ?? true,
   })
 }
 

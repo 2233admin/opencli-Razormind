@@ -1,3 +1,4 @@
+from __future__ import annotations
 from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -29,11 +30,11 @@ RecordSortOrder = Literal["asc", "desc"]
 
 @router.get("", response_model=ApiResponse[list[CollectedRecordRead]])
 async def list_records(
-    source_id: Optional[str] = None,
-    task_id: Optional[str] = None,
-    project_id: Optional[str] = None,
-    status: Optional[str] = None,
-    search: Optional[str] = Query(None),
+    source_id: str | None = None,
+    task_id: str | None = None,
+    project_id: str | None = None,
+    status: str | None = None,
+    search: str | None = Query(None),
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
     sort_by: RecordSortField = Query("created_at"),
@@ -59,9 +60,7 @@ async def list_records(
 
 
 @router.get("/{record_id}", response_model=ApiResponse[CollectedRecordRead])
-async def get_record(
-    record_id: str, db: AsyncSession = Depends(get_db)
-) -> ApiResponse:
+async def get_record(record_id: str, db: AsyncSession = Depends(get_db)) -> ApiResponse:
     record = await record_service.get_record(db, record_id)
     if not record:
         raise HTTPException(status_code=404, detail="Record not found")
@@ -69,9 +68,7 @@ async def get_record(
 
 
 @router.delete("/{record_id}", response_model=ApiResponse[None])
-async def delete_record(
-    record_id: str, db: AsyncSession = Depends(get_db)
-) -> ApiResponse:
+async def delete_record(record_id: str, db: AsyncSession = Depends(get_db)) -> ApiResponse:
     deleted = await record_service.delete_records(db, [record_id])
     if not deleted:
         raise HTTPException(status_code=404, detail="Record not found")
@@ -90,7 +87,7 @@ async def batch_delete_records(
 
 @router.delete("", response_model=ApiResponse[dict])
 async def clear_all_records(
-    source_id: Optional[str] = Query(None),
+    source_id: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
 ) -> ApiResponse:
     deleted = await record_service.delete_all_records(db, source_id=source_id)

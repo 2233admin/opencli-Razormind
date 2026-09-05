@@ -7,18 +7,51 @@ def main():
     parser = argparse.ArgumentParser(
         description='Extract reviews from the currently loaded Trustpilot review page.'
     )
-    parser.add_argument('--include-reviewer-metadata', action='store_true',
-                        help='Adds reviewerNumberOfReviews and reviewerProfileIsVerified to each review.')
-    parser.add_argument('--include-reply-analysis', action='store_true',
-                        help='Adds companyReplyPublishedDate and companyReplyUpdatedDate when a reply exists.')
-    parser.add_argument('--include-extended-metadata', action='store_true',
-                        help='Adds reviewSource, reviewVerificationSource, reviewLikes to each review.')
-    parser.add_argument('--include-review-photos', action='store_true',
-                        help='Adds reviewPhotoUrls array (best-effort DOM scan inside the review card).')
-    parser.add_argument('--no-experience-date', action='store_true',
-                        help='Omit reviewDateOfExperience from the output (kept by default).')
-    parser.add_argument('--filter-country', default='',
-                        help='Client-side filter: keep only reviews whose reviewer countryCode matches the given ISO Alpha-2 code (e.g. US, GB, DK).')
+    parser.add_argument(
+        '--include-reviewer-metadata',
+        action='store_true',
+        help=(
+            'Adds reviewerNumberOfReviews and reviewerProfileIsVerified '
+            'to each review.'
+        ),
+    )
+    parser.add_argument(
+        '--include-reply-analysis',
+        action='store_true',
+        help=(
+            'Adds companyReplyPublishedDate and companyReplyUpdatedDate '
+            'when a reply exists.'
+        ),
+    )
+    parser.add_argument(
+        '--include-extended-metadata',
+        action='store_true',
+        help=(
+            'Adds reviewSource, reviewVerificationSource, reviewLikes '
+            'to each review.'
+        ),
+    )
+    parser.add_argument(
+        '--include-review-photos',
+        action='store_true',
+        help=(
+            'Adds reviewPhotoUrls array (best-effort DOM scan inside the '
+            'review card).'
+        ),
+    )
+    parser.add_argument(
+        '--no-experience-date',
+        action='store_true',
+        help='Omit reviewDateOfExperience from the output (kept by default).',
+    )
+    parser.add_argument(
+        '--filter-country',
+        default='',
+        help=(
+            'Client-side filter: keep only reviews whose reviewer countryCode '
+            'matches the given ISO Alpha-2 code (e.g. US, GB, DK).'
+        ),
+    )
     args = parser.parse_args()
 
     inc_reviewer = 'true' if args.include_reviewer_metadata else 'false'
@@ -58,7 +91,8 @@ def main():
         }}
 
         const bu = pp.businessUnit;
-        if (!bu) return JSON.stringify({{ error: true, message: 'businessUnit missing from pageProps' }});
+        if (!bu) return JSON.stringify({{ error: true, message:
+          'businessUnit missing from pageProps' }});
 
         const reviews = Array.isArray(pp.reviews) ? pp.reviews : [];
         const filters = pp.filters || {{}};
@@ -73,7 +107,10 @@ def main():
         for (let i = 0; i < reviews.length; i++) {{
           const r = reviews[i];
           const consumer = r.consumer || {{}};
-          if (filterCountry && (consumer.countryCode || '').toUpperCase() !== filterCountry) continue;
+          if (
+            filterCountry &&
+            (consumer.countryCode || '').toUpperCase() !== filterCountry
+          ) continue;
 
           const labels = r.labels || {{}};
           const ver = labels.verification || {{}};
@@ -105,7 +142,8 @@ def main():
             obj.reviewDateOfExperience = dates.experiencedDate || null;
           }}
           if ({inc_reviewer}) {{
-            obj.reviewerNumberOfReviews = consumer.numberOfReviews != null ? consumer.numberOfReviews : null;
+            obj.reviewerNumberOfReviews =
+              consumer.numberOfReviews != null ? consumer.numberOfReviews : null;
             obj.reviewerProfileIsVerified = !!consumer.isVerified;
           }}
           if ({inc_reply}) {{
@@ -120,11 +158,18 @@ def main():
           if ({inc_photos}) {{
             const urls = [];
             try {{
-              const candidates = document.querySelectorAll('[data-review-id="' + r.id + '"], article[id*="' + r.id + '"]');
+              const candidates = document.querySelectorAll(
+                '[data-review-id="' + r.id + '"], article[id*="' + r.id + '"]'
+              );
               candidates.forEach(function(card) {{
                 card.querySelectorAll('img').forEach(function(img) {{
                   const src = img.getAttribute('src') || '';
-                  if (src && (src.indexOf('consumer-image-uploads') !== -1 || src.indexOf('review-photos') !== -1 || src.indexOf('reviewphotos') !== -1)) {{
+                  if (
+                    src &&
+                    (src.indexOf('consumer-image-uploads') !== -1 ||
+                      src.indexOf('review-photos') !== -1 ||
+                      src.indexOf('reviewphotos') !== -1)
+                  ) {{
                     if (urls.indexOf(src) === -1) urls.push(src);
                   }}
                 }});
@@ -162,12 +207,15 @@ def main():
             stars: bu.stars != null ? bu.stars : null,
             totalReviews: bu.numberOfReviews != null ? bu.numberOfReviews : null
           }},
-          totalFiltered: filters.totalNumberOfFilteredReviews != null ? filters.totalNumberOfFilteredReviews : null,
+          totalFiltered:
+            filters.totalNumberOfFilteredReviews != null
+              ? filters.totalNumberOfFilteredReviews : null,
           scrapedDateTime: scrapedAt,
           isCompanyFound: true
         }});
       }} catch(e) {{
-        return JSON.stringify({{ error: true, message: 'extract failed: ' + (e && e.message ? e.message : String(e)) }});
+        return JSON.stringify({{ error: true, message: 'extract failed: ' +
+          (e && e.message ? e.message : String(e)) }});
       }}
     }})()
     """

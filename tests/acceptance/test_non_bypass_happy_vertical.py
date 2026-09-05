@@ -11,6 +11,7 @@ from pathlib import Path
 from uuid import NAMESPACE_URL, uuid5
 
 import pytest
+import yaml
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 from scripts.non_bypass_proof_contract import delivery_payload_hash, source_binding_hash
@@ -439,8 +440,6 @@ def test_mandatory_substitution_audit_is_itself_fail_closed():
 
 
 def test_compose_topology_is_isolated_and_has_the_required_proof_networks():
-    import yaml
-
     topology = yaml.safe_load((ROOT / "docker-compose.non-bypass-acceptance.yml").read_text())
     services = topology["services"]
     assert not any("ports" in service for service in services.values())

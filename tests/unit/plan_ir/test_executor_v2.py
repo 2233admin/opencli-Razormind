@@ -9,7 +9,7 @@ failure (one source fails, other proceeds), and the Two-Tier Attribution
 contract (the HARD TEST).
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -368,7 +368,7 @@ async def test_shared_segment_failure_never_touches_source_state(db_session):
             SourceMeasurement(
                 source_id=src.id,
                 run_id="prior-run",
-                measured_at=datetime(2026, 7, 1, tzinfo=timezone.utc),
+                measured_at=datetime(2026, 7, 1, tzinfo=UTC),
                 accepted=5,
                 duplicates=1,
                 rejected=0,

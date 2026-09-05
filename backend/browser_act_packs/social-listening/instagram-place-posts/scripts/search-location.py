@@ -1,5 +1,7 @@
 import argparse
 import sys
+import urllib.parse
+
 
 def main():
     sys.stdout.reconfigure(encoding='utf-8', newline='\n')
@@ -8,21 +10,25 @@ def main():
     args = parser.parse_args()
 
     # URL-encode the keyword
-    import urllib.parse
     encoded = urllib.parse.quote(args.keyword)
 
     js = f"""
     (async function() {{
       try {{
-        var r = await fetch('https://www.instagram.com/api/v1/location_search/?search_query={encoded}', {{
-          headers: {{
-            'X-IG-App-ID': '936619743392459',
-            'X-Requested-With': 'XMLHttpRequest'
-          }}
-        }});
+        var r = await fetch(
+          'https://www.instagram.com/api/v1/location_search/?search_query={encoded}',
+          {{
+            headers: {{
+              'X-IG-App-ID': '936619743392459',
+              'X-Requested-With': 'XMLHttpRequest'
+            }}
+          }});
         if (!r.ok) {{
           var errText = await r.text();
-          return JSON.stringify({{ error: true, message: 'HTTP ' + r.status, detail: errText.slice(0, 200) }});
+          return JSON.stringify({{
+            error: true, message: 'HTTP ' + r.status,
+            detail: errText.slice(0, 200)
+          }});
         }}
         var data = await r.json();
         var venues = (data.venues || []).map(function(v) {{

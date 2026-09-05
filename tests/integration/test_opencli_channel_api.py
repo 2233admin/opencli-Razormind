@@ -191,7 +191,7 @@ async def test_collect_without_positional_args_backward_compat(
 
 @pytest.mark.asyncio
 async def test_collect_agent_mode_passes_positional_args_to_dispatch(
-    client, db_engine, opencli_source_payload
+    client, db_engine, db_session, opencli_source_payload
 ):
     """In HTTP agent mode, positional_args is forwarded to _collect_via_agent."""
     from backend.browser_pool import LocalBrowserPool

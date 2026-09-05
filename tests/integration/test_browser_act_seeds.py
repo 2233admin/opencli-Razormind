@@ -14,9 +14,9 @@ real vendored files, not a stand-in.
 """
 
 import json
+from unittest.mock import patch
 
 import pytest
-from unittest.mock import patch
 
 from backend.browser_act.cli import BrowserActResult
 from backend.browser_act_packs.catalog import PackCatalog

@@ -12,7 +12,12 @@ depends_on = None
 def upgrade() -> None:
     op.create_table(
         "automations",
-        sa.Column("workspace_id", sa.String(36), sa.ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False),
+        sa.Column(
+            "workspace_id",
+            sa.String(36),
+            sa.ForeignKey("workspaces.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
         sa.Column("name", sa.String(255), nullable=False),
         sa.Column("prompt", sa.Text(), nullable=False),
         sa.Column("precheck", sa.Text()),
@@ -23,7 +28,12 @@ def upgrade() -> None:
         sa.Column("approval_mode", sa.String(32), nullable=False),
         sa.Column("project", sa.JSON(), nullable=False),
         sa.Column("enabled", sa.Boolean(), nullable=False),
-        sa.Column("created_by_user_id", sa.String(36), sa.ForeignKey("users.id", ondelete="RESTRICT"), nullable=False),
+        sa.Column(
+            "created_by_user_id",
+            sa.String(36),
+            sa.ForeignKey("users.id", ondelete="RESTRICT"),
+            nullable=False,
+        ),
         sa.Column("id", sa.String(36), primary_key=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),

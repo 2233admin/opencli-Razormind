@@ -8,7 +8,7 @@ suggestion, TTL pause + auto-resume + inverse ledger row, kill-switch
 short-circuit, and outcome evaluation running every tick.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import select
@@ -16,11 +16,10 @@ from sqlalchemy import select
 from backend.control import kill_switch
 from backend.control.cycle import run_control_cycle_once
 from backend.models.control_action import ControlActionRecord
-from backend.models.schedule import CronSchedule
 from backend.models.source import DataSource
 from backend.models.source_measurement import SourceMeasurement as SourceMeasurementRow
 
-NOW = datetime(2026, 7, 2, 12, 0, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 7, 2, 12, 0, 0, tzinfo=UTC)
 
 
 @pytest.fixture(autouse=True)
@@ -162,9 +161,19 @@ async def test_automatic_mode_executes_when_gate_passes(db_session, monkeypatch)
         # Pre-load evidence for BOTH suggestions auth_failed produces
         # (policies.suggest_actions: pause_source -> pause, require_auth_review
         # -> require_review), so the gate passes on this very first tick.
-        await _seed_evidence(db_session, samples=10, recovered=8, action_type="pause", state="auth_failed")
         await _seed_evidence(
-            db_session, samples=10, recovered=8, action_type="require_review", state="auth_failed"
+            db_session,
+            samples=10,
+            recovered=8,
+            action_type="pause",
+            state="auth_failed",
+        )
+        await _seed_evidence(
+            db_session,
+            samples=10,
+            recovered=8,
+            action_type="require_review",
+            state="auth_failed",
         )
         await db_session.commit()
 
@@ -192,7 +201,9 @@ async def test_automatic_mode_executes_when_gate_passes(db_session, monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_dangerous_suggestion_downgrades_and_preserves_original_in_ledger(db_session, monkeypatch):
+async def test_dangerous_suggestion_downgrades_and_preserves_original_in_ledger(
+    db_session, monkeypatch
+):
     """schema_drift suggests pause_source + require_review — both already
     whitelist-mapped. To exercise a genuine Require-Review Downgrade we seed
     a DEAD-state source (policies.suggest_actions -> require_review only)
@@ -213,9 +224,19 @@ async def test_dangerous_suggestion_downgrades_and_preserves_original_in_ledger(
     try:
         source = await _make_source(db_session)
         await _seed_measurement_row(db_session, source.id, error_kinds={"auth_failed": 1})
-        await _seed_evidence(db_session, samples=10, recovered=8, action_type="pause", state="auth_failed")
         await _seed_evidence(
-            db_session, samples=10, recovered=8, action_type="require_review", state="auth_failed"
+            db_session,
+            samples=10,
+            recovered=8,
+            action_type="pause",
+            state="auth_failed",
+        )
+        await _seed_evidence(
+            db_session,
+            samples=10,
+            recovered=8,
+            action_type="require_review",
+            state="auth_failed",
         )
         await db_session.commit()
 
@@ -311,9 +332,19 @@ async def test_kill_switch_blocks_execution_even_in_automatic_mode(db_session, m
     try:
         source = await _make_source(db_session)
         await _seed_measurement_row(db_session, source.id, error_kinds={"auth_failed": 1})
-        await _seed_evidence(db_session, samples=10, recovered=10, action_type="pause", state="auth_failed")
         await _seed_evidence(
-            db_session, samples=10, recovered=10, action_type="require_review", state="auth_failed"
+            db_session,
+            samples=10,
+            recovered=10,
+            action_type="pause",
+            state="auth_failed",
+        )
+        await _seed_evidence(
+            db_session,
+            samples=10,
+            recovered=10,
+            action_type="require_review",
+            state="auth_failed",
         )
         await db_session.commit()
 

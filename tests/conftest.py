@@ -22,7 +22,6 @@ from backend.database import Base, get_db
 from backend.main import app
 from backend.models import *  # noqa: F401, F403 — register all models
 
-
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
 
 
@@ -60,7 +59,7 @@ async def db_engine():
 
 
 @pytest_asyncio.fixture(scope="function")
-async def db_session(db_engine) -> AsyncGenerator[AsyncSession, None]:
+async def db_session(db_engine) -> AsyncGenerator[AsyncSession]:
     session_factory = async_sessionmaker(
         db_engine, class_=AsyncSession, expire_on_commit=False
     )
@@ -71,7 +70,7 @@ async def db_session(db_engine) -> AsyncGenerator[AsyncSession, None]:
 
 
 @pytest_asyncio.fixture(scope="function")
-async def client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
+async def client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient]:
     """HTTP test client with DB session override."""
 
     async def override_get_db():

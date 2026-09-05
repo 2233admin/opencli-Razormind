@@ -83,7 +83,11 @@ def upgrade() -> None:
         sa.Column("raw", sa.JSON(), nullable=False),
         sa.PrimaryKeyConstraint("id"),
     )
-    op.create_index("ix_odp_system_measurements_observed_at", "odp_system_measurements", ["observed_at"])
+    op.create_index(
+        "ix_odp_system_measurements_observed_at",
+        "odp_system_measurements",
+        ["observed_at"],
+    )
 
 
 def downgrade() -> None:

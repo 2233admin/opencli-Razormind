@@ -7,13 +7,25 @@ def main():
     js = r"""
     (async function() {
       try {
-        const panel = document.querySelector('ytd-engagement-panel-section-list-renderer');
+        const panel = document.querySelector(
+          'ytd-engagement-panel-section-list-renderer'
+        );
         if (!panel) {
-          return JSON.stringify({ error: true, message: 'Transcript panel not found. Call open-transcript-panel first and wait stable.' });
+          return JSON.stringify({
+            error: true,
+            message: 'Transcript panel not found. '
+              + 'Call open-transcript-panel first and wait stable.',
+          });
         }
-        const initialSegments = panel.querySelectorAll('transcript-segment-view-model');
+        const initialSegments = panel.querySelectorAll(
+          'transcript-segment-view-model'
+        );
         if (initialSegments.length === 0) {
-          return JSON.stringify({ error: true, message: 'No transcript segments found. Panel may still be loading or transcripts are unavailable.' });
+          return JSON.stringify({
+            error: true,
+            message: 'No transcript segments found. '
+              + 'Panel may still be loading or transcripts are unavailable.',
+          });
         }
 
         // Scroll panel to trigger lazy loading for long videos
@@ -35,7 +47,10 @@ def main():
         })).filter(s => s.text);
 
         if (allSegments.length === 0) {
-          return JSON.stringify({ error: true, message: 'Transcript segments parsed but all text was empty.' });
+          return JSON.stringify({
+            error: true,
+            message: 'Transcript segments parsed but all text was empty.',
+          });
         }
 
         const fullText = allSegments.map(s => s.text).join(' ');

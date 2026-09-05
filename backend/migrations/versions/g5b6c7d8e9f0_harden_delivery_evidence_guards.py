@@ -48,12 +48,14 @@ def _sqlite_guards() -> None:
 
 def _postgres_guards() -> None:
     op.execute(
-        "CREATE FUNCTION delivery_evidence_append_only() RETURNS trigger LANGUAGE plpgsql AS $$ "
+        "CREATE FUNCTION delivery_evidence_append_only() RETURNS trigger "
+        "LANGUAGE plpgsql AS $$ "
         "BEGIN RAISE EXCEPTION 'delivery evidence is append-only'; END; $$"
     )
     for table in _EVIDENCE_TABLES:
         op.execute(
-            f"CREATE TRIGGER trg_{table.lower()}_append_only BEFORE UPDATE OR DELETE ON {table} "
+            f"CREATE TRIGGER trg_{table.lower()}_append_only "
+            f"BEFORE UPDATE OR DELETE ON {table} "
             "FOR EACH ROW EXECUTE FUNCTION delivery_evidence_append_only()"
         )
     op.execute(
@@ -86,22 +88,26 @@ def upgrade() -> None:
         batch.add_column(sa.Column("send_started_at", sa.DateTime(timezone=True), nullable=True))
     with op.batch_alter_table("delivery_execution_results", reflect_kwargs=reflect_kwargs) as batch:
         batch.create_check_constraint(
-            "ck_delivery_result_attempt_range", "attempt_number BETWEEN 1 AND 3"
+            "ck_delivery_result_attempt_range",
+            "attempt_number BETWEEN 1 AND 3",
         )
         batch.create_check_constraint(
-            "ck_delivery_result_outcome", "outcome IN ('accepted', 'rejected', 'unknown')"
+            "ck_delivery_result_outcome",
+            "outcome IN ('accepted', 'rejected', 'unknown')",
         )
     with op.batch_alter_table(
         "delivery_execution_reconciliations", reflect_kwargs=reflect_kwargs
     ) as batch:
         batch.create_check_constraint(
-            "ck_delivery_reconciliation_outcome", "outcome IN ('accepted', 'rejected')"
+            "ck_delivery_reconciliation_outcome",
+            "outcome IN ('accepted', 'rejected')",
         )
     with op.batch_alter_table(
         "controlled_receiver_deliveries", reflect_kwargs=reflect_kwargs
     ) as batch:
         batch.create_check_constraint(
-            "ck_receiver_delivery_status", "durable_status IN ('accepted', 'rejected')"
+            "ck_receiver_delivery_status",
+            "durable_status IN ('accepted', 'rejected')",
         )
     if op.get_bind().dialect.name == "sqlite":
         _sqlite_guards()
@@ -132,12 +138,8 @@ def downgrade() -> None:
         "delivery_execution_reconciliations", reflect_kwargs=reflect_kwargs
     ) as batch:
         batch.drop_constraint("ck_delivery_reconciliation_outcome", type_="check")
-    with op.batch_alter_table(
-        "delivery_execution_results", reflect_kwargs=reflect_kwargs
-    ) as batch:
+    with op.batch_alter_table("delivery_execution_results", reflect_kwargs=reflect_kwargs) as batch:
         batch.drop_constraint("ck_delivery_result_outcome", type_="check")
         batch.drop_constraint("ck_delivery_result_attempt_range", type_="check")
-    with op.batch_alter_table(
-        "delivery_executions", reflect_kwargs=reflect_kwargs
-    ) as batch:
+    with op.batch_alter_table("delivery_executions", reflect_kwargs=reflect_kwargs) as batch:
         batch.drop_column("send_started_at")

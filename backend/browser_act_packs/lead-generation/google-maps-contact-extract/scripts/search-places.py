@@ -18,7 +18,11 @@ def main():
     var cards = Array.from(document.querySelectorAll('[role=feed] > div'))
       .filter(function(el) { return el.querySelector('a[aria-label]'); });
     if (cards.length === 0) {
-      return JSON.stringify({ error: true, message: 'No place cards found in feed. Make sure the Google Maps search results page is open with search results visible.' });
+      return JSON.stringify({
+        error: true,
+        message: 'No place cards found in feed. ' +
+          'Make sure the Google Maps search results page is open with search results visible.'
+      });
     }
     var results = cards.slice(0, __MAX__).map(function(el) {
       var link = el.querySelector('a');
@@ -35,8 +39,16 @@ def main():
       var priceM = t.match(/\$[\d]+[–\-][\d]+|\$\$+/);
       var phoneM = t.match(/[(]?[0-9]{3}[)]?[ .\-][0-9]{3}[ .\-][0-9]{4}/);
       // Category follows price range or review count, then ends with " ·"
-      var catM = t.match(/(?:\$[\d]+[^C\n]*?)([A-Z][a-zA-Z ]+(?:shop|restaurant|cafe|bar|hotel|store|bakery|pharmacy|gym|service|center|salon|spa|market))/i) ||
-                 t.match(/[·] ([A-Z][a-zA-Z ]*(?:shop|restaurant|cafe|bar|hotel|store|bakery|pharmacy|gym|salon|spa)) [·]/i);
+      var catM = t.match(new RegExp(
+        '(?:\\$[\\d]+[^C\\n]*?)' +
+        '([A-Z][a-zA-Z ]+(?:shop|restaurant|cafe|bar|hotel|store|' +
+        'bakery|pharmacy|gym|service|center|salon|spa|market))',
+        'i'
+      )) || t.match(new RegExp(
+        '[·] ([A-Z][a-zA-Z ]*(?:shop|restaurant|cafe|bar|hotel|' +
+        'store|bakery|pharmacy|gym|salon|spa)) [·]',
+        'i'
+      ));
 
       return {
         name: nameEl ? nameEl.getAttribute('aria-label') : null,

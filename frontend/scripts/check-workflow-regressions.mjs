@@ -1721,18 +1721,18 @@ test('EvidenceBatch projection produces stable node and edge view-models', async
 })
 
 test('EvidenceBatch workbench consumes projection, list, selection, and detail state', async () => {
-  const [panel, proxy] = await Promise.all([
-    readSource('components/flow/run-trace-panel.tsx'),
+  const [workbench, proxy] = await Promise.all([
+    readSource('components/flow/run-trace-research-workbenches.tsx'),
     readSource('app/api/workflow/evidence-batch-proxy.ts'),
   ])
-  const workbench = sourceSection(panel, 'function EvidenceBatchWorkbench(', 'function EvidenceBatchDetailCard(')
+  const evidenceBatchWorkbench = sourceSection(workbench, 'function EvidenceBatchWorkbench(', 'function EvidenceBatchDetailCard(')
 
-  assert.match(workbench, /aria-label="EvidenceBatch results"/)
-  assert.match(workbench, /state\.projection/)
-  assert.match(workbench, /const batches = state\.batches/)
-  assert.match(workbench, /batches\.map/)
-  assert.match(workbench, /onSelectBatch\(batch\.batchId\)/)
-  assert.match(workbench, /state\.detail\s*\?\s*<EvidenceBatchDetailCard/)
+  assert.match(evidenceBatchWorkbench, /aria-label="EvidenceBatch results"/)
+  assert.match(evidenceBatchWorkbench, /state\.projection/)
+  assert.match(evidenceBatchWorkbench, /const batches = state\.batches/)
+  assert.match(evidenceBatchWorkbench, /batches\.map/)
+  assert.match(evidenceBatchWorkbench, /onSelectBatch\(batch\.batchId\)/)
+  assert.match(evidenceBatchWorkbench, /state\.detail\s*\?\s*<EvidenceBatchDetailCard/)
   assert.match(proxy, /export async function proxyWorkflowEvidenceProjectionRequest/)
   assert.match(proxy, /`\$\{BACKEND_URL\}\/api\/v1\/workflows\/runs\/\$\{encodeURIComponent\(runId\)\}\/projection`/)
   assert.match(proxy, /`\$\{BACKEND_URL\}\/api\/v1\/workflows\/runs\/\$\{encodeURIComponent\(runId\)\}\/evidence-batches`/)
@@ -2450,4 +2450,290 @@ test('internal primitive menu edits the clicked node child scope at L2/L3 and re
     project: useFlowStore.getState().workflowProject,
     stack: useFlowStore.getState().networkStack,
   }), beforeL4Edit)
+})
+
+test('Studio evidence workbench uses workspace-scoped batch routes', async () => {
+  const runs = await importTypeScript('lib/workflow/backend-runs.ts')
+  const originalFetch = globalThis.fetch
+  const requests = []
+  globalThis.fetch = async (path) => {
+    requests.push(String(path))
+    return new Response(JSON.stringify({ data: { runId: 'run', batches: [], nodes: [], clusters: [], missingSources: [], summaries: [], conflicts: [], artifacts: [] } }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }
+  const scope = { workspaceId: 'workspace', projectId: 'project', workflowId: 'workflow' }
+  try {
+    const batches = await runs.fetchWorkspaceWorkflowEvidenceBatches(scope, 'run')
+    const projection = await runs.fetchWorkspaceWorkflowEvidenceBatchProjection(scope, 'run')
+    await runs.fetchWorkspaceWorkflowEvidenceBatchDetail(scope, 'run', 'batch')
+    assert.deepEqual(batches.batches, [])
+    assert.deepEqual(projection.nodes, [])
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+  const root = '/api/v1/workspaces/workspace/projects/project/workflows/workflow/runs/run/evidence-batches'
+  assert.deepEqual(requests, [root, `${root}/projection`, `${root}/batch`])
+})
+
+test('ResearchGraph adapter keeps stable identity and deterministic ordering', async () => {
+  const { researchGraphToReactFlow } = await importTypeScript('lib/workflow/research-graph-to-react-flow.ts')
+  const entity = (id, kind, sequence) => ({ id, kind, sequence, eventId: `e-${id}`, runId: 'r', traceId: 't', nodeId: 'n', sourceIds: [], evidenceIds: [], attributes: {}, lineage: {} })
+  const graph = { runId: 'r', traceId: 't', eventCount: 2, lastSequence: 2, entities: [entity('z', 'claim', 2), entity('a', 'source', 1)], relations: [] }
+  const projected = researchGraphToReactFlow(graph)
+  assert.deepEqual(projected.nodes.map((node) => node.id), ['research:a', 'research:z'])
+  assert.equal(projected.nodes[0].data.displayLabel, 'source:a')
+  assert.equal(projected.nodes[1].id, 'research:z')
+})
+
+test('ResearchGraph run-panel adapter selects generic and scoped HTTP routes across plugin states', async () => {
+  const panelClient = await importTypeScript('components/flow/research-graph-run-panel-client.ts')
+  const originalFetch = globalThis.fetch
+  const requests = []
+  const scope = { workspaceId: 'workspace', projectId: 'project', workflowId: 'workflow' }
+  const projection = { runId: 'run', traceId: 'trace', eventCount: 0, lastSequence: 0, entities: [], relations: [] }
+  const genericOptions = panelClient.researchGraphRunPanelRequestOptions({
+    runId: 'run',
+    projection: null,
+    scope: null,
+    authorization: null,
+    runStatus: 'ready',
+    lifecycle: { onError() {} },
+  })
+  const scopedOptions = panelClient.researchGraphRunPanelRequestOptions({
+    runId: 'run',
+    projection: null,
+    scope,
+    authorization: null,
+    runStatus: 'ready',
+    lifecycle: { onError() {} },
+  })
+  let pluginEnabled = true
+  globalThis.fetch = async (path, init = {}) => {
+    requests.push({ path: String(path), method: init.method ?? 'GET' })
+    return new Response(JSON.stringify(pluginEnabled
+      ? { data: init.method === 'POST' ? { events: [], graph: projection } : projection }
+      : { error: 'Not Found' }), {
+      status: pluginEnabled ? 200 : 404,
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }
+  const entity = {
+    id: 'source',
+    kind: 'source',
+    sourceIds: [],
+    evidenceIds: [],
+    attributes: {},
+    eventId: 'event',
+    sequence: 0,
+    runId: 'run',
+    traceId: 'trace',
+    nodeId: 'node',
+    lineage: {},
+    state: 'recorded',
+    authoritative: false,
+  }
+  try {
+    assert.deepEqual(await panelClient.loadResearchGraphRunPanel('run', genericOptions), projection)
+    assert.deepEqual(
+      (await panelClient.mutateResearchGraphRunPanel(null, entity, 'propose', genericOptions)).graph,
+      projection,
+    )
+    assert.deepEqual(await panelClient.loadResearchGraphRunPanel('run', scopedOptions), projection)
+    assert.deepEqual(
+      (await panelClient.mutateResearchGraphRunPanel(null, entity, 'propose', scopedOptions)).graph,
+      projection,
+    )
+
+    pluginEnabled = false
+    assert.equal(await panelClient.loadResearchGraphRunPanel('run', genericOptions), null)
+    assert.equal(await panelClient.loadResearchGraphRunPanel('run', scopedOptions), null)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+  const genericRoute = '/api/workflow/runs/run/research-graph'
+  const scopedRoute = '/api/v1/workspaces/workspace/projects/project/workflows/workflow/runs/run/research-graph'
+  assert.deepEqual(requests, [
+    { path: genericRoute, method: 'GET' },
+    { path: `${genericRoute}/mutations`, method: 'POST' },
+    { path: scopedRoute, method: 'GET' },
+    { path: `${scopedRoute}/mutations`, method: 'POST' },
+    { path: genericRoute, method: 'GET' },
+    { path: scopedRoute, method: 'GET' },
+  ])
+})
+
+test('ResearchGraph panel adapter is registered through the generic extension seam', async () => {
+  const client = await readSource('lib/workflow/research-graph-client.ts')
+  const panel = await readSource('components/flow/run-trace-panel.tsx')
+  const extension = await readSource('components/flow/research-graph-run-panel-extension.tsx')
+  const panelClient = await readSource('components/flow/research-graph-run-panel-client.ts')
+  const defaults = await readSource('components/flow/default-run-panel-extensions.ts')
+  const overlays = await readSource('components/flow/workflow-editor-overlays.tsx')
+  const canvas = await readSource('components/flow/workflow-canvas-surface.tsx')
+  const hook = await readSource('components/flow/use-research-graph.ts')
+  assert.match(client, /fetchWorkflowResearchGraph/)
+  assert.match(client, /fetchWorkspaceWorkflowResearchGraph/)
+  assert.match(client, /mutateWorkflowResearchGraph/)
+  assert.match(client, /mutateWorkspaceWorkflowResearchGraph/)
+  assert.match(client, /\/api\/v1\/workspaces/)
+  assert.match(client, /research-graph/)
+  assert.match(client, /\$\{path\}\/mutations/)
+  assert.match(panel, /RunPanelExtension/)
+  assert.match(panel, /extensions = \[\]/)
+  assert.doesNotMatch(panel, /ResearchGraph|research-graph/)
+  assert.doesNotMatch(overlays, /ResearchGraph|research-graph|default-run-panel-extensions/)
+  assert.match(overlays, /runPanelExtensions = \[\]/)
+  assert.match(extension, /ResearchGraphReadout/)
+  assert.match(extension, /useResearchGraphMutation/)
+  assert.match(panelClient, /fetchWorkspaceWorkflowResearchGraph/)
+  assert.match(panelClient, /mutateWorkspaceWorkflowResearchGraph/)
+  assert.match(defaults, /ResearchGraphRunPanelExtension/)
+  assert.match(canvas, /createDefaultRunPanelExtensions/)
+  assert.match(canvas, /runPanelExtensions=\{props\.runPanelExtensions \?\? createDefaultRunPanelExtensions\(\)\}/)
+  assert.match(hook, /mutateResearchGraphRunPanel/)
+})
+
+test('ResearchGraph run-panel registry handles fake, empty, and duplicate extensions', async () => {
+  const registry = await importTypeScript('lib/workflow/run-panel-extensions.ts')
+  const calls = []
+  const Fake = () => {
+    calls.push('fake')
+    return null
+  }
+  const context = { runId: 'r', projection: null, authorization: null, runStatus: 'ready', lifecycle: { onError() {} } }
+  const resolved = registry.resolveRunPanelExtensions([{ key: 'z', Component: Fake }, { key: 'a', Component: Fake }])
+  assert.deepEqual(resolved.map((extension) => extension.key), ['a', 'z'])
+  const dispatched = registry.dispatchRunPanelExtensions(resolved, context)
+  assert.deepEqual(dispatched.map((extension) => extension.key), ['a', 'z'])
+  assert.deepEqual(registry.dispatchRunPanelExtensions([], context), [])
+  assert.throws(() => registry.resolveRunPanelExtensions([{ key: 'fake', Component: Fake }, { key: 'fake', Component: Fake }]), /Duplicate/)
+  assert.equal(calls.length, 0)
+})
+
+test('ResearchGraph mutation adapter preserves complete claim transitions', async () => {
+  const panelClient = await importTypeScript('components/flow/research-graph-run-panel-client.ts')
+  const originalFetch = globalThis.fetch
+  const requests = []
+  const proposal = {
+    id: 'claim-proposal',
+    kind: 'claim',
+    label: 'Proposed claim',
+    sourceIds: ['source-1'],
+    evidenceIds: ['evidence-1'],
+    attributes: { content: 'Claim content' },
+    eventId: 'event',
+    sequence: 5,
+    runId: 'run',
+    traceId: 'trace',
+    nodeId: 'claim-node',
+    lineage: { sourceId: 'source-1', evidenceId: 'evidence-1' },
+    state: 'proposed',
+    authoritative: false,
+  }
+  const projection = (state, revision, sequence) => ({
+    runId: 'run',
+    traceId: 'trace',
+    eventCount: sequence,
+    lastSequence: sequence,
+    currentRevision: revision,
+    entities: [{ ...proposal, state, sequence }],
+    relations: [],
+  })
+  const responses = [
+    projection('proposed', 'revision-1', 6),
+    projection('verified', 'revision-2', 7),
+    projection('retracted', 'revision-3', 8),
+  ]
+  globalThis.fetch = async (_path, init = {}) => {
+    requests.push(JSON.parse(init.body))
+    return new Response(JSON.stringify({ data: { events: [], graph: responses.shift() } }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }
+  try {
+    const proposed = await panelClient.mutateResearchGraphRunPanel(
+      projection('recorded', 'revision-0', 5),
+      proposal,
+      'propose',
+      { authorization: null },
+    )
+    const proposedClaim = proposed.graph.entities[0]
+    const verified = await panelClient.mutateResearchGraphRunPanel(
+      proposed.graph,
+      proposedClaim,
+      'verify',
+      { authorization: null },
+    )
+    const verifiedClaim = verified.graph.entities[0]
+    const retracted = await panelClient.mutateResearchGraphRunPanel(
+      verified.graph,
+      verifiedClaim,
+      'retract',
+      { authorization: null },
+    )
+    assert.equal(retracted.graph.entities[0].state, 'retracted')
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+  assert.deepEqual(
+    requests.map(({ action, targetId, entity, expectedRevision, expectedSequence }) => ({
+      action,
+      targetId,
+      entity,
+      expectedRevision,
+      expectedSequence,
+    })),
+    [
+      {
+        action: 'propose',
+        targetId: undefined,
+        entity: {
+          id: 'claim-proposal',
+          kind: 'claim',
+          label: 'Proposed claim',
+          sourceIds: ['source-1'],
+          evidenceIds: ['evidence-1'],
+          attributes: { content: 'Claim content' },
+        },
+        expectedRevision: 'revision-0',
+        expectedSequence: 5,
+      },
+      {
+        action: 'verify',
+        targetId: 'claim-proposal',
+        entity: undefined,
+        expectedRevision: 'revision-1',
+        expectedSequence: 6,
+      },
+      {
+        action: 'retract',
+        targetId: 'claim-proposal',
+        entity: undefined,
+        expectedRevision: 'revision-2',
+        expectedSequence: 7,
+      },
+    ],
+  )
+})
+
+test('ResearchGraph claim controls expose only valid next actions and mutation feedback', async () => {
+  const { researchGraphClaimActions } = await importTypeScript('lib/workflow/research-graph-actions.ts')
+  const claim = (state) => ({
+    id: 'claim',
+    kind: 'claim',
+    state,
+  })
+  assert.deepEqual(researchGraphClaimActions(claim('proposed')), ['verify', 'reject'])
+  assert.deepEqual(researchGraphClaimActions(claim('verified')), ['retract'])
+  assert.deepEqual(researchGraphClaimActions(claim('retracted')), [])
+  assert.deepEqual(researchGraphClaimActions({ id: 'source', kind: 'source', state: 'recorded' }), [])
+
+  const readout = await readSource('components/flow/research-graph-readout.tsx')
+  assert.match(readout, /role="status"/)
+  assert.match(readout, /role="alert"/)
+  assert.match(readout, /disabled=\{pending !== null\}/)
+  assert.match(readout, /setMutationError/)
 })

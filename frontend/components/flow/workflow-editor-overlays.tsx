@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils"
 import type { CanvasPoint } from "./workflow-canvas-geometry"
 import type { WorkflowProfile } from "@/lib/workflow/schema"
 import { MAX_WORKFLOW_NODE_DEPTH, workflowNodeDepthFromNetworkStack, workflowNodeLayerAtDepth } from "@/lib/workflow/node-hierarchy"
+import type { RunPanelExtension, RunPanelScope } from "@/lib/workflow/run-panel-extensions"
 
 type NetworkStackEntry = { nodeId: string; label: string }
 
@@ -86,6 +87,8 @@ export function WorkflowFloatingPanels({
   runRequestId,
   settingsOpen,
   workflowProfile,
+  scope,
+  runPanelExtensions = [],
 }: {
   nodeManagementOpen: boolean
   onCloseNodeManagement: () => void
@@ -95,12 +98,14 @@ export function WorkflowFloatingPanels({
   runRequestId: number
   settingsOpen: boolean
   workflowProfile: WorkflowProfile
+  runPanelExtensions?: readonly RunPanelExtension[]
+  scope?: RunPanelScope | null
 }) {
   return (
     <>
       {runTraceOpen ? (
         <div className={cn("workflow-floating-panel absolute top-3 z-40", nodeManagementOpen ? "left-[28.75rem]" : "left-3")}>
-          <RunTracePanel runRequestId={runRequestId} />
+          <RunTracePanel runRequestId={runRequestId} extensions={runPanelExtensions} scope={scope} />
         </div>
       ) : null}
 

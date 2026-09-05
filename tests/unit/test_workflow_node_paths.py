@@ -1,4 +1,4 @@
-from backend.schemas.workflow import WorkflowNodeRunEvent, WorkflowRunNodeState
+from backend.schemas.workflow_runtime import WorkflowNodeRunEvent, WorkflowRunNodeState
 
 
 def _event(**overrides) -> WorkflowNodeRunEvent:

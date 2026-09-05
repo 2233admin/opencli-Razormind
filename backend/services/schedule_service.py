@@ -1,5 +1,4 @@
 import logging
-from typing import Optional
 
 from croniter import croniter
 from sqlalchemy import func, select
@@ -17,8 +16,8 @@ def validate_cron_expression(expr: str) -> bool:
 
 async def list_schedules(
     session: AsyncSession,
-    source_id: Optional[str] = None,
-    enabled: Optional[bool] = None,
+    source_id: str | None = None,
+    enabled: bool | None = None,
     page: int = 1,
     limit: int = 20,
 ) -> tuple[list[CronSchedule], int]:
@@ -31,14 +30,13 @@ async def list_schedules(
     if enabled is not None:
         query = query.where(CronSchedule.enabled == enabled)
         count_query = count_query.where(CronSchedule.enabled == enabled)
-
     total = (await session.execute(count_query)).scalar_one()
     offset = (page - 1) * limit
     result = await session.execute(query.offset(offset).limit(limit))
     return result.scalars().all(), total
 
 
-async def get_schedule(session: AsyncSession, schedule_id: str) -> Optional[CronSchedule]:
+async def get_schedule(session: AsyncSession, schedule_id: str) -> CronSchedule | None:
     result = await session.execute(
         select(CronSchedule).where(CronSchedule.id == schedule_id)
     )

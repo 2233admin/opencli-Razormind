@@ -25,8 +25,7 @@ a fresh row.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -41,7 +40,7 @@ def ensure_utc(dt: datetime) -> datetime:
     naive) so age math never raises on aware-vs-naive comparison. Shared with
     ``backend.control.outcomes``, which does the same age math on the same
     columns."""
-    return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=UTC)
 
 
 async def record_advisory_actions(
@@ -51,8 +50,8 @@ async def record_advisory_actions(
     state: SourceControlState,
     actions: list[ControlAction],
     measurement: SourceMeasurement,
-    measurement_row_id: Optional[str],
-    run_id: Optional[str],
+    measurement_row_id: str | None,
+    run_id: str | None,
     mode: str,
     dedup_seconds: int,
 ) -> int:
@@ -69,7 +68,7 @@ async def record_advisory_actions(
     write shares the request's commit/rollback fate. Callers treat failures
     as best-effort (see ``backend.api.v1.sources.get_source_control_state``).
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     written = 0
 
     for action in actions:
@@ -122,8 +121,8 @@ async def record_executed_action(
     reason: str,
     payload: dict,
     measurement: SourceMeasurement,
-    measurement_row_id: Optional[str],
-    run_id: Optional[str],
+    measurement_row_id: str | None,
+    run_id: str | None,
 ) -> ControlActionRecord:
     """Write one ``control_actions`` row for an action the actuator ACTUALLY
     performed (issue 03 / PR-Control-4) — ``mode="automatic"``,

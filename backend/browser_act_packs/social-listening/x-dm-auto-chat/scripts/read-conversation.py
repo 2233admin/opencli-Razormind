@@ -1,10 +1,16 @@
 import argparse
 import sys
 
+
 def main():
     sys.stdout.reconfigure(encoding='utf-8', newline='\n')
-    parser = argparse.ArgumentParser(description='Read all currently-loaded messages from the active X DM conversation DOM')
-    args = parser.parse_args()
+    parser = argparse.ArgumentParser(
+        description=(
+            'Read all currently-loaded messages from the active '
+            'X DM conversation DOM'
+        )
+    )
+    parser.parse_args()
 
     js = """
     (() => {
@@ -15,7 +21,12 @@ def main():
         const header = document.querySelector('[data-testid="dm-conversation-header"]');
         const peerName = header?.innerText?.trim();
         const panel = document.querySelector('[data-testid="dm-conversation-panel"]');
-        if (!panel) return JSON.stringify({ error: true, message: 'no active conversation (dm-conversation-panel not found); navigate to /i/chat/{id1}-{id2} or click an inbox item' });
+        if not panel:
+          return JSON.stringify({
+            error: true,
+            message: 'no active conversation (dm-conversation-panel not found); '
+              + 'navigate to /i/chat/{id1}-{id2} or click an inbox item'
+          });
 
         const convIdMatch = location.pathname.match(/\\/i\\/chat\\/(\\d+)-(\\d+)/);
         let convId = null;
@@ -25,9 +36,13 @@ def main():
           convId = (a < b ? `${a}:${b}` : `${b}:${a}`);
         }
 
-        const myId = document.cookie.split('; ').find(c => c.startsWith('twid='))?.split('=')[1]?.replace(/^u%3D/, '').replace(/^u=/, '');
+        const myId = document.cookie.split('; ')
+          .find(c => c.startsWith('twid='))?.split('=')[1]
+          ?.replace(/^u%3D/, '').replace(/^u=/, '');
 
-        const msgEls = document.querySelectorAll('[data-testid^="message-"]:not([data-testid^="message-text-"])');
+        const msgEls = document.querySelectorAll(
+          '[data-testid^="message-"]:not([data-testid^="message-text-"])'
+        );
         const messages = [];
         msgEls.forEach(el => {
           const testid = el.getAttribute('data-testid');
@@ -50,7 +65,9 @@ def main():
           if (timeMatch) timestamp = timeMatch[1];
 
           // Extract attached URLs (rich links)
-          const links = [...el.querySelectorAll('a[href^="http"]')].map(a => a.getAttribute('href')).filter((v, i, arr) => arr.indexOf(v) === i);
+          const links = [...el.querySelectorAll('a[href^="http"]')]
+            .map(a => a.getAttribute('href'))
+            .filter((v, i, arr) => arr.indexOf(v) === i);
 
           // Attached images (avatars excluded)
           const images = [...el.querySelectorAll('img[src]')]

@@ -109,7 +109,13 @@ async def test_runner_drives_pagination_and_saves_cursor_each_page():
     chan = PagedChannel(total_pages=3)
     store = InMemoryCursorStore()
     items = (
-        await run_channel(_source(), {}, channel=chan, cursor_store=store, http=object())
+        await run_channel(
+            _source(),
+            {},
+            channel=chan,
+            cursor_store=store,
+            http=object(),
+        )
     ).items
 
     assert len(items) == 6  # 3 pages x 2 items
@@ -126,7 +132,13 @@ async def test_runner_resumes_from_stored_cursor():
     store = InMemoryCursorStore()
     await store.save("s1", {"page": 2})  # pretend a prior run got to page 2
     items = (
-        await run_channel(_source(), {}, channel=chan, cursor_store=store, http=object())
+        await run_channel(
+            _source(),
+            {},
+            channel=chan,
+            cursor_store=store,
+            http=object(),
+        )
     ).items
 
     assert chan.cursors_seen[0] == {"page": 2}  # started where it left off
@@ -158,9 +170,15 @@ async def test_non_incremental_pagination_advances_cursor_within_run():
 
 @pytest.mark.asyncio
 async def test_max_pages_guard_stops_infinite_pagination():
-    items = (await run_channel(
-        _source(), {}, channel=InfiniteChannel(), cursor_store=InMemoryCursorStore(), http=object()
-    )).items
+    items = (
+        await run_channel(
+            _source(),
+            {},
+            channel=InfiniteChannel(),
+            cursor_store=InMemoryCursorStore(),
+            http=object(),
+        )
+    ).items
     assert len(items) == MAX_PAGES
 
 

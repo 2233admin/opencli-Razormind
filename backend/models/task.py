@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -19,7 +19,7 @@ class CollectionTask(TimestampMixin):
     source_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("data_sources.id", ondelete="CASCADE"), nullable=False
     )
-    agent_id: Mapped[Optional[str]] = mapped_column(
+    agent_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("ai_agents.id", ondelete="SET NULL"), nullable=True
     )
     # manual | scheduled | webhook
@@ -28,18 +28,18 @@ class CollectionTask(TimestampMixin):
     priority: Mapped[int] = mapped_column(Integer, default=5, nullable=False)  # 1-10
     # pending | running | completed | failed | cancelled
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="pending")
-    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Recovery creates a new task and never mutates the failed source task.
-    retry_of_task_id: Mapped[Optional[str]] = mapped_column(
+    retry_of_task_id: Mapped[str | None] = mapped_column(
         String(36),
         ForeignKey("collection_tasks.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )
-    recovery_mode: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    recovery_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    initiating_actor: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    recovery_idempotency_key: Mapped[Optional[str]] = mapped_column(
+    recovery_mode: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    recovery_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    initiating_actor: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    recovery_idempotency_key: Mapped[str | None] = mapped_column(
         String(255), nullable=True, unique=True
     )
 
@@ -51,7 +51,7 @@ class CollectionTask(TimestampMixin):
     records: Mapped[list["CollectedRecord"]] = relationship(
         "CollectedRecord", back_populates="task", cascade="all, delete-orphan"
     )
-    retry_of: Mapped[Optional["CollectionTask"]] = relationship(
+    retry_of: Mapped["CollectionTask | None"] = relationship(
         "CollectionTask", remote_side="CollectionTask.id", back_populates="recoveries"
     )
     recoveries: Mapped[list["CollectionTask"]] = relationship(
@@ -69,24 +69,26 @@ class TaskRun(TimestampMixin):
     )
     # running | completed | failed
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="running")
-    worker_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    celery_task_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    worker_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    celery_task_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
-    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    duration_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     records_collected: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    error_detail: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error_detail: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     # URL of the edge node that executed this run (set when dispatched to a remote agent)
-    node_url: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    node_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
 
     # Relationship
     task: Mapped["CollectionTask"] = relationship("CollectionTask", back_populates="runs")
     events: Mapped[list["TaskRunEvent"]] = relationship(
-        "TaskRunEvent", back_populates="run", cascade="all, delete-orphan",
-        order_by="TaskRunEvent.created_at"
+        "TaskRunEvent",
+        back_populates="run",
+        cascade="all, delete-orphan",
+        order_by="TaskRunEvent.created_at",
     )
 
 
@@ -103,7 +105,7 @@ class TaskRunEvent(TimestampMixin):
     # trigger | collect | normalize | store | ai_process | notify | complete | failed
     step: Mapped[str] = mapped_column(String(50), nullable=False)
     message: Mapped[str] = mapped_column(Text, nullable=False)
-    detail: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
-    elapsed_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    detail: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    elapsed_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     run: Mapped["TaskRun"] = relationship("TaskRun", back_populates="events")

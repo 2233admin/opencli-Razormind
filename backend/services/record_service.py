@@ -1,5 +1,3 @@
-from typing import Optional
-
 from sqlalchemy import String, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -9,11 +7,11 @@ from backend.models.studio import StudioWorkflow
 
 async def list_records(
     session: AsyncSession,
-    source_id: Optional[str] = None,
-    task_id: Optional[str] = None,
-    project_id: Optional[str] = None,
-    status: Optional[str] = None,
-    search: Optional[str] = None,
+    source_id: str | None = None,
+    task_id: str | None = None,
+    project_id: str | None = None,
+    status: str | None = None,
+    search: str | None = None,
     page: int = 1,
     limit: int = 20,
     sort_by: str = "created_at",
@@ -68,7 +66,7 @@ async def list_records(
 
 async def get_record(
     session: AsyncSession, record_id: str
-) -> Optional[CollectedRecord]:
+) -> CollectedRecord | None:
     result = await session.execute(
         select(CollectedRecord).where(CollectedRecord.id == record_id)
     )
@@ -88,7 +86,7 @@ async def delete_records(
 
 async def delete_all_records(
     session: AsyncSession,
-    source_id: Optional[str] = None,
+    source_id: str | None = None,
 ) -> int:
     """Delete all records, optionally filtered by source. Returns deleted count."""
     stmt = delete(CollectedRecord)

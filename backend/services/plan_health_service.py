@@ -11,8 +11,7 @@ split out, because — unlike per-source measurements — nothing outside the
 executor ever writes a Plan Health row).
 """
 
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,8 +30,8 @@ async def record_node_health(
     duration_ms: int = 0,
     items_in: int = 0,
     items_out: int = 0,
-    error_message: Optional[str] = None,
-    detail: Optional[dict] = None,
+    error_message: str | None = None,
+    detail: dict | None = None,
 ) -> PlanHealthRecord:
     """Persist one shared-segment node's health for one run. Never raises on
     the caller's behalf — a failing node's own error is recorded as data
@@ -48,7 +47,7 @@ async def record_node_health(
         items_out=items_out,
         error_message=error_message,
         detail=detail or {},
-        recorded_at=datetime.now(timezone.utc),
+        recorded_at=datetime.now(UTC),
     )
     session.add(row)
     await session.flush()
@@ -59,7 +58,7 @@ async def record_node_health(
 async def list_plan_health(
     session: AsyncSession,
     plan_id: str,
-    run_key: Optional[str] = None,
+    run_key: str | None = None,
     page: int = 1,
     limit: int = 20,
 ) -> tuple[list[PlanHealthRecord], int]:

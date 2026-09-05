@@ -20,7 +20,14 @@ class TestMapErrorType:
         assert map_error_type("SomeBrandNewException") is ErrorKind.UNKNOWN
 
     def test_timeout_types(self):
-        for t in ("TimeoutException", "TimeoutError", "ConnectTimeout", "ReadTimeout", "PoolTimeout"):
+        timeout_types = (
+            "TimeoutException",
+            "TimeoutError",
+            "ConnectTimeout",
+            "ReadTimeout",
+            "PoolTimeout",
+        )
+        for t in timeout_types:
             assert map_error_type(t) is ErrorKind.TIMEOUT
 
     def test_network_types(self):

@@ -6,7 +6,7 @@ import hashlib
 import json
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
@@ -38,14 +38,14 @@ def source_id_for_opencli(site: str, command: str, explicit: str | None = None) 
 
 def _parse_ts(value: str | None) -> datetime:
     if not value:
-        return datetime.now(timezone.utc)
+        return datetime.now(UTC)
     try:
         ts = datetime.fromisoformat(value.replace("Z", "+00:00"))
         if ts.tzinfo is None:
-            ts = ts.replace(tzinfo=timezone.utc)
+            ts = ts.replace(tzinfo=UTC)
         return ts
     except ValueError:
-        return datetime.now(timezone.utc)
+        return datetime.now(UTC)
 
 
 def discord_message_to_payload(msg: dict[str, Any]) -> dict[str, Any]:
@@ -116,7 +116,10 @@ _TITLE_KEYS = ("title", "name", "word", "topic", "headline", "subject")
 _URL_KEYS = ("url", "link", "href", "permalink")
 _CONTENT_KEYS = ("content", "text", "body", "summary", "description")
 _AUTHOR_KEYS = ("author", "channel", "creator", "by", "user")
-_DATE_KEYS = ("created_at", "published_at", "published", "date", "time", "listed", "updated", "timestamp")
+_DATE_KEYS = (
+    "created_at", "published_at", "published", "date", "time", "listed",
+    "updated", "timestamp",
+)
 
 
 def _first_field(item: dict[str, Any], keys: tuple[str, ...]) -> str:
@@ -138,7 +141,13 @@ def _opencli_item_payload(item: dict[str, Any], *, site: str, command: str) -> d
         "extra_site": site,
         "extra_command": command,
     }
-    standard = {k.lower() for group in (_TITLE_KEYS, _URL_KEYS, _CONTENT_KEYS, _AUTHOR_KEYS, _DATE_KEYS) for k in group}
+    standard = {
+        k.lower()
+        for group in (
+            _TITLE_KEYS, _URL_KEYS, _CONTENT_KEYS, _AUTHOR_KEYS, _DATE_KEYS
+        )
+        for k in group
+    }
     for key, value in item.items():
         if key.lower() not in standard:
             payload[f"extra_{key}"] = value

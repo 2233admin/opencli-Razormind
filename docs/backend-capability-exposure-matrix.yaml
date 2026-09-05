@@ -2604,6 +2604,33 @@ operations:
   decision: Runtime traces back project-scoped Studio run inspection.
   target_epic: Epic 8
   capability_id: studio.workflow
+- method: GET
+  path: /api/v1/workspaces/{workspace_id}/projects/{project_id}/workflows/{workflow_id}/runs/{run_id}/evidence-batches
+  operation_id: get_project_run_evidence_batches_api_v1_workspaces__workspace_id__projects__project_id__workflows__workflow_id__runs__run_id__evidence_batches_get
+  disposition: studio_binding
+  frontend_route: /studio/workflow
+  wrapper: null
+  decision: Read EvidenceBatch lists through the project-scoped Studio runtime boundary.
+  target_epic: Epic 8
+  capability_id: studio.workflow
+- method: GET
+  path: /api/v1/workspaces/{workspace_id}/projects/{project_id}/workflows/{workflow_id}/runs/{run_id}/evidence-batches/projection
+  operation_id: get_project_run_evidence_projection_api_v1_workspaces__workspace_id__projects__project_id__workflows__workflow_id__runs__run_id__evidence_batches_projection_get
+  disposition: studio_binding
+  frontend_route: /studio/workflow
+  wrapper: null
+  decision: Read EvidenceBatch projections through the project-scoped Studio runtime boundary.
+  target_epic: Epic 8
+  capability_id: studio.workflow
+- method: GET
+  path: /api/v1/workspaces/{workspace_id}/projects/{project_id}/workflows/{workflow_id}/runs/{run_id}/evidence-batches/{batch_id}
+  operation_id: get_project_run_evidence_batch_api_v1_workspaces__workspace_id__projects__project_id__workflows__workflow_id__runs__run_id__evidence_batches__batch_id__get
+  disposition: studio_binding
+  frontend_route: /studio/workflow
+  wrapper: null
+  decision: Read EvidenceBatch detail through the project-scoped Studio runtime boundary.
+  target_epic: Epic 8
+  capability_id: studio.workflow
 - method: POST
   path: /api/v1/workspaces/{workspace_id}/projects/{project_id}/workflows/{workflow_id}/runs
   operation_id: start_published_workflow_run_api_v1_workspaces__workspace_id__projects__project_id__workflows__workflow_id__runs_post

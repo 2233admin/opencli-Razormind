@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Optional
 
 from pydantic import BaseModel
 
@@ -36,6 +35,7 @@ except ImportError:  # pragma: no cover - pyyaml is a declared dependency
     _HAS_YAML = False
 
 logger = logging.getLogger(__name__)
+
 
 #: Default scan root: this package's own directory, i.e.
 #: backend/browser_act_packs/ (the vendored <category>/<pack-name>/ dirs live
@@ -56,7 +56,7 @@ class PackInfo(BaseModel):
     capability: str
 
 
-def _parse_frontmatter(text: str) -> Optional[dict]:
+def _parse_frontmatter(text: str) -> dict | None:
     """Parse the ``---``-delimited YAML frontmatter block at the top of a
     SKILL.md. Returns None when there is no well-formed frontmatter block."""
     if not text.startswith("---"):
@@ -74,7 +74,7 @@ def _parse_frontmatter(text: str) -> Optional[dict]:
     return _manual_frontmatter(raw)
 
 
-def _manual_frontmatter(raw: str) -> Optional[dict]:
+def _manual_frontmatter(raw: str) -> dict | None:
     """Minimal fallback frontmatter parser for the rare case pyyaml isn't
     importable. Handles flat ``key: value`` lines only (no nested YAML) —
     good enough for the ``name``/``description`` keys this catalog needs."""
@@ -101,7 +101,7 @@ class PackCatalog:
     disk should construct a new instance.
     """
 
-    def __init__(self, root: Optional[Path | str] = None):
+    def __init__(self, root: Path | str | None = None):
         self.root = Path(root) if root is not None else PACKS_ROOT
         self._packs: list[PackInfo] = self._scan()
 
@@ -152,13 +152,13 @@ class PackCatalog:
     def list_packs(self) -> list[PackInfo]:
         return list(self._packs)
 
-    def get_pack(self, domain: str, capability: str) -> Optional[PackInfo]:
+    def get_pack(self, domain: str, capability: str) -> PackInfo | None:
         for pack in self._packs:
             if pack.domain == domain and pack.capability == capability:
                 return pack
         return None
 
-    def get_pack_by_name(self, name: str) -> Optional[PackInfo]:
+    def get_pack_by_name(self, name: str) -> PackInfo | None:
         for pack in self._packs:
             if pack.name == name:
                 return pack

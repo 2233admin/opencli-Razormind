@@ -147,7 +147,7 @@ def _stop_when_triggered(stop_when: str | None, page_item_count: int) -> bool:
     return page_item_count <= threshold if op == "<=" else page_item_count < threshold
 
 
-class _CollectAbort(Exception):
+class _CollectAbortError(Exception):
     """Internal control-flow signal: stop the collect() pagination loop and
     report this outcome as a ChannelResult. Never escapes collect()."""
 
@@ -387,7 +387,7 @@ class BrowserActChannel(AbstractChannel):
                         # other/absent mode is single-page (documented
                         # limitation -- see module docstring).
                         break
-        except _CollectAbort as exc:
+        except _CollectAbortError as exc:
             return ChannelResult(
                 success=False,
                 error_type=exc.error_type,
@@ -515,7 +515,7 @@ class BrowserActChannel(AbstractChannel):
                 parsed = json.loads(raw)
                 if isinstance(parsed, dict) and parsed.get("error"):
                     message = str(parsed.get("message", "unknown pack script error"))
-                    raise _CollectAbort(_classify_error(message), message)
+                    raise _CollectAbortError(_classify_error(message), message)
                 items = parsed if isinstance(parsed, list) else [parsed]
             elif step.op == "click" and step.index is not None:
                 await sess.click(step.index)

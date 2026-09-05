@@ -4,9 +4,18 @@ import sys
 
 def main():
     sys.stdout.reconfigure(encoding='utf-8', newline='\n')
-    parser = argparse.ArgumentParser(description="Discover URLs from /sitemap.xml (recursively expanding sitemap indexes)")
-    parser.add_argument('origin', help="Site origin, e.g. https://example.com")
-    parser.add_argument('--max-urls', type=int, default=5000, help="Stop after collecting this many URLs")
+    parser = argparse.ArgumentParser(
+        description="Discover URLs from /sitemap.xml (recursively expanding sitemap indexes)"
+    )
+    parser.add_argument(
+        "origin", help="Site origin, e.g. https://example.com"
+    )
+    parser.add_argument(
+        "--max-urls",
+        type=int,
+        default=5000,
+        help="Stop after collecting this many URLs",
+    )
     args = parser.parse_args()
 
     js = f"""
@@ -72,9 +81,13 @@ def main():
         }}
 
         if (!foundAny) {{
-          return JSON.stringify({{ error: true, message: 'No sitemap found at standard paths', urls: [] }});
+          return JSON.stringify({{
+            error: true, message: 'No sitemap found at standard paths', urls: []
+          }});
         }}
-        return JSON.stringify({{ error: false, source: 'sitemap.xml', count: urls.length, urls: urls }});
+        return JSON.stringify({{
+          error: false, source: 'sitemap.xml', count: urls.length, urls: urls
+        }});
       }} catch(e) {{
         return JSON.stringify({{ error: true, message: e.message, urls: [] }});
       }}

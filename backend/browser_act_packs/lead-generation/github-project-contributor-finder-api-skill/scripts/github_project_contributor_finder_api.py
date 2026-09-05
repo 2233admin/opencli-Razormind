@@ -1,10 +1,11 @@
-import os
-import time
-import requests
-import json
-import sys
 import datetime
 import io
+import json
+import os
+import sys
+import time
+
+import requests
 
 # Force UTF-8 encoding for standard output and error streams
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
@@ -15,7 +16,14 @@ TEMPLATE_ID = "90284769428414983"
 API_BASE_URL = "https://api.browseract.com/v2/workflow"
 
 
-def run_github_project_contributor_finder_task(api_key, keywords, stars=100, updated="2026-01-01", page_turns=1, date_limit_per_page=5):
+def run_github_project_contributor_finder_task(
+    api_key,
+    keywords,
+    stars=100,
+    updated="2026-01-01",
+    page_turns=1,
+    date_limit_per_page=5,
+):
     """
     Starts a GitHub Project & Contributor Finder task and polls for completion.
     Returns structured data as a string, or None on failure.
@@ -33,7 +41,7 @@ def run_github_project_contributor_finder_task(api_key, keywords, stars=100, upd
     }
 
     # 1. Start Task
-    print(f"Start Task", flush=True)
+    print("Start Task", flush=True)
     try:
         res = requests.post(
             f"{API_BASE_URL}/run-task-by-template",
@@ -46,9 +54,19 @@ def run_github_project_contributor_finder_task(api_key, keywords, stars=100, upd
     if "id" not in res:
         res_str = str(res)
         if "Invalid authorization" in res_str:
-            print("Error: Invalid authorization. Please check your BrowserAct API Key.", flush=True)
-        elif "concurrent" in res_str.lower() or "too many running tasks" in res_str.lower():
-            print("Error: Concurrent task limit reached. Please upgrade your plan at https://www.browseract.com/reception/recharge", flush=True)
+            print(
+                "Error: Invalid authorization. Please check your BrowserAct API Key.",
+                flush=True,
+            )
+        elif (
+            "concurrent" in res_str.lower()
+            or "too many running tasks" in res_str.lower()
+        ):
+            print(
+                "Error: Concurrent task limit reached. Please upgrade your plan at "
+                "https://www.browseract.com/reception/recharge",
+                flush=True,
+            )
         else:
             print(f"Error: Could not start task. Response: {res}", flush=True)
         return None
@@ -76,7 +94,11 @@ def run_github_project_contributor_finder_task(api_key, keywords, stars=100, upd
                 finished = True
                 break
             elif status in ["failed", "canceled"]:
-                print(f"Error: Task {status}. Please check your BrowserAct dashboard.", flush=True)
+                print(
+                    f"Error: Task {status}. Please check your "
+                    "BrowserAct dashboard.",
+                    flush=True,
+                )
                 return None
         except Exception as e:
             timestamp = datetime.datetime.now().strftime("%H:%M:%S")
@@ -109,7 +131,11 @@ def run_github_project_contributor_finder_task(api_key, keywords, stars=100, upd
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python github_project_contributor_finder_api.py <keywords> [stars] [updated] [page_turns] [date_limit_per_page]", flush=True)
+        print(
+            "Usage: python github_project_contributor_finder_api.py <keywords> "
+            "[stars] [updated] [page_turns] [date_limit_per_page]",
+            flush=True,
+        )
         sys.exit(1)
 
     api_key = os.getenv("BROWSERACT_API_KEY")
@@ -118,7 +144,11 @@ if __name__ == "__main__":
         print("Please follow these steps:", flush=True)
         print("1. Go to: https://www.browseract.com/reception/integrations", flush=True)
         print("2. Copy your API Key.", flush=True)
-        print("3. Provide it to me or set it as an environment variable (BROWSERACT_API_KEY).", flush=True)
+        print(
+            "3. Provide it to me or set it as an environment variable "
+            "(BROWSERACT_API_KEY).",
+            flush=True,
+        )
         sys.exit(1)
 
     keywords = sys.argv[1]
@@ -127,6 +157,8 @@ if __name__ == "__main__":
     page_turns = int(sys.argv[4]) if len(sys.argv) > 4 else 1
     date_limit_per_page = int(sys.argv[5]) if len(sys.argv) > 5 else 5
 
-    result = run_github_project_contributor_finder_task(api_key, keywords, stars, updated, page_turns, date_limit_per_page)
+    result = run_github_project_contributor_finder_task(
+        api_key, keywords, stars, updated, page_turns, date_limit_per_page
+    )
     if result:
         print(result, flush=True)

@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from sqlalchemy import JSON, Boolean, DateTime, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -7,8 +7,8 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from backend.models.base import TimestampMixin
 
 if TYPE_CHECKING:
-    from backend.models.task import CollectionTask
     from backend.models.schedule import CronSchedule
+    from backend.models.task import CollectionTask
 
 
 class DataSource(TimestampMixin):
@@ -17,7 +17,7 @@ class DataSource(TimestampMixin):
     __tablename__ = "data_sources"
 
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Channel type: opencli | web_scraper | api | rss | cli
     channel_type: Mapped[str] = mapped_column(String(50), nullable=False)
@@ -32,14 +32,14 @@ class DataSource(TimestampMixin):
     )
 
     # Optional AI processing config
-    ai_config: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    ai_config: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     # Per-source SourceObjective override (issue 02: per-source objective
     # override). Null means "no override, use the global default
     # SourceObjective()". A partial dict is merged over defaults through
     # backend.control.objectives.resolve_objective — never read directly by
     # evaluator/policy code, which always take a resolved SourceObjective.
-    objective_override: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    objective_override: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     tags: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
@@ -51,7 +51,7 @@ class DataSource(TimestampMixin):
     # the Control Cycle auto-resumes (re-enables, clears this) once the TTL
     # expires and records the inverse action in the Evidence Ledger.
     review_required: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    paused_until: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    paused_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Relationships
     tasks: Mapped[list["CollectionTask"]] = relationship(

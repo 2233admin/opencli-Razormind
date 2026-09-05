@@ -5,12 +5,18 @@ import sys
 def main():
     sys.stdout.reconfigure(encoding='utf-8', newline='\n')
     parser = argparse.ArgumentParser(
-        description='Extract Trustpilot company profile data from the SSR data embedded in the review page.'
+        description=(
+            'Extract Trustpilot company profile data from the SSR data '
+            'embedded in the review page.'
+        )
     )
     parser.add_argument(
         '--include-response-metrics',
         action='store_true',
-        help='Include reply behavior metrics (avg days to reply, reply percentage, AI response flag).'
+        help=(
+            'Include reply behavior metrics (avg days to reply, reply '
+            'percentage, AI response flag).'
+        ),
     )
     args = parser.parse_args()
 
@@ -44,12 +50,19 @@ def main():
         }}
 
         const bu = pp.businessUnit;
-        if (!bu) return JSON.stringify({{ error: true, message: 'businessUnit missing from pageProps' }});
+        if (!bu) return JSON.stringify({{ error: true, message:
+          'businessUnit missing from pageProps' }});
 
         const verification = bu.verification || {{}};
-        const isVerified = !!(verification.verifiedByGoogle || verification.verifiedPaymentMethod || verification.verifiedUserIdentity);
+        const isVerified = !!(
+          verification.verifiedByGoogle ||
+          verification.verifiedPaymentMethod ||
+          verification.verifiedUserIdentity
+        );
         const categories = bu.categories || [];
-        const primaryCategory = categories.find(function(c) {{ return c.isPrimary; }}) || categories[0] || null;
+        const primaryCategory = categories.find(function(c) {{
+          return c.isPrimary;
+        }}) || categories[0] || null;
         const contact = bu.contactInfo || {{}};
 
         const result = {{
@@ -61,7 +74,8 @@ def main():
           trustScoreNumeric: bu.trustScore != null ? bu.trustScore : null,
           stars: bu.stars != null ? bu.stars : null,
           OfficialTotalReviewCount: bu.numberOfReviews != null ? bu.numberOfReviews : null,
-          numberOfReviewsLast12Months: bu.numberOfReviewsLast12Months != null ? bu.numberOfReviewsLast12Months : null,
+          numberOfReviewsLast12Months: bu.numberOfReviewsLast12Months != null
+            ? bu.numberOfReviewsLast12Months : null,
           isCompanyVerified: isVerified ? 'yes' : 'no',
           verificationFlags: {{
             verifiedByGoogle: !!verification.verifiedByGoogle,
@@ -74,7 +88,9 @@ def main():
           isCollectingReviews: !!bu.isCollectingReviews,
           category: primaryCategory ? primaryCategory.name : null,
           categoryId: primaryCategory ? primaryCategory.id : null,
-          allCategories: categories.map(function(c) {{ return {{ id: c.id, name: c.name, isPrimary: !!c.isPrimary }}; }}),
+          allCategories: categories.map(function(c) {{
+            return {{ id: c.id, name: c.name, isPrimary: !!c.isPrimary }};
+          }}),
           websiteUrl: bu.websiteUrl || null,
           websiteTitle: bu.websiteTitle || null,
           profileImageUrl: bu.profileImageUrl || null,
@@ -92,11 +108,17 @@ def main():
         if ({include_metrics}) {{
           const activity = bu.activity || {{}};
           const rb = activity.replyBehavior || {{}};
-          result.replyAverageDaysToReply = rb.averageDaysToReply != null ? rb.averageDaysToReply : null;
-          result.replyPercentage = rb.replyPercentage != null ? rb.replyPercentage : null;
-          result.totalNegativeReviewsCount = rb.totalNegativeReviewsCount != null ? rb.totalNegativeReviewsCount : null;
-          result.negativeReviewsWithRepliesCount = rb.negativeReviewsWithRepliesCount != null ? rb.negativeReviewsWithRepliesCount : null;
-          result.lastReplyToNegativeReview = rb.lastReplyToNegativeReview != null ? rb.lastReplyToNegativeReview : null;
+          result.replyAverageDaysToReply =
+            rb.averageDaysToReply != null ? rb.averageDaysToReply : null;
+          result.replyPercentage =
+            rb.replyPercentage != null ? rb.replyPercentage : null;
+          result.totalNegativeReviewsCount =
+            rb.totalNegativeReviewsCount != null ? rb.totalNegativeReviewsCount : null;
+          result.negativeReviewsWithRepliesCount =
+            rb.negativeReviewsWithRepliesCount != null
+              ? rb.negativeReviewsWithRepliesCount : null;
+          result.lastReplyToNegativeReview =
+            rb.lastReplyToNegativeReview != null ? rb.lastReplyToNegativeReview : null;
           result.companyUsesAIResponses = !!activity.isUsingAIResponses;
           result.claimedDate = activity.claimedDate || null;
           result.isAskingForReviews = !!activity.isAskingForReviews;
@@ -104,7 +126,8 @@ def main():
 
         return JSON.stringify(result);
       }} catch(e) {{
-        return JSON.stringify({{ error: true, message: 'extract failed: ' + (e && e.message ? e.message : String(e)) }});
+        return JSON.stringify({{ error: true, message: 'extract failed: ' +
+          (e && e.message ? e.message : String(e)) }});
       }}
     }})()
     """
