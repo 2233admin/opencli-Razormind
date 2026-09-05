@@ -1,6 +1,6 @@
 # OpenAlice 基础模块整合验收
 
-日期：2026-09-06。任务事实源为 [父任务 #116](https://github.com/2233admin/opencli-Razormind/issues/116)。最新状态：#121 读取模块、#122 阅读器、#123 工作状态与 #124 项目/Inbox 接线已通过各自验收；#121 生产来源的研究续跑分支仍在补齐，#125 开始基础实施。整批任务和主分支合并尚未完成。
+日期：2026-09-06。任务事实源为 [父任务 #116](https://github.com/2233admin/opencli-Razormind/issues/116)。最新状态：#121 读取与完整生产来源、#122 阅读器、#123 工作状态与 #124 项目/Inbox 接线已通过各自验收。#125 基础已整合测试，但独立审查发现 SDK 降级路径，正在修正；连接设置前端并行实施。整批任务和主分支合并尚未完成。
 
 ## 整合范围
 
@@ -68,3 +68,17 @@ Luna 的端到端提交 `041ee94f` 已整合为 `3f915c57`，Sol 的生产来源
 #125 ADR 0046 的官方同步 dispatcher 与持久 ACK 边界已通过独立审查，状态改为 Accepted。[第一波实施合同](https://github.com/2233admin/opencli-Razormind/issues/125#issuecomment-5555078767) 已发布并远端回读：Sol 仅负责安装、绑定、严格 SDK 入站和持久收件基础；原 Agent 回复、出站、产物领取和共享注册仍属于后续接线。SDK 的真实 wheel/线程/超时后迟到提交测试是验收门槛，尚未完成这项实现。
 
 本轮路由：Luna 交付项目 E2E 并接手明确的研究续跑修复；Sol 交付来源链并转入连接器安全边界；协调者完成集成和上述复跑；独立 reviewer 找到未覆盖的研究续跑路径后退回。业务数据、实际外部消息和主目录未改动，父目标最终独立验收仍待全部任务完成。
+
+## 来源完整验收与连接器严格入口修正
+
+研究续跑修复 `366ad171` 已整合为 `dbdadcdb`，原独立 reviewer 接受。测试真实 published HTTP 父 run → continuation service → child native writer，来源保持同一 conversation；没有来源的父 run 仍无来源，客户端不能重绑，旧产物 hash 保持不变。generic continuation HTTP 原有的 Studio 拒绝不放宽，不能把 service 验证表述为该 HTTP 入口已经对 Studio 开放。[#121 验收评论](https://github.com/2233admin/opencli-Razormind/issues/121#issuecomment-5555356259) 已发布并远端回读。
+
+连接器基础 `8e37e909` 整合为 `28267872`；协调者在 `336370d0` 注册模型和生产 router，Fleet Auth 只豁免精确 callback 的 POST，并标注独立 SDK 认证的 OpenAPI 合同。新的真实 create_app + SQLite + 固定 SDK 测试证明正确加密签名事件/URL challenge、重推一个 receipt、错误签名无写入，以及相邻方法/路径继续401。基础与来源34项、接线/Fleet/研究既有回归54项通过；OpenAPI 补充断言后单项复跑通过，Ruff与uv lock check通过。未运行全仓覆盖率认证。
+
+SDK 要求 websockets>=11,<16，锁文件因此从16.1.1调整到15.0.1。Luna 单独核查项目实际调用和该版本签名，6项既有Agent/userscript测试与本地loopback握手/收发通过，未发现兼容阻断。
+
+基础独立审查结论仍为 REVISE：固定SDK对空密钥配置的明文无签名事件可返回200并执行callback；明文URL challenge也可能先于签名检查返回200。新[修复合同](https://github.com/2233admin/opencli-Razormind/issues/125#issuecomment-5555371293)要求完整可解凭据、严格加密envelope/必要头、SDK继续负责全部验签解密，同时补reply target边界、日志脱敏和disabled/revoked已验证重推的稳定receipt。共享接线本身已被独立审查接受，基础整体尚未验收或开放实际外部使用。
+
+Sol 在connector工作树修正上述边界，并增加仅当前用户的my-binding读取；Luna在独立UI工作树按[前端合同](https://github.com/2233admin/opencli-Razormind/issues/125#issuecomment-5555391202)复用/providers/catalog实现安装、本人绑定和健康状态，不把callback readiness当作已绑定。完整原Agent回复/出站/产物grant留待下一波，不展示虚假的发送能力。
+
+后续会话grant需明确处理conversation.revision随正常turn递增的事实：不能让grant因自身成功回复而失效，也不能跳过关闭、授权context变更、撤销和降权重检。此为第二波待审合同要求，尚无对应实现。本轮仍未重启或变更8046/8047预览、原有业务服务或业务数据库。
