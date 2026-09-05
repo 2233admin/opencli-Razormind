@@ -16,6 +16,8 @@ from backend.models.operations_agent import (
     OperationsAgentRun,
     PublishedOperationsAgentVersion,
 )
+from backend.models.studio import StudioProject, StudioWorkspace
+from backend.models.workflow import Project
 from backend.security.identity import RequestIdentity, get_request_identity
 from backend.services.agent_work_health import get_agent_work_health
 from backend.services.automation_schedule_service import create_bound_automation_run
@@ -71,6 +73,15 @@ async def _seed_health_records(db_session, role: WorkspaceRole = WorkspaceRole.A
         )
     )
     await db_session.flush()
+    db_session.add(
+        Project(
+            id=PROJECT_ID,
+            workspace_id=workspace.id,
+            name="Health project",
+            slug=f"health-{role.value}",
+            created_by_user_id=user.id,
+        )
+    )
     agent = OperationsAgentIdentity(
         workspace_id=workspace.id,
         owning_team_id=team.id,
@@ -193,12 +204,15 @@ async def test_health_combines_runtime_failure_pause_and_conversation_evidence(
     db_session,
     monkeypatch,
 ):
-    _, workspace, _, automation = await _seed_health_records(db_session)
+    user, workspace, _, automation = await _seed_health_records(db_session)
     monkeypatch.setattr(ws_agent_manager, "is_connected", lambda _url: True)
 
     health = await get_agent_work_health(
         db_session,
+        identity=RequestIdentity(subject=user.subject),
+        requested_workspace_id=workspace.id,
         workspace_id=workspace.id,
+        studio_workspace_id=None,
         project_id=PROJECT_ID,
         can_run=True,
         can_manage=True,
@@ -311,7 +325,10 @@ async def test_health_surfaces_configuration_permission_and_runtime_failure_bloc
 
     health = await get_agent_work_health(
         db_session,
+        identity=RequestIdentity(subject=user.subject),
+        requested_workspace_id=workspace.id,
         workspace_id=workspace.id,
+        studio_workspace_id=None,
         project_id=PROJECT_ID,
         can_run=True,
         can_manage=True,
@@ -349,3 +366,159 @@ async def test_viewer_health_api_exposes_no_mutating_actions(db_session, monkeyp
     assert data["permissions"] == {"can_run": False, "can_manage": False}
     actions = [action for item in data["items"] for action in item["actions"]]
     assert {action["kind"] for action in actions} == {"open_conversation"}
+
+
+async def test_local_admin_health_bridge_validates_studio_project_and_keeps_both_scopes(
+    db_session,
+    monkeypatch,
+):
+    user, governed, _, _ = await _seed_health_records(db_session)
+    studio = StudioWorkspace(name="Studio health", slug="studio-health")
+    db_session.add(studio)
+    await db_session.flush()
+    project = StudioProject(
+        workspace_id=studio.id,
+        name="Studio project",
+        slug="studio-project",
+        created_by_user_id="local-development-user",
+    )
+    db_session.add(project)
+    await db_session.flush()
+    conversation = AgentConversation(
+        workspace_id=governed.id,
+        title="Studio investigation",
+        created_by_user_id=user.id,
+        context_binding={
+            "project_id": project.id,
+            "studio_workspace_id": studio.id,
+        },
+        status="active",
+    )
+    db_session.add(conversation)
+    await db_session.commit()
+    monkeypatch.setattr(ws_agent_manager, "is_connected", lambda _url: True)
+
+    app = FastAPI()
+    app.include_router(router)
+
+    async def override_db():
+        yield db_session
+
+    async def override_identity():
+        return RequestIdentity(
+            subject=user.subject,
+            is_platform_admin=True,
+            auth_method="local",
+        )
+
+    app.dependency_overrides[get_db] = override_db
+    app.dependency_overrides[get_request_identity] = override_identity
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get(
+            f"/workspaces/{studio.id}/operations-agents/work-health",
+            params={"project_id": project.id},
+        )
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["workspace_id"] == governed.id
+    assert data["studio_workspace_id"] == studio.id
+    assert data["project_id"] == project.id
+    assert [item["title"] for item in data["items"]] == ["Studio investigation"]
+
+
+async def test_studio_health_rejects_oidc_and_foreign_project(db_session):
+    user, _, _, _ = await _seed_health_records(db_session)
+    studio = StudioWorkspace(name="Studio A", slug="studio-a")
+    other_studio = StudioWorkspace(name="Studio B", slug="studio-b")
+    foreign_governed = Workspace(name="Foreign governed", slug="foreign-governed")
+    db_session.add_all((studio, other_studio, foreign_governed))
+    await db_session.flush()
+    foreign_project = StudioProject(
+        workspace_id=other_studio.id,
+        name="Foreign project",
+        slug="foreign-project",
+        created_by_user_id="local-development-user",
+    )
+    db_session.add(foreign_project)
+    await db_session.commit()
+
+    app = FastAPI()
+    app.include_router(router)
+
+    async def override_db():
+        yield db_session
+
+    app.dependency_overrides[get_db] = override_db
+    identity = RequestIdentity(
+        subject=user.subject,
+        is_platform_admin=True,
+        auth_method="oidc",
+    )
+
+    async def override_identity():
+        return identity
+
+    app.dependency_overrides[get_request_identity] = override_identity
+    url = f"/workspaces/{studio.id}/operations-agents/work-health"
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        oidc_response = await client.get(url, params={"project_id": foreign_project.id})
+        identity = RequestIdentity(
+            subject=user.subject,
+            is_platform_admin=True,
+            auth_method="local",
+        )
+        foreign_response = await client.get(url, params={"project_id": foreign_project.id})
+        foreign_workspace_response = await client.get(
+            f"/workspaces/{foreign_governed.id}/operations-agents/work-health"
+        )
+
+    assert oidc_response.status_code == 403
+    assert foreign_response.status_code == 409
+    assert "project is not owned" in foreign_response.json()["detail"]
+    assert foreign_workspace_response.status_code == 403
+
+
+async def test_governed_health_hides_studio_bound_conversations_from_oidc_member(
+    db_session,
+    monkeypatch,
+):
+    user, workspace, _, _ = await _seed_health_records(db_session, WorkspaceRole.VIEWER)
+    studio = StudioWorkspace(name="Hidden Studio", slug="hidden-studio")
+    db_session.add(studio)
+    await db_session.flush()
+    studio_only = AgentConversation(
+        workspace_id=workspace.id,
+        title="Hidden Studio title",
+        created_by_user_id=user.id,
+        context_binding={
+            "project_id": PROJECT_ID,
+            "studio_workspace_id": studio.id,
+        },
+        status="active",
+    )
+    db_session.add(studio_only)
+    await db_session.commit()
+    monkeypatch.setattr(ws_agent_manager, "is_connected", lambda _url: True)
+
+    app = FastAPI()
+    app.include_router(router)
+
+    async def override_db():
+        yield db_session
+
+    async def override_identity():
+        return RequestIdentity(subject=user.subject, auth_method="oidc")
+
+    app.dependency_overrides[get_db] = override_db
+    app.dependency_overrides[get_request_identity] = override_identity
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get(
+            f"/workspaces/{workspace.id}/operations-agents/work-health",
+            params={"project_id": PROJECT_ID},
+        )
+
+    assert response.status_code == 200
+    titles = {item["title"] for item in response.json()["data"]["items"]}
+    assert "Project investigation" in titles
+    assert "Hidden Studio title" not in titles

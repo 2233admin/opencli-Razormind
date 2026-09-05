@@ -1,7 +1,8 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowUp, Bell, Bot, CalendarClock, ChevronDown, CircleDot, FileSearch, Pause, Play, Plus, Repeat2, Terminal } from 'lucide-react'
+import { useSearchParams } from 'next/navigation'
 import { toast } from 'sonner'
 
 import AgentAvatar from '@/components/smoothui/agent-avatar'
@@ -16,6 +17,7 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { automationExecutorMeta as executorMeta } from '@/lib/automations/executors'
 import { AUTOMATION_APPROVALS as APPROVALS } from '@/lib/automations/approval'
+import { resolveOperationsAgentConfigTarget, resolveOperationsAgentWorkspace } from '@/lib/operations-agent-deep-link'
 
 const SUGGESTIONS = [
   { name: '每日运行简报', prompt: '汇总过去一天的运行、失败和待批准事项，给出需要关注的下一步。', icon: Bell, color: 'text-indigo-400', schedule: 'daily@08:00' },
@@ -298,6 +300,8 @@ function ContractEditor({ workspaceId, agent }: { workspaceId: string; agent: Op
 }
 
 export default function OperationsAgentsPage() {
+  const searchParams = useSearchParams()
+  const requestedWorkspaceId = searchParams.get('workspace')
   const workspaces = useGovernedWorkspaces()
   const [workspaceId, setWorkspaceId] = useState<string | null>(null)
   const [view, setView] = useState<'automations' | 'agents'>('automations')
@@ -337,6 +341,7 @@ export default function OperationsAgentsPage() {
   const [agentCreateOpen, setAgentCreateOpen] = useState(false)
   const [automationToRun, setAutomationToRun] = useState<Automation | null>(null)
   const [automationToBind, setAutomationToBind] = useState<Automation | null>(null)
+  const appliedDeepLinkRef = useRef<string | null>(null)
   const [bindingAgentId, setBindingAgentId] = useState('')
   const runnableAgents = useMemo(
     () => (agents.data ?? []).filter(
@@ -354,10 +359,49 @@ export default function OperationsAgentsPage() {
   const latestRun = useMemo(() => new Map(activity.data?.map((run) => [run.operations_agent_id, run]) ?? []), [activity.data])
 
   useEffect(() => {
-    if (!workspaceId && workspaces.data?.length) {
-      setWorkspaceId(workspaces.data[0].id)
+    if (workspaceId || !workspaces.data) return
+    setWorkspaceId(resolveOperationsAgentWorkspace(
+      requestedWorkspaceId,
+      workspaceId,
+      workspaces.data.map((workspace) => workspace.id),
+    ))
+  }, [requestedWorkspaceId, workspaceId, workspaces.data])
+
+  useEffect(() => {
+    const configMode = searchParams.get('config')
+    const targetReady = configMode === 'contract'
+      ? agents.isSuccess
+      : configMode === 'binding'
+        ? automations.isSuccess
+        : true
+    if (!targetReady) return
+    const signature = searchParams.toString()
+    if (appliedDeepLinkRef.current === signature) return
+    const target = resolveOperationsAgentConfigTarget({
+      activeWorkspaceId: workspaceId,
+      requestedWorkspaceId,
+      requestedAgentId: searchParams.get('agent'),
+      requestedAutomationId: searchParams.get('automation'),
+      configMode,
+      accessibleAgentIds: (agents.data ?? []).map((agent) => agent.id),
+      accessibleAutomationIds: (automations.data ?? []).map((automation) => automation.id),
+    })
+    if (!target) return
+    if (target.kind === 'agent') {
+      const agent = agents.data?.find((candidate) => candidate.id === target.id)
+      if (!agent) return
+      setView('agents')
+      setSelectedAgent(agent)
+      setAgentDetailView('contract')
+    } else {
+      const automation = automations.data?.find((candidate) => candidate.id === target.id)
+      if (!automation) return
+      setView('automations')
+      setAutomationToBind(automation)
+      setBindingAgentId(automation.operations_agent_id ?? runnableAgents[0]?.id ?? '')
     }
-  }, [workspaceId, workspaces.data])
+    appliedDeepLinkRef.current = signature
+  }, [agents.data, agents.isSuccess, automations.data, automations.isSuccess, requestedWorkspaceId, runnableAgents, searchParams, workspaceId])
 
   function startCreate(preset?: AgentStarterInput) {
     setName(preset?.name ?? '')

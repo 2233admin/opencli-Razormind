@@ -44,16 +44,25 @@ const statePresentation: Record<
 }
 
 function workHref(
-  workspaceId: string,
+  governedWorkspaceId: string,
+  navigationWorkspaceId: string,
   projectId: string | null | undefined,
   action: AgentWorkAction,
 ) {
   if (action.kind === 'configure') {
-    return `/operations-agents?${new URLSearchParams({ workspace: workspaceId })}`
+    const params = new URLSearchParams({ workspace: governedWorkspaceId })
+    if (action.operations_agent_id) {
+      params.set('agent', action.operations_agent_id)
+      params.set('config', 'contract')
+    } else if (action.automation_id) {
+      params.set('automation', action.automation_id)
+      params.set('config', 'binding')
+    }
+    return `/operations-agents?${params}`
   }
   if (action.kind !== 'open_conversation' || !action.conversation_id) return null
   const params = new URLSearchParams({
-    workspace: workspaceId,
+    workspace: navigationWorkspaceId,
     agent: '1',
     conversation: action.conversation_id,
   })
@@ -79,13 +88,15 @@ function WorkStateIcon({ state }: { state: AgentWorkState }) {
 
 function WorkItem({
   item,
-  workspaceId,
+  governedWorkspaceId,
+  navigationWorkspaceId,
   projectId,
   busy,
   onAction,
 }: {
   item: AgentWorkHealthItem
-  workspaceId: string
+  governedWorkspaceId: string
+  navigationWorkspaceId: string
   projectId?: string | null
   busy: boolean
   onAction: (action: AgentWorkAction) => void
@@ -120,7 +131,7 @@ function WorkItem({
       {item.actions.length ? (
         <div className="mt-3 flex flex-wrap gap-2">
           {item.actions.map((action) => {
-            const href = workHref(workspaceId, projectId, action)
+            const href = workHref(governedWorkspaceId, navigationWorkspaceId, projectId, action)
             if (href) {
               return (
                 <Link
@@ -171,7 +182,10 @@ export function AgentWorkHealth({
       item.state === 'queued' || item.state === 'running') ? 5_000 : 30_000,
   })
   const action = useMutation({
-    mutationFn: (next: AgentWorkAction) => performAgentWorkAction(workspaceId!, next),
+    mutationFn: (next: AgentWorkAction) => {
+      if (!health.data) throw new Error('工作状态尚未加载')
+      return performAgentWorkAction(health.data.workspace_id, next)
+    },
     onSuccess: () => {
       toast.success('工作状态已更新')
       void queryClient.invalidateQueries({
@@ -192,7 +206,11 @@ export function AgentWorkHealth({
           </div>
           {health.data ? (
             <Badge variant={health.data.counts.needs_attention ? 'destructive' : 'secondary'}>
-              {health.data.counts.needs_attention ? `${health.data.counts.needs_attention} 项需处理` : '运行路径正常'}
+              {health.data.counts.needs_attention
+                ? `${health.data.counts.needs_attention} 项需处理`
+                : health.data.counts.total
+                  ? '暂无待处理项'
+                  : '暂无 Agent 工作'}
             </Badge>
           ) : null}
         </div>
@@ -209,7 +227,8 @@ export function AgentWorkHealth({
           <WorkItem
             key={item.id}
             item={item}
-            workspaceId={workspaceId!}
+            governedWorkspaceId={health.data.workspace_id}
+            navigationWorkspaceId={health.data.studio_workspace_id ?? health.data.workspace_id}
             projectId={projectId}
             busy={action.isPending}
             onAction={(next) => action.mutate(next)}

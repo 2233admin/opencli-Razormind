@@ -252,6 +252,7 @@ class AgentWorkHealthPermissionsRead(BaseModel):
 
 class AgentWorkHealthRead(BaseModel):
     workspace_id: str
+    studio_workspace_id: str | None = None
     project_id: str | None = None
     generated_at: datetime
     permissions: AgentWorkHealthPermissionsRead

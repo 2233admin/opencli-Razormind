@@ -72,6 +72,7 @@ export interface AgentWorkHealthItem {
 
 export interface AgentWorkHealth {
   workspace_id: string
+  studio_workspace_id: string | null
   project_id: string | null
   generated_at: string
   permissions: { can_run: boolean; can_manage: boolean }
@@ -87,7 +88,7 @@ export async function getAgentWorkHealth(
   projectId?: string | null,
 ): Promise<AgentWorkHealth> {
   const response = await apiClient.get<ApiResponse<AgentWorkHealth>>(
-    `/workspaces/${workspaceId}/operations-agents/work-health`,
+    `/workspaces/${encodeURIComponent(workspaceId)}/operations-agents/work-health`,
     { params: projectId ? { project_id: projectId } : undefined },
   )
   return response.data.data
@@ -99,7 +100,7 @@ export async function performAgentWorkAction(
 ): Promise<void> {
   if (action.kind === 'pause_run' && action.operations_agent_id && action.run_id) {
     await apiClient.post(
-      `/workspaces/${workspaceId}/operations-agents/${action.operations_agent_id}/runs/${action.run_id}/pause`,
+      `/workspaces/${encodeURIComponent(workspaceId)}/operations-agents/${encodeURIComponent(action.operations_agent_id)}/runs/${encodeURIComponent(action.run_id)}/pause`,
     )
     return
   }
@@ -107,7 +108,7 @@ export async function performAgentWorkAction(
     (action.kind === 'run_automation' || action.kind === 'retry_automation')
     && action.automation_id
   ) {
-    await apiClient.post(`/workspaces/${workspaceId}/automations/${action.automation_id}/runs`)
+    await apiClient.post(`/workspaces/${encodeURIComponent(workspaceId)}/automations/${encodeURIComponent(action.automation_id)}/runs`)
     return
   }
   throw new Error(`Action ${action.kind} is navigation-only or has no valid target`)

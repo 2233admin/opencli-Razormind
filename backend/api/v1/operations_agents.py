@@ -15,6 +15,7 @@ from backend.models.operations_agent import (
     OperationsAgentRun,
     PublishedOperationsAgentVersion,
 )
+from backend.models.studio import StudioProject
 from backend.schemas.automation import AgentWorkHealthRead
 from backend.schemas.common import ApiResponse
 from backend.schemas.operations_agent import (
@@ -41,6 +42,10 @@ from backend.security.workspace_rbac import (
     get_workspace_access,
     require_permission,
 )
+from backend.services.agent_conversation_service import (
+    AgentConversationError,
+    validate_context_binding,
+)
 from backend.services.agent_runtime_selection import (
     RuntimeSelectionError,
     select_agent_runtime,
@@ -50,6 +55,7 @@ from backend.services.operations_agent_runtime_service import (
     cancel_operations_agent_run,
     schedule_operations_agent_run,
 )
+from backend.services.studio_agent_session_access import resolve_agent_session_workspace
 
 router = APIRouter(
     prefix="/workspaces/{workspace_id}/operations-agents", tags=["operations-agents"]
@@ -86,14 +92,46 @@ async def read_agent_work_health(
     identity: RequestIdentity = Depends(get_request_identity),
     db: AsyncSession = Depends(get_db),
 ) -> ApiResponse:
-    access = await get_workspace_access(db, workspace_id, identity)
-    require_permission(access, WorkspacePermission.READ)
+    context = {"project_id": project_id} if project_id is not None else {}
+    scope = await resolve_agent_session_workspace(
+        db,
+        identity,
+        workspace_id,
+        context=context,
+    )
+    require_permission(scope.access, WorkspacePermission.READ)
+    if project_id is not None:
+        if scope.studio_workspace_id is not None:
+            studio_project_id = await db.scalar(
+                select(StudioProject.id).where(
+                    StudioProject.id == project_id,
+                    StudioProject.workspace_id == scope.studio_workspace_id,
+                    StudioProject.archived.is_(False),
+                )
+            )
+            if studio_project_id is None:
+                raise HTTPException(
+                    status.HTTP_409_CONFLICT,
+                    "project is not owned by the Workspace",
+                )
+        try:
+            await validate_context_binding(
+                db,
+                scope.workspace_id,
+                context,
+                studio_workspace_id=scope.studio_workspace_id,
+            )
+        except AgentConversationError as exc:
+            raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
     health = await get_agent_work_health(
         db,
-        workspace_id=workspace_id,
+        identity=identity,
+        requested_workspace_id=workspace_id,
+        workspace_id=scope.workspace_id,
+        studio_workspace_id=scope.studio_workspace_id,
         project_id=project_id,
-        can_run=access.allows(WorkspacePermission.RUN_OPERATIONS_AGENTS),
-        can_manage=access.allows(WorkspacePermission.MANAGE_AGENT_IDENTITIES),
+        can_run=scope.access.allows(WorkspacePermission.RUN_OPERATIONS_AGENTS),
+        can_manage=scope.access.allows(WorkspacePermission.MANAGE_AGENT_IDENTITIES),
     )
     return ApiResponse.ok(health)
 

@@ -20,10 +20,14 @@ from backend.schemas.automation import (
     AgentWorkHealthRead,
     AgentWorkLatestRunRead,
 )
+from backend.security.identity import RequestIdentity
+from backend.security.workspace_rbac import WorkspacePermission, require_permission
+from backend.services.agent_conversation_service import list_conversations
 from backend.services.automation_schedule_service import (
     AutomationBindingError,
     validate_automation_binding,
 )
+from backend.services.studio_agent_session_access import resolve_stored_agent_session_workspace
 
 _ATTENTION_STATES = frozenset({"blocked", "failed", "paused"})
 _MISSING_RUNTIME_CODES = frozenset(
@@ -434,7 +438,10 @@ async def _automation_health(
 async def get_agent_work_health(
     session: AsyncSession,
     *,
+    identity: RequestIdentity,
+    requested_workspace_id: str,
     workspace_id: str,
+    studio_workspace_id: str | None,
     project_id: str | None,
     can_run: bool,
     can_manage: bool,
@@ -450,13 +457,23 @@ async def get_agent_work_health(
             .order_by(Automation.updated_at.desc())
         )
     )
-    conversations = list(
-        await session.scalars(
-            select(AgentConversation)
-            .where(AgentConversation.workspace_id == workspace_id)
-            .order_by(AgentConversation.updated_at.desc())
-        )
+    conversations = await list_conversations(
+        session,
+        identity,
+        workspace_id=requested_workspace_id,
+        limit=50,
+        context={"project_id": project_id} if project_id is not None else {},
     )
+    authorized_conversations: list[AgentConversation] = []
+    for conversation in conversations:
+        conversation_scope = await resolve_stored_agent_session_workspace(
+            session,
+            identity,
+            workspace_id=conversation.workspace_id,
+            context_binding=conversation.context_binding,
+        )
+        require_permission(conversation_scope.access, WorkspacePermission.READ)
+        authorized_conversations.append(conversation)
     latest_automation_runs = await _latest_automation_runs(session, workspace_id)
     latest_turns = await _latest_conversation_turns(session, workspace_id)
     agents = {
@@ -469,7 +486,7 @@ async def get_agent_work_health(
     }
 
     items: list[AgentWorkHealthItemRead] = []
-    for conversation in conversations:
+    for conversation in authorized_conversations:
         item = _conversation_health(conversation, latest_turns.get(conversation.id))
         if project_id is None or item.project_id == project_id:
             items.append(item)
@@ -528,6 +545,7 @@ async def get_agent_work_health(
     )
     return AgentWorkHealthRead(
         workspace_id=workspace_id,
+        studio_workspace_id=studio_workspace_id,
         project_id=project_id,
         generated_at=generated_at,
         permissions=AgentWorkHealthPermissionsRead(can_run=can_run, can_manage=can_manage),
