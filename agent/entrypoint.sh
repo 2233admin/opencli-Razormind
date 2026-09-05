@@ -3,6 +3,7 @@ set -e
 
 HAVE_CHROME=false
 if command -v chromium >/dev/null 2>&1; then HAVE_CHROME=true; fi
+if [ "${AGENT_HAS_CHROME:-false}" = "true" ]; then HAVE_CHROME=true; fi
 
 BROWSER_RUNTIME_BUNDLE_ROOT="${BROWSER_RUNTIME_BUNDLE_ROOT:-/opt/browser-runtime-bundles}"
 BROWSER_RUNTIME_BUNDLE_MANIFEST="${BROWSER_RUNTIME_BUNDLE_MANIFEST:-$BROWSER_RUNTIME_BUNDLE_ROOT/opencli-default/2/manifest.json}"
@@ -80,7 +81,7 @@ if [ "$HAVE_CHROME" = "true" ]; then
     echo "[agent] WARNING: Bridge daemon not found at $DAEMON_JS"
   fi
 
-  BROWSER_ENGINE="${BROWSER_ENGINE:-chromium}"
+  BROWSER_ENGINE="${BROWSER_ENGINE-chromium}"
   CHROME_BIN="$(node /usr/local/bin/resolve-browser-executable.mjs "$BROWSER_ENGINE")" || {
     echo "[agent] Browser engine resolution failed for $BROWSER_ENGINE" >&2
     exit 1

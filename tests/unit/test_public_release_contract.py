@@ -33,7 +33,7 @@ def source_docker_recipes(readme: str) -> list[str]:
     return [
         block
         for block in re.findall(r"~~~bash\n(.*?)\n~~~", readme, re.DOTALL)
-        if "docker-compose.build.yml" in block
+        if "# 仅首次执行以下初始化步骤" in block
     ]
 
 
