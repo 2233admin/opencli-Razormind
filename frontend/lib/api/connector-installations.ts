@@ -63,6 +63,11 @@ export type ConnectorBinding = {
   updated_at: string
 }
 
+export type ConnectorWorkspaceMember = {
+  subject: string
+  role: string
+}
+
 function installationPath(workspaceId: string) {
   return `/workspaces/${encodeURIComponent(workspaceId)}/connector-installations`
 }
@@ -79,6 +84,9 @@ export const connectorMyBindingQueryKey = (
   workspaceId: string | null,
   installationId: string | null,
 ) => ['connector-my-binding', workspaceId, installationId] as const
+
+export const connectorWorkspaceMembersQueryKey = (workspaceId: string | null) =>
+  ['connector-workspace-members', workspaceId] as const
 
 export async function listConnectorInstallations(workspaceId: string) {
   const response = await apiClient.get<ApiResponse<ConnectorInstallation[]>>(installationPath(workspaceId))
@@ -136,6 +144,13 @@ export async function revokeConnectorBinding(workspaceId: string, bindingId: str
   return response.data.data
 }
 
+export async function listConnectorWorkspaceMembers(workspaceId: string) {
+  const response = await apiClient.get<ApiResponse<ConnectorWorkspaceMember[]>>(
+    `/workspaces/${encodeURIComponent(workspaceId)}/members`,
+  )
+  return response.data.data
+}
+
 export function useConnectorInstallations(workspaceId: string | null) {
   return useQuery({
     queryKey: connectorInstallationsQueryKey(workspaceId),
@@ -162,6 +177,22 @@ export function useMyConnectorBinding(workspaceId: string | null, installationId
     queryFn: () => getMyConnectorBinding(workspaceId as string, installationId as string),
     enabled: Boolean(workspaceId && installationId),
   })
+}
+
+export function useConnectorWorkspaceMemberRole(
+  workspaceId: string | null,
+  subject: string | null,
+) {
+  const query = useQuery({
+    queryKey: connectorWorkspaceMembersQueryKey(workspaceId),
+    queryFn: () => listConnectorWorkspaceMembers(workspaceId as string),
+    enabled: Boolean(workspaceId && subject),
+  })
+  const member = query.data?.find((candidate) => candidate.subject === subject) ?? null
+  // Keep unknown roles and unavailable permission data read-only. These are the
+  // only existing roles that grant configuration.manage in the backend RBAC map.
+  const canManageConfiguration = member?.role === 'admin' || member?.role === 'maintainer'
+  return { ...query, member, canManageConfiguration }
 }
 
 export function useCreateConnectorInstallation() {

@@ -5,6 +5,7 @@ import { Copy, KeyRound, Loader2, Link2, Plus, RefreshCw, ShieldAlert, Unlink } 
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { toast } from 'sonner'
 
+import { useAuth } from '@/components/auth/auth-provider'
 import { useGovernedWorkspaces } from '@/lib/api/hooks'
 import {
   useConnectorInstallationHealth,
@@ -13,6 +14,7 @@ import {
   useCreateConnectorInstallation,
   useMyConnectorBinding,
   useRevokeConnectorBinding,
+  useConnectorWorkspaceMemberRole,
   useUpdateConnectorInstallation,
   type ConnectorBindingChallenge,
   type ConnectorInstallation,
@@ -134,7 +136,7 @@ function InstallationForm({ workspaceId, installation }: InstallationFormProps) 
           <DialogHeader>
             <DialogTitle>{editing ? '编辑飞书消息连接' : '安装飞书消息连接'}</DialogTitle>
             <DialogDescription>
-              凭据只通过本次请求写入服务端加密存储；前端不会把秘密写入 URL、本地存储或日志。
+              保存后不会再次显示秘密；编辑时秘密留空则保留现有值。
             </DialogDescription>
           </DialogHeader>
 
@@ -158,13 +160,15 @@ function InstallationForm({ workspaceId, installation }: InstallationFormProps) 
             </div>
           </div>
 
-          <label className="flex items-center justify-between rounded-md border p-3 text-sm">
-            <span>
-              <span className="block font-medium">启用安装</span>
-              <span className="mt-0.5 block text-xs text-muted-foreground">停用后不能生成新的绑定指令。</span>
-            </span>
-            <input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} className="size-4 accent-primary" />
-          </label>
+          {editing ? (
+            <label className="flex items-center justify-between rounded-md border p-3 text-sm">
+              <span>
+                <span className="block font-medium">启用安装</span>
+                <span className="mt-0.5 block text-xs text-muted-foreground">停用后不能生成新的绑定指令。</span>
+              </span>
+              <input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} className="size-4 accent-primary" />
+            </label>
+          ) : null}
 
           <DialogFooter>
             <Button type="submit" disabled={pending}>
@@ -209,7 +213,7 @@ function CapabilityState({ label, ready }: { label: string; ready: boolean }) {
   )
 }
 
-function InstallationCard({ workspaceId, installation }: { workspaceId: string; installation: ConnectorInstallation }) {
+function InstallationCard({ workspaceId, installation, canManageConfiguration }: { workspaceId: string; installation: ConnectorInstallation; canManageConfiguration: boolean }) {
   const health = useConnectorInstallationHealth(workspaceId, installation.installation_public_id)
   const binding = useMyConnectorBinding(workspaceId, installation.installation_public_id)
   const challenge = useCreateConnectorBindingChallenge()
@@ -318,7 +322,7 @@ function InstallationCard({ workspaceId, installation }: { workspaceId: string; 
                 <Copy className="size-3" />{copied ? '已复制' : '复制'}
               </Button>
             </div>
-            <p className="mt-2 text-[11px] leading-4 text-muted-foreground">请在绑定入口执行这条一次性指令。绑定完成后刷新当前用户绑定状态。</p>
+            <p className="mt-2 text-[11px] leading-4 text-muted-foreground">请将这条一次性指令私聊发送给对应的飞书机器人。绑定完成后刷新当前用户绑定状态。</p>
           </div>
         ) : null}
 
@@ -330,7 +334,7 @@ function InstallationCard({ workspaceId, installation }: { workspaceId: string; 
           <Button type="button" size="sm" variant="outline" onClick={() => { void health.refetch(); void binding.refetch() }} disabled={health.isFetching || binding.isFetching}>
             <RefreshCw className={health.isFetching || binding.isFetching ? 'size-3.5 animate-spin' : 'size-3.5'} />刷新状态
           </Button>
-          <InstallationForm workspaceId={workspaceId} installation={installation} />
+          {canManageConfiguration ? <InstallationForm workspaceId={workspaceId} installation={installation} /> : null}
         </div>
       </CardContent>
     </Card>
@@ -338,6 +342,7 @@ function InstallationCard({ workspaceId, installation }: { workspaceId: string; 
 }
 
 export function FeishuConnectorInstallationPanel() {
+  const { identity } = useAuth()
   const pathname = usePathname()
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -346,6 +351,8 @@ export function FeishuConnectorInstallationPanel() {
   const selectedWorkspace = workspaces.data?.find((workspace) => workspace.id === requestedWorkspaceId) ?? null
   const workspaceId = selectedWorkspace?.id ?? null
   const installations = useConnectorInstallations(workspaceId)
+  const workspaceAccess = useConnectorWorkspaceMemberRole(workspaceId, identity?.subject ?? null)
+  const canManageConfiguration = workspaceAccess.isSuccess && workspaceAccess.canManageConfiguration
 
   function selectWorkspace(nextWorkspaceId: string) {
     const params = new URLSearchParams(searchParams.toString())
@@ -360,15 +367,15 @@ export function FeishuConnectorInstallationPanel() {
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="min-w-0">
           <h2 id="feishu-connector-title" className="text-base font-semibold">飞书消息连接</h2>
-          <p className="mt-1 max-w-3xl text-sm leading-5 text-muted-foreground">按 Workspace 配置 Feishu 消息接收、健康状态和当前用户绑定。它与飞书多维表格投递连接分开管理。</p>
+          <p className="mt-1 max-w-3xl text-sm leading-5 text-muted-foreground">连接飞书机器人，管理消息接收与账号绑定。</p>
         </div>
-        {workspaceId ? <InstallationForm workspaceId={workspaceId} /> : null}
+        {workspaceId && canManageConfiguration ? <InstallationForm workspaceId={workspaceId} /> : null}
       </div>
 
       <div className="flex flex-col gap-2 rounded-lg border bg-muted/15 p-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <Label htmlFor="feishu-connector-workspace">配置 Workspace</Label>
-          <p className="mt-1 text-xs text-muted-foreground">只读取你已授权的 governed Workspace；不会把 Studio Workspace ID 当作授权范围。</p>
+          <p className="mt-1 text-xs text-muted-foreground">只显示你有访问权限的 Workspace。</p>
         </div>
         <select
           id="feishu-connector-workspace"
@@ -390,17 +397,21 @@ export function FeishuConnectorInstallationPanel() {
       ) : null}
       {workspaces.isSuccess && !workspaceId ? <EmptyState title="尚未选择 Workspace" description="选择一个已授权 Workspace 后，才能读取或安装飞书消息连接。" /> : null}
 
+      {workspaceId && workspaceAccess.isLoading ? <p role="status" className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">正在读取 Workspace 配置权限…</p> : null}
+      {workspaceId && workspaceAccess.isError ? <p role="alert" className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-xs text-destructive">无法读取 Workspace 配置权限，已隐藏安装和编辑操作；你仍可查看连接并管理本人绑定。</p> : null}
+      {workspaceId && workspaceAccess.isSuccess && !canManageConfiguration ? <p className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">当前账号可查看连接并管理本人绑定；安装或编辑连接需要 Workspace 配置权限。</p> : null}
+
       {workspaceId && installations.isLoading ? <LoadingState /> : null}
       {workspaceId && installations.isError ? <ErrorState message={(installations.error as Error)?.message} hint={BACKEND_HINT} /> : null}
       {workspaceId && installations.isSuccess && installations.data.length === 0 ? (
         <div className="flex flex-col gap-3">
-          <EmptyState title="暂无飞书消息连接" description="安装连接后，可以生成当前用户的绑定指令并查看回调健康状态。" />
-          <div className="flex justify-center"><InstallationForm workspaceId={workspaceId} /></div>
+          <EmptyState title="暂无飞书消息连接" description={canManageConfiguration ? '安装连接后，可以生成当前用户的绑定指令并查看回调健康状态。' : '当前没有可查看的飞书消息连接；安装连接需要 Workspace 配置权限。'} />
+          {canManageConfiguration ? <div className="flex justify-center"><InstallationForm workspaceId={workspaceId} /></div> : null}
         </div>
       ) : null}
       {workspaceId && installations.isSuccess && installations.data.length ? (
         <div className="grid gap-3">
-          {installations.data.map((installation) => <InstallationCard key={installation.installation_public_id} workspaceId={workspaceId} installation={installation} />)}
+          {installations.data.map((installation) => <InstallationCard key={installation.installation_public_id} workspaceId={workspaceId} installation={installation} canManageConfiguration={canManageConfiguration} />)}
         </div>
       ) : null}
     </section>
