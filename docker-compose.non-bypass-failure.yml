@@ -47,6 +47,7 @@ services:
       TARGET_PORT: "5432"
       GATE_PORT: "5432"
       PROOF_ARTIFACT_DIR: /proof-artifacts
+      RELAY_TRACE: ${RELAY_TRACE:-}
     volumes:
       - ${PROOF_ARTIFACT_DIR:-./.artifacts/non-bypass-failures}:/proof-artifacts
     networks: [proof-control, proof-fault]

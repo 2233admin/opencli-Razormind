@@ -22,6 +22,11 @@ _TARGET_HOST = os.environ.get("TARGET_HOST", "proof-admin-postgres")
 _TARGET_PORT = int(os.environ.get("TARGET_PORT", "5432"))
 _GATE_PORT = int(os.environ.get("GATE_PORT", "5432"))
 _COORDINATION_ROOT = Path(os.environ.get("PROOF_ARTIFACT_DIR", "/proof-artifacts")) / "coordination"
+def _trace(message: str) -> None:
+    if os.environ.get("RELAY_TRACE") == "1":
+        print(f"admin-pg-relay: {message}", flush=True)
+
+
 
 
 
@@ -260,12 +265,16 @@ class CancellationGate:
     async def should_hold(self, flow: ConnectionFlow, frame: FrontendFrame) -> bool:
         flow.should_hold(frame)
         sql = flow._sql(frame)
+        normalized = _normalized_sql(sql)
         async with self._lock:
             if not self._armed or self._held:
                 return False
+            if b"delivery_executions" in normalized:
+                _trace(f"stage={self._stage} sql={normalized.decode('utf-8', 'replace')}")
             if self._stage == "await_claim" and _execution_claim(sql):
                 self._claim_flow = flow
                 self._stage = "await_reservation"
+                _trace("claim")
             elif (
                 self._stage == "await_reservation"
                 and self._claim_flow is flow
@@ -273,6 +282,7 @@ class CancellationGate:
             ):
                 self._reservation_flow = flow
                 self._stage = "await_commit"
+                _trace("reservation")
             elif (
                 self._stage == "await_commit"
                 and self._reservation_flow is flow
@@ -280,12 +290,14 @@ class CancellationGate:
             ):
                 self._stage = "await_commit_success"
                 self._commit_completed = False
+                _trace("commit-sent")
             elif self._stage == "await_locked_read" and _locked_execution_read(sql):
                 self._held = True
                 _COORDINATION_ROOT.mkdir(parents=True, exist_ok=True)
                 (
                     _COORDINATION_ROOT / f"{self._run}.cancel-before-dispatch-held"
                 ).write_text("held", encoding="utf-8")
+                _trace("held")
                 return True
             return False
 
@@ -299,10 +311,13 @@ class CancellationGate:
                 self._claim_flow = None
                 self._reservation_flow = None
                 self._commit_completed = False
+                _trace("commit-error")
             elif frame.message_type == b"C" and frame.body.startswith(b"COMMIT\0"):
                 self._commit_completed = True
+                _trace("commit-confirmed")
             elif frame.message_type == b"Z" and self._commit_completed:
                 self._stage = "await_locked_read"
+                _trace("await-locked-read")
 
     async def wait_for_release(self) -> None:
         try:
