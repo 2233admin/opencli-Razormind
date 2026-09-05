@@ -9,6 +9,7 @@ import pytest
 SEEDED_WITH_MANIFEST = {
     "ecommerce/taobao-keyword-search",
     "search-research/google-search-serp",
+    "video-platforms/kuaishou-search",
 }
 
 
