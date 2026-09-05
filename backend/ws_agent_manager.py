@@ -67,6 +67,8 @@ _connections: dict[str, WebSocket] = {}
 
 # request_id → Future awaiting agent result (collect/result path)
 _pending: dict[str, asyncio.Future] = {}
+_collect_owners: dict[str, WebSocket] = {}
+_task_owners: dict[str, WebSocket] = {}
 
 # request_id → Future awaiting the terminal agent_result (agent_task path)
 _pending_agent_tasks: dict[str, asyncio.Future] = {}
@@ -77,19 +79,24 @@ _agent_task_callbacks: dict[str, tuple[Callable[[dict[str, Any]], Any], str]] = 
 
 def register_connection(agent_url: str, ws: WebSocket) -> None:
     """Record a newly-established WS connection for agent_url."""
+    previous = _connections.get(agent_url)
+    if previous is not None and previous is not ws:
+        unregister_connection(agent_url, previous)
+        asyncio.get_running_loop().create_task(previous.close(code=1012))
     _connections[agent_url] = ws
     logger.info("WS agent connected: %s (total=%d)", agent_url, len(_connections))
 
 
-def unregister_connection(agent_url: str) -> None:
-    """Remove a WS connection and fail all its pending futures.
-
-    Collect-path futures (``_pending``) are left for their own timeout — no
-    request_id → agent_url reverse index exists for that path, matching prior
-    behavior. Agent-task futures (``_pending_agent_tasks``) ARE indexed by
-    owning agent_url, so on disconnect we resolve them immediately with an
-    AgentDisconnected error instead of leaving them to hang until timeout.
-    """
+def unregister_connection(agent_url: str, source_ws: WebSocket | None = None) -> bool:
+    """Fail this transport's pending work without unregistering a replacement."""
+    current = _connections.get(agent_url)
+    if current is None or (source_ws is not None and current is not source_ws):
+        return False
+    for request_id, owner in list(_collect_owners.items()):
+        if owner is current:
+            future = _pending.get(request_id)
+            if future is not None and not future.done():
+                future.set_exception(RuntimeError("Agent disconnected before collection completed"))
     _connections.pop(agent_url, None)
     logger.info("WS agent disconnected: %s (remaining=%d)", agent_url, len(_connections))
 
@@ -108,6 +115,7 @@ def unregister_connection(agent_url: str) -> None:
                 "error_type": "AgentDisconnected",
             })
         _agent_task_callbacks.pop(request_id, None)
+    return True
 
 
 def is_connected(agent_url: str) -> bool:
@@ -144,9 +152,12 @@ async def dispatch_collect(
         raise RuntimeError(f"No active WS connection for agent: {agent_url}")
 
     request_id = request_id or str(uuid.uuid4())
+    if request_id in _pending or request_id in _pending_agent_tasks:
+        raise ValueError("request_id is already active")
     loop = asyncio.get_running_loop()
     fut: asyncio.Future[dict] = loop.create_future()
     _pending[request_id] = fut
+    _collect_owners[request_id] = ws
 
     try:
         await ws.send_json({
@@ -169,11 +180,16 @@ async def dispatch_collect(
         raise
     finally:
         _pending.pop(request_id, None)
+        _collect_owners.pop(request_id, None)
 
 
-def resolve_response(request_id: str, result: dict[str, Any]) -> None:
+def resolve_response(
+    request_id: str, result: dict[str, Any], source_ws: WebSocket | None = None
+) -> None:
     """Called from the WS receive loop when an agent returns a 'result' message."""
     fut = _pending.get(request_id)
+    if source_ws is not None and _collect_owners.get(request_id) is not source_ws:
+        return
     if fut is None or fut.done():
         logger.warning("WS: unexpected result for request_id=%s (no waiting future)", request_id)
         return
@@ -213,6 +229,7 @@ async def send_agent_task(
     loop = asyncio.get_running_loop()
     fut: asyncio.Future[dict] = loop.create_future()
     _pending_agent_tasks[request_id] = fut
+    _task_owners[request_id] = ws
     _agent_task_callbacks[request_id] = (on_event, agent_url)
 
     try:
@@ -228,6 +245,7 @@ async def send_agent_task(
         raise
     finally:
         _pending_agent_tasks.pop(request_id, None)
+        _task_owners.pop(request_id, None)
         _agent_task_callbacks.pop(request_id, None)
 
 
@@ -248,11 +266,15 @@ async def _invoke_on_event(
         await result
 
 
-async def resolve_agent_event(request_id: str, msg: dict[str, Any]) -> None:
+async def resolve_agent_event(
+    request_id: str, msg: dict[str, Any], source_ws: WebSocket | None = None
+) -> None:
     """Called from the WS receive loop when an agent sends an 'agent_event' frame."""
     entry = _agent_task_callbacks.get(request_id)
     if entry is None:
         logger.warning("WS: unexpected agent_event for request_id=%s (no waiting task)", request_id)
+        return
+    if source_ws is not None and _task_owners.get(request_id) is not source_ws:
         return
     on_event, _owner = entry
     event = msg.get("event", {})
@@ -264,9 +286,13 @@ async def resolve_agent_event(request_id: str, msg: dict[str, Any]) -> None:
         if fut is not None and not fut.done():
             fut.set_exception(exc)
 
-def resolve_agent_result(request_id: str, msg: dict[str, Any]) -> None:
+def resolve_agent_result(
+    request_id: str, msg: dict[str, Any], source_ws: WebSocket | None = None
+) -> None:
     """Called from the WS receive loop when an agent sends the terminal 'agent_result' frame."""
     fut = _pending_agent_tasks.get(request_id)
+    if source_ws is not None and _task_owners.get(request_id) is not source_ws:
+        return
     if fut is None or fut.done():
         logger.warning(
             "WS: unexpected agent_result for request_id=%s (no waiting future)",
