@@ -1,6 +1,6 @@
 # OpenAlice 基础模块整合验收
 
-日期：2026-09-06。任务事实源为 [父任务 #116](https://github.com/2233admin/opencli-Razormind/issues/116)。最新状态：#121 读取与完整生产来源、#122 阅读器、#123 工作状态与 #124 项目/Inbox 接线已通过各自验收。#125 基础已整合测试，但独立审查发现 SDK 降级路径，正在修正；连接设置前端并行实施。整批任务和主分支合并尚未完成。
+日期：2026-09-06。任务事实源为 [父任务 #116](https://github.com/2233admin/opencli-Razormind/issues/116)。最新状态：#121 读取与完整生产来源、#122 阅读器、#123 工作状态与 #124 项目/Inbox 接线已通过各自验收。#125 严格接入基础修复和连接设置界面现已通过真实测试与独立复审，已更新到隔离预览；原会话回复、出站和产物授权仍在下一阶段。整批任务和主分支合并尚未完成。
 
 ## 整合范围
 
@@ -82,3 +82,18 @@ SDK 要求 websockets>=11,<16，锁文件因此从16.1.1调整到15.0.1。Luna �
 Sol 在connector工作树修正上述边界，并增加仅当前用户的my-binding读取；Luna在独立UI工作树按[前端合同](https://github.com/2233admin/opencli-Razormind/issues/125#issuecomment-5555391202)复用/providers/catalog实现安装、本人绑定和健康状态，不把callback readiness当作已绑定。完整原Agent回复/出站/产物grant留待下一波，不展示虚假的发送能力。
 
 后续会话grant需明确处理conversation.revision随正常turn递增的事实：不能让grant因自身成功回复而失效，也不能跳过关闭、授权context变更、撤销和降权重检。此为第二波待审合同要求，尚无对应实现。本轮仍未重启或变更8046/8047预览、原有业务服务或业务数据库。
+
+## 严格接入与配置界面验收
+
+此前的 SDK 降级问题已由 `a4dfce5b` 修复并整合为 `fc341ca5`，原独立 reviewer 接受。协调者在整合树使用真实固定 SDK wheel 和临时 SQLite 重跑 migration、runtime、receipt、installation 及实际 create_app callback 测试，49 项通过。完整凭据门禁、唯一加密 envelope/签名头、SDK 验签解密、reply target 上限、错误脱敏、停用/撤销后的已验签持久拒绝与 ACK、本人绑定读取均在此次范围内。[后端验收记录](https://github.com/2233admin/opencli-Razormind/issues/125#issuecomment-5555574416) 已发布并远端回读。
+
+连接设置页面复用 `/providers/catalog`，`b3dccbf3` 和 `2a88fcdf` 分别整合为 `c4fa638e`、`828e37df`。界面读取真实 governed Workspace 成员角色，仅管理员/维护者显示安装和编辑；本人绑定来自独立 my-binding API，未把配置就绪误标为本人已绑定。新建表单不提供后端不支持的启停选项，编辑时秘密留空保留现值。独立 UI 审查接受授权与秘密边界。
+
+协调者在 `85d9ac81` 补齐可重复的隔离浏览器验收，复用现有 OpenAlice runner，新增局部虚构工作区 fixture。测试使用真实 Next 页面、HTTP、SQLite 和固定 SDK；只在本机使用虚构密钥构造加密签名事件，没有响应拦截或真实飞书请求。专用配置隔离于默认 smoke 套件。
+
+- `node node_modules/@playwright/test/cli.js test --config playwright.feishu-connectors.config.mjs`：2 条完整浏览器测试通过。包含安装、API 不返回秘密、健康状态、生成绑定指令、真实加密 callback 及重推、刷新已绑定、UI 撤销、编辑秘密空白、停用后禁用绑定、375px 无溢出、跨 Workspace 拒绝，以及 Viewer 可以管理本人绑定但不能编辑安装。
+- 全量 TypeScript、面板/API/测试配置定向 ESLint、fixture/runner Ruff 和 `git diff --check` 通过。
+- 临时测试端口 8048/8051 已释放；用户预览保持 8047，8046 只重启隔离后端加载新代码。预览 SQLite 备份后仅新增四张 connector 表和一条明确标注模拟、已停用的连接，不执行其他表迁移。
+- 另以正常本地登录实际检查 8047 配置页：真实角色、模拟连接、未绑定状态、停用限制、秘密不回显、375px 无溢出、无 pageerror，桌面与手机截图已检查。
+
+本轮路由：Sol 负责 P1 安全边界修复，Luna 负责配置 UI，协调者补真实 SDK 浏览器闭环、整合和预览，独立 reviewer 分别复审后端和 UI。当前 P2 执行合同在独立安全审阅；健康页面明确提示回复与产物领取尚不可用。业务数据、真实模型/飞书消息和远程主分支未改动，父目标最终独立验收仍未执行。
