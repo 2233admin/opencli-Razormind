@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import json
-from collections.abc import Mapping
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response, status
+from fastapi.exceptions import RequestValidationError
+from fastapi.routing import APIRoute
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.database import get_db
@@ -18,7 +18,7 @@ from backend.schemas.browser_space import (
     BrowserSpaceTaskRead,
 )
 from backend.schemas.common import ApiResponse
-from backend.security.identity import RequestIdentity, get_request_identity
+from backend.security.identity import RequestIdentity, get_request_identity, is_platform_admin
 from backend.security.workspace_rbac import (
     WorkspaceAccess,
     WorkspacePermission,
@@ -27,61 +27,44 @@ from backend.security.workspace_rbac import (
 )
 from backend.services import browser_space_service
 
+
+class BrowserSpaceRoute(APIRoute):
+    """Validation errors must not echo rejected secret-bearing request inputs."""
+
+    def get_route_handler(self):
+        handler = super().get_route_handler()
+
+        async def bounded_validation(request):
+            try:
+                return await handler(request)
+            except RequestValidationError as exc:
+                raise HTTPException(
+                    status.HTTP_422_UNPROCESSABLE_ENTITY, "invalid_request"
+                ) from exc
+
+        return bounded_validation
+
+
 router = APIRouter(
     prefix="/workspaces/{workspace_id}/browser-spaces",
     tags=["browser-spaces"],
-)
-
-_MAX_PAYLOAD_BYTES = 64 * 1024
-_SENSITIVE_KEYS = frozenset(
-    {
-        "agent_url",
-        "authorization",
-        "authorization_header",
-        "cookie",
-        "cookies",
-        "cdp_endpoint",
-        "credential",
-        "credentials",
-        "endpoint",
-        "headers",
-        "password",
-        "profile_path",
-        "secret",
-        "token",
-    }
+    route_class=BrowserSpaceRoute,
 )
 
 
 def _safe_payload(value: Any) -> Any:
     """Return a bounded, secret-free representation suitable for an API response."""
-    if isinstance(value, Mapping):
-        clean = {
-            str(key): _safe_payload(item)
-            for key, item in value.items()
-            if str(key).lower().replace("-", "_") not in _SENSITIVE_KEYS
-        }
-    elif isinstance(value, (list, tuple)):
-        clean = [_safe_payload(item) for item in value]
-    elif isinstance(value, (str, int, float, bool)) or value is None:
-        clean = value
-    else:
-        clean = str(value)
-
-    try:
-        encoded = json.dumps(clean, ensure_ascii=False, separators=(",", ":"))
-    except (TypeError, ValueError):
-        return {"truncated": True, "reason": "result_not_serializable"}
-    if len(encoded.encode("utf-8")) > _MAX_PAYLOAD_BYTES:
-        return {"truncated": True, "reason": "result_too_large"}
-    return clean
+    return browser_space_service._safe_result(value)
 
 
-def _space_read(space: Any, active_task: Any = None) -> BrowserSpaceRead:
+def _space_read(space: Any, latest_task: Any = None) -> BrowserSpaceRead:
     result = BrowserSpaceRead.model_validate(space)
-    if active_task is not None:
-        result.active_task = _task_read(active_task)
+    if latest_task is not None:
+        result.latest_task = _task_read(latest_task)
+        if latest_task.status in {"queued", "running"}:
+            result.active_task = result.latest_task
     return result
+
 
 def _task_read(task: Any) -> BrowserSpaceTaskRead:
     return BrowserSpaceTaskRead(
@@ -144,6 +127,19 @@ async def list_browser_spaces(
     return ApiResponse.ok([_space_read(space) for space in spaces])
 
 
+@router.get("/instances", response_model=ApiResponse[list[dict[str, Any]]])
+async def list_available_browser_instances(
+    workspace_id: str,
+    identity: RequestIdentity = Depends(get_request_identity),
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse:
+    access = await get_workspace_access(db, workspace_id, identity)
+    require_permission(access, WorkspacePermission.MANAGE_CONFIGURATION)
+    if not is_platform_admin(identity):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "platform_admin_required")
+    return ApiResponse.ok(await browser_space_service.available_instances(db))
+
+
 @router.post("", response_model=ApiResponse[BrowserSpaceRead], status_code=status.HTTP_201_CREATED)
 async def create_browser_space(
     workspace_id: str,
@@ -153,6 +149,8 @@ async def create_browser_space(
 ) -> ApiResponse:
     access = await get_workspace_access(db, workspace_id, identity)
     require_permission(access, WorkspacePermission.MANAGE_CONFIGURATION)
+    if not is_platform_admin(identity):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "platform_admin_required")
     if body.owner_type == "operator" and body.owner_id != identity.subject:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Browser Space owner permission required")
     try:
@@ -175,7 +173,7 @@ async def get_browser_space(
         space = await browser_space_service.get_space(
             db, workspace_id, space_id, _space_identity(identity, access)
         )
-        active_task = await browser_space_service.get_latest_task(db, space.id)
+        active_task = await browser_space_service.get_latest_task(db, space.id, active_only=False)
     except browser_space_service.BrowserSpaceError as exc:
         raise _service_error(exc) from exc
     return ApiResponse.ok(_space_read(space, active_task))
@@ -209,11 +207,14 @@ async def submit_browser_space_task(
     except browser_space_service.BrowserSpaceError as exc:
         raise _service_error(exc) from exc
     if created:
+        gate_authorized = is_platform_admin(identity)
         background_tasks.add_task(
             browser_space_service.execute_task_in_background,
             str(task.id),
             body.args,
             body.timeout_seconds,
+            body.gate,
+            gate_authorized,
         )
     response.status_code = status.HTTP_202_ACCEPTED if created else status.HTTP_200_OK
     return ApiResponse.ok(_task_read(task))

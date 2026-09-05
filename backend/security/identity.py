@@ -51,6 +51,16 @@ class RequestIdentity:
     claims: Mapping[str, Any] | None = None
 
 
+def is_platform_admin(identity: RequestIdentity) -> bool:
+    """Accept only verified admin state or an exact role in a structured role list."""
+    if identity.is_platform_admin:
+        return True
+    roles = identity.claims.get("roles") if identity.claims else None
+    return isinstance(roles, (list, tuple)) and any(
+        isinstance(role, str) and role == "platform-admin" for role in roles
+    )
+
+
 class OIDCVerifier:
     def __init__(
         self,

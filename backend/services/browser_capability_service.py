@@ -1,3 +1,4 @@
+import asyncio
 import fnmatch
 import os
 import time
@@ -161,9 +162,14 @@ async def invoke_capability(
             # Persist the audit start, then release all locks before agent I/O.
             await session.commit()
         result = await _dispatch_capability(instance, capability, args)
+        if commit_before_dispatch and result.get("type") == "error":
+            raise BrowserRuntimeError("agent_invocation_failed", "agent reported a runtime failure")
         invocation.output_payload = result
         invocation.page_before = result.get("page_before")
         invocation.page_after = result.get("page_after")
+    except asyncio.CancelledError:
+        invocation.error = {"code": "capability_cancelled", "message": "capability call cancelled"}
+        raise
     except BrowserRuntimeError as exc:
         invocation.error = {"code": exc.code, "message": str(exc)}
         raise

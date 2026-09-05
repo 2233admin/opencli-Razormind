@@ -16,6 +16,7 @@ import {
   getBrowserSpace,
   listBrowserSpaceEvents,
   listBrowserSpaces,
+  listBrowserSpaceInstances,
   submitBrowserSpaceTask,
   type BrowserSpaceCreateRequest,
   type BrowserSpaceEvent,
@@ -72,6 +73,12 @@ export function BrowserSpacesPanel() {
   const searchParams = useSearchParams()
   const workspaces = useMyWorkspaces()
   const workspaceId = searchParams.get('workspace') ?? workspaces.data?.[0]?.id ?? null
+  const instancesQuery = useQuery({
+    queryKey: ['browser-space-instances', workspaceId],
+    queryFn: () => listBrowserSpaceInstances(workspaceId as string),
+    enabled: Boolean(workspaceId),
+    refetchInterval: 5_000,
+  })
   const spacesQuery = useQuery({
     queryKey: ['browser-spaces', workspaceId],
     queryFn: () => listBrowserSpaces(workspaceId as string),
@@ -106,7 +113,8 @@ export function BrowserSpacesPanel() {
     refetchInterval: 2_000,
   })
   const detail = detailQuery.data ?? selectedSpace
-  const activeTask = detailQuery.data?.active_task ?? null
+  const activeTask = detailQuery.data?.latest_task ?? detailQuery.data?.active_task ?? null
+  const taskInProgress = activeTask?.status === 'queued' || activeTask?.status === 'running'
   const capabilities = useMemo(
     () => grantedCapabilities.split(',').map((item) => item.trim()).filter(Boolean),
     [grantedCapabilities],
@@ -124,7 +132,15 @@ export function BrowserSpacesPanel() {
     if (selectedSpaceId && !spaces.some((space) => space.id === selectedSpaceId)) setSelectedSpaceId(spaces[0]?.id ?? null)
   }, [selectedSpaceId, spaces])
 
+  const defaultCapability = selectedSpace?.granted_capabilities[0] ?? ''
+  useEffect(() => {
+    setConfirmAction(null)
+    setRequestId(newRequestId())
+    setCapability(defaultCapability)
+  }, [workspaceId, activeSpaceId, defaultCapability])
+
   const refreshSpaces = () => {
+    void queryClient.invalidateQueries({ queryKey: ['browser-space-instances', workspaceId] })
     void queryClient.invalidateQueries({ queryKey: ['browser-spaces', workspaceId] })
     void queryClient.invalidateQueries({ queryKey: ['browser-space', workspaceId] })
     void queryClient.invalidateQueries({ queryKey: ['browser-space-events', workspaceId] })
@@ -222,7 +238,16 @@ export function BrowserSpacesPanel() {
           <form className="space-y-3" onSubmit={handleCreate}>
             <label className="block space-y-1 text-sm">
               <span>BrowserInstance ID</span>
-              <Input value={browserInstanceId} onChange={(event) => setBrowserInstanceId(event.target.value)} placeholder="已有实例的 opaque ID" disabled={hasMutation || !workspaceId} />
+              <select className="h-9 w-full rounded-md border bg-background px-2 text-sm" value={browserInstanceId} onChange={(event) => {
+                const instance = instancesQuery.data?.find((item) => item.id === event.target.value)
+                setBrowserInstanceId(event.target.value)
+                setGrantedCapabilities(instance?.capabilities.join(', ') ?? '')
+                setCapability(instance?.capabilities[0] ?? '')
+              }} disabled={hasMutation || !workspaceId || !instancesQuery.data?.length}>
+                <option value="">选择可用实例</option>
+                {(instancesQuery.data ?? []).map((instance) => <option key={instance.id} value={instance.id}>{instance.id}</option>)}
+              </select>
+              {instancesQuery.error ? <p role="alert" className="text-xs text-destructive">{errorText(instancesQuery.error)}</p> : null}
             </label>
             <label className="block space-y-1 text-sm">
               <span>Binding ID（可选）</span>
@@ -233,7 +258,7 @@ export function BrowserSpacesPanel() {
               <label className="block space-y-1 text-sm"><span>Owner ID</span><Input value={ownerId} onChange={(event) => setOwnerId(event.target.value)} placeholder="opaque identity" disabled={hasMutation || !workspaceId} /></label>
             </div>
             <label className="block space-y-1 text-sm"><span>授权 Capabilities（逗号分隔）</span><Input value={grantedCapabilities} onChange={(event) => setGrantedCapabilities(event.target.value)} placeholder="page.metadata, page.read" disabled={hasMutation || !workspaceId} /></label>
-            <Button type="submit" className="w-full" disabled={hasMutation || !workspaceId}><Plus className="size-4" />{createMutation.isPending ? '正在创建…' : '创建 Browser Space'}</Button>
+            <Button type="submit" className="w-full" disabled={hasMutation || !workspaceId || !instancesQuery.data?.some((instance) => instance.id === browserInstanceId)}><Plus className="size-4" />{createMutation.isPending ? '正在创建…' : '创建 Browser Space'}</Button>
           </form>
           {createMutation.error ? <p role="alert" className="text-xs text-destructive">{errorCode(createMutation.error) ? `${errorCode(createMutation.error)}：` : ''}{errorText(createMutation.error)}</p> : null}
           <div className="border-t pt-4">
@@ -253,7 +278,7 @@ export function BrowserSpacesPanel() {
                 <Button
                   size="xs"
                   variant={confirmAction === 'cancel' ? 'destructive' : 'outline'}
-                  disabled={hasMutation || detail.status === 'closed'}
+                  disabled={hasMutation || detail.status === 'closed' || !taskInProgress}
                   onClick={() => confirmAction === 'cancel' ? cancelMutation.mutate() : setConfirmAction('cancel')}
                 >
                   <Pause className="size-3" />
@@ -274,8 +299,8 @@ export function BrowserSpacesPanel() {
           {!activeSpaceId ? <EmptyState title="选择一个 Space" description="创建或选择左侧的 Space 后，可提交任务并查看事件。" /> : detailQuery.isLoading ? <LoadingState /> : detailQuery.error ? <ErrorState message={errorText(detailQuery.error)} hint={BACKEND_HINT} /> : detail ? <>
             {detail.last_error_code ? <p role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">运行时错误：{detail.last_error_code}</p> : null}
             <div className="grid gap-2 sm:grid-cols-3"><div className="rounded-md border p-3"><p className="text-xs text-muted-foreground">Space 状态</p><div className="mt-1"><StatusBadge status={detail.status} /></div></div><div className="rounded-md border p-3"><p className="text-xs text-muted-foreground">BrowserInstance</p><p className="mt-1 truncate font-mono text-xs">{detail.browser_instance_id}</p></div><div className="rounded-md border p-3"><p className="text-xs text-muted-foreground">授权能力</p><p className="mt-1 text-xs">{detail.granted_capabilities.join(', ') || '无'}</p></div></div>
-            <form className="space-y-3 rounded-md border p-4" onSubmit={(event) => { event.preventDefault(); submitMutation.mutate() }}><div className="flex items-center justify-between gap-2"><h4 className="font-medium">提交命名 Capability</h4><Badge variant="outline">无共享标签页回退</Badge></div><div className="grid gap-2 sm:grid-cols-2"><label className="block space-y-1 text-sm"><span>Capability</span><Input value={capability} onChange={(event) => setCapability(event.target.value)} list="browser-space-capabilities" disabled={hasMutation || detail.status === 'closed'} /><datalist id="browser-space-capabilities">{detail.granted_capabilities.map((item) => <option key={item} value={item} />)}</datalist></label><label className="block space-y-1 text-sm"><span>Request ID</span><Input value={requestId} onChange={(event) => setRequestId(event.target.value)} maxLength={64} disabled={hasMutation || detail.status === 'closed'} /></label></div><label className="block space-y-1 text-sm"><span>Args（JSON 对象，最大 64 KiB）</span><Textarea value={argsText} onChange={(event) => setArgsText(event.target.value)} rows={4} spellCheck={false} className="font-mono text-xs" disabled={hasMutation || detail.status === 'closed'} /></label><label className="block max-w-48 space-y-1 text-sm"><span>超时（秒，1-600）</span><Input type="number" min={1} max={MAX_TIMEOUT_SECONDS} value={timeoutSeconds} onChange={(event) => setTimeoutSeconds(event.target.value)} disabled={hasMutation || detail.status === 'closed'} /></label><Button type="submit" disabled={hasMutation || detail.status === 'closed'}>{submitMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : null}{submitMutation.isPending ? '正在提交…' : '提交任务'}</Button>{submitMutation.error && errorCode(submitMutation.error) ? <p role="alert" className="text-xs text-destructive">{errorCode(submitMutation.error)}：{errorText(submitMutation.error)}</p> : null}</form>
-            {activeTask ? <div className="rounded-md border p-4"><div className="flex items-center justify-between gap-2"><h4 className="font-medium">当前任务</h4><StatusBadge status={activeTask.status} /></div><p className="mt-2 font-mono text-xs text-muted-foreground">{activeTask.capability ?? '已授权 Capability'} · {activeTask.operation_id}</p>{activeTask.error ? <p role="alert" className="mt-2 text-xs text-destructive">{activeTask.error}</p> : null}{activeTask.result ? <pre className="mt-3 max-h-64 overflow-auto rounded bg-muted/40 p-3 text-xs">{formattedJson(activeTask.result)}</pre> : null}</div> : null}
+            <form className="space-y-3 rounded-md border p-4" onSubmit={(event) => { event.preventDefault(); submitMutation.mutate() }}><div className="flex items-center justify-between gap-2"><h4 className="font-medium">提交命名 Capability</h4><Badge variant="outline">无共享标签页回退</Badge></div><div className="grid gap-2 sm:grid-cols-2"><label className="block space-y-1 text-sm"><span>Capability</span><Input value={capability} onChange={(event) => setCapability(event.target.value)} list="browser-space-capabilities" disabled={hasMutation || detail.status === 'closed'} /><datalist id="browser-space-capabilities">{detail.granted_capabilities.map((item) => <option key={item} value={item} />)}</datalist></label><label className="block space-y-1 text-sm"><span>Request ID</span><Input value={requestId} onChange={(event) => setRequestId(event.target.value)} maxLength={64} disabled={hasMutation || detail.status === 'closed'} /></label></div><label className="block space-y-1 text-sm"><span>Args（JSON 对象，最大 64 KiB）</span><Textarea value={argsText} onChange={(event) => setArgsText(event.target.value)} rows={4} spellCheck={false} className="font-mono text-xs" disabled={hasMutation || detail.status === 'closed'} /></label><label className="block max-w-48 space-y-1 text-sm"><span>超时（秒，1-600）</span><Input type="number" min={1} max={MAX_TIMEOUT_SECONDS} value={timeoutSeconds} onChange={(event) => setTimeoutSeconds(event.target.value)} disabled={hasMutation || detail.status === 'closed'} /></label><Button type="submit" disabled={hasMutation || detail.status === 'closed' || taskInProgress}>{submitMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : null}{submitMutation.isPending ? '正在提交…' : '提交任务'}</Button>{submitMutation.error ? <p role="alert" className="text-xs text-destructive">{errorCode(submitMutation.error)}：{errorText(submitMutation.error)}</p> : null}</form>
+            {activeTask ? <div className="rounded-md border p-4"><div className="flex items-center justify-between gap-2"><h4 className="font-medium">最近任务</h4><StatusBadge status={activeTask.status} /></div><p className="mt-2 font-mono text-xs text-muted-foreground">{activeTask.capability ?? '已授权 Capability'} · {activeTask.operation_id}</p>{activeTask.error ? <p role="alert" className="mt-2 text-xs text-destructive">{activeTask.error}</p> : null}{activeTask.result ? <pre className="mt-3 max-h-64 overflow-auto rounded bg-muted/40 p-3 text-xs">{formattedJson(activeTask.result)}</pre> : null}</div> : null}
             <div className="rounded-md border p-4"><h4 className="font-medium">事件时间线</h4>{eventsQuery.isLoading ? <LoadingState /> : eventsQuery.error ? <ErrorState message={errorText(eventsQuery.error)} hint={BACKEND_HINT} /> : (eventsQuery.data?.events ?? []).length === 0 ? <p className="mt-3 text-xs text-muted-foreground">暂无事件</p> : <ol className="mt-3 space-y-2">{(eventsQuery.data?.events ?? []).map((event) => <li key={event.id} className="flex gap-3 border-l-2 border-muted pl-3 text-xs"><span className="font-mono text-muted-foreground">#{event.sequence}</span><span><strong>{eventLabel(event)}</strong><span className="ml-2 text-muted-foreground">{event.created_at}</span>{event.payload && Object.keys(event.payload).length > 0 ? <pre className="mt-1 max-h-24 overflow-auto rounded bg-muted/40 p-2 text-[11px]">{formattedJson(event.payload)}</pre> : null}</span></li>)}</ol>}</div>
           </> : null}
         </section>

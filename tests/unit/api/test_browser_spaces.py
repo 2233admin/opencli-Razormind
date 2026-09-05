@@ -68,6 +68,7 @@ async def _client(monkeypatch, *, identity=None):
 
     app.dependency_overrides[get_db] = override_db
     if identity is not None:
+
         async def override_identity():
             return identity
 
@@ -111,7 +112,9 @@ async def test_create_maps_reservation_conflict_to_409(monkeypatch):
         )
 
     monkeypatch.setattr(browser_spaces.browser_space_service, "create_space", fail)
-    async with await _client(monkeypatch, identity=RequestIdentity(subject="operator-1")) as client:
+    async with await _client(
+        monkeypatch, identity=RequestIdentity(subject="operator-1", is_platform_admin=True)
+    ) as client:
         response = await client.post(
             "/workspaces/workspace-1/browser-spaces",
             json={
@@ -129,6 +132,7 @@ async def test_create_maps_reservation_conflict_to_409(monkeypatch):
 @pytest.mark.asyncio
 async def test_idempotent_task_response_is_200(monkeypatch):
     identity = RequestIdentity(subject="operator-1")
+
     async def get_space(*_args, **_kwargs):
         return _space()
 
@@ -167,7 +171,9 @@ async def test_new_task_is_scheduled_after_accepted_response(monkeypatch):
         assert _kwargs["execute"] is False
         return _task(), True
 
-    async def schedule(task_id, args, timeout_seconds):
+    async def schedule(task_id, args, timeout_seconds, gate, gate_authorized):
+        assert gate is None
+        assert gate_authorized is False
         scheduled.append((task_id, args, timeout_seconds))
 
     monkeypatch.setattr(browser_spaces.browser_space_service, "get_space", get_space)
@@ -195,8 +201,10 @@ async def test_new_task_is_scheduled_after_accepted_response(monkeypatch):
 @pytest.mark.asyncio
 async def test_event_replay_is_ordered_bounded_and_redacted(monkeypatch):
     identity = RequestIdentity(subject="operator-1")
+
     async def list_events(*_args, **_kwargs):
         return [_event()]
+
     async with await _client(monkeypatch, identity=identity) as client:
         monkeypatch.setattr(browser_spaces.browser_space_service, "list_events", list_events)
         response = await client.get(

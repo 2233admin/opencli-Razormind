@@ -3,11 +3,13 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import math
 import re
 import uuid
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any, Protocol
+from urllib.parse import urlparse
 
 from sqlalchemy import select, text, update
 from sqlalchemy.exc import IntegrityError
@@ -23,8 +25,10 @@ from backend.models.browser_space import (
     BrowserSpaceTaskStatus,
 )
 from backend.models.identity import Workspace
-from backend.security.identity import RequestIdentity
+from backend.security.identity import RequestIdentity, is_platform_admin
 from backend.security.workspace_rbac import get_workspace_access
+from backend.services import browser_capability_service
+from backend.services.browser_service import BrowserRuntimeError, get_runtime_bundle
 
 _MAX_PAYLOAD_BYTES = 64 * 1024
 _MAX_ERROR_MESSAGE = 2_000
@@ -71,6 +75,10 @@ class BrowserSpaceExecutor(Protocol):
 class CapabilityExecutor:
     """Adapter that keeps all browser side effects behind the capability service."""
 
+    def __init__(self, gate: str | None = None, gate_authorized: bool = False) -> None:
+        self.gate = gate
+        self.gate_authorized = gate_authorized
+
     async def execute(
         self,
         *,
@@ -91,20 +99,25 @@ class CapabilityExecutor:
                 raise BrowserSpaceError(
                     "isolation_unavailable", "browser instance is unavailable", 409
                 )
-            invocation = await invoke_capability(
-                runtime_session,
-                runtime_instance,
-                capability,
-                args,
-                gate=None,
-                gate_authorized=False,
-                audit_input_payload=_safe_result(args),
-            )
-            await runtime_session.commit()
+            try:
+                invocation = await invoke_capability(
+                    runtime_session,
+                    runtime_instance,
+                    capability,
+                    args,
+                    gate=self.gate,
+                    gate_authorized=self.gate_authorized,
+                    audit_input_payload=_safe_result(args),
+                    commit_before_dispatch=True,
+                )
+            finally:
+                await runtime_session.commit()
             return invocation.output_payload or {}
 
     async def cancel(self, task_id: str) -> bool:
-        return True
+        # The current Agent protocols have no acknowledged runtime cancellation.
+        # Keep the lease until the original call returns instead of claiming cleanup.
+        return False
 
     async def release(self, space_id: str) -> None:
         return None
@@ -153,21 +166,34 @@ def _redact(value: Any, *, depth: int = 0) -> Any:
             str(key): _redact(item, depth=depth + 1)
             for key, item in value.items()
             if not _SENSITIVE_KEY.search(str(key))
+            and _redact(str(key), depth=depth + 1) == str(key)
         }
     if isinstance(value, list):
         return [_redact(item, depth=depth + 1) for item in value[:100]]
     if isinstance(value, tuple):
         return [_redact(item, depth=depth + 1) for item in value[:100]]
     if isinstance(value, str):
+        value = re.sub(
+            r"(?im)(?:cookie|set-cookie|profile[_ -]?path|cdp[_ -]?endpoint)\s*[:=][^\r\n]*",
+            "[REDACTED]",
+            value,
+        )
         value = _SENSITIVE_VALUE.sub("[REDACTED]", value)
-        value = re.sub(r"https?://[^\s]+", "[redacted-url]", value)
+        value = re.sub(r"(?:https?|wss?)://[^\s]+", "[redacted-url]", value)
+        value = re.sub(
+            r"(?is)<[^>]+>.*|(?:[A-Za-z]:[\\/]|/(?:home|Users|tmp|var)/)\S*", "[REDACTED]", value
+        )
         return value[:4_096]
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
     if isinstance(value, (int, float, bool)) or value is None:
         return value
-    return str(value)[:4_096]
+    return _redact(str(value), depth=depth + 1)
 
 
 def _safe_result(value: Any) -> dict[str, Any]:
+    if len(_json_bytes(value)) > _MAX_PAYLOAD_BYTES:
+        return {"truncated": True, "reason": "result_too_large"}
     redacted = _redact(value)
     if not isinstance(redacted, dict):
         redacted = {"value": redacted}
@@ -175,14 +201,24 @@ def _safe_result(value: Any) -> dict[str, Any]:
 
 
 def _safe_error(value: Any) -> str:
-    text = _SENSITIVE_VALUE.sub("[REDACTED]", str(value))
-    text = re.sub(r"https?://[^\s]+", "[redacted-url]", text)
-    return text[:_MAX_ERROR_MESSAGE]
+    return str(_redact(str(value)))[:_MAX_ERROR_MESSAGE]
 
 
-def _fingerprint(capability: str, args: dict[str, Any], timeout_seconds: int) -> str:
+def _fingerprint(
+    capability: str,
+    args: dict[str, Any],
+    timeout_seconds: int,
+    gate: str | None = None,
+) -> str:
     return hashlib.sha256(
-        _json_bytes({"capability": capability, "args": args, "timeout_seconds": timeout_seconds})
+        _json_bytes(
+            {
+                "capability": capability,
+                "args": args,
+                "timeout_seconds": timeout_seconds,
+                "gate": gate,
+            }
+        )
     ).hexdigest()
 
 
@@ -220,13 +256,51 @@ async def list_spaces(
     await _validate_access(db, workspace_id, identity)
     if limit < 1 or limit > 100:
         raise BrowserSpaceError("invalid_limit", "limit must be between 1 and 100", 422)
-    result = await db.execute(
-        select(BrowserSpace)
-        .where(BrowserSpace.workspace_id == workspace_id)
-        .order_by(BrowserSpace.created_at.desc())
-        .limit(limit)
-    )
+    statement = select(BrowserSpace).where(BrowserSpace.workspace_id == workspace_id)
+    if identity is not None:
+        access = await get_workspace_access(db, workspace_id, identity)
+        if access.role not in {"admin", "maintainer"}:
+            statement = statement.where(
+                BrowserSpace.owner_id.in_((identity.subject, access.user_id))
+            )
+    result = await db.execute(statement.order_by(BrowserSpace.created_at.desc()).limit(limit))
     return list(result.scalars().all())
+
+
+def _has_agent_route(instance: BrowserInstance) -> bool:
+    endpoint_host = urlparse(instance.endpoint).hostname
+    return bool(
+        endpoint_host
+        and instance.agent_url
+        and instance.agent_protocol in {"http", "ws"}
+        and urlparse(instance.agent_url).hostname == endpoint_host
+        and instance.runtime_bundle_id
+    )
+
+
+async def available_instances(db: AsyncSession) -> list[dict[str, Any]]:
+    """Project globally managed runtime slots without disclosing connection data."""
+    reserved = select(BrowserSpace.browser_instance_id).where(BrowserSpace.status != "closed")
+    instances = (
+        await db.scalars(
+            select(BrowserInstance)
+            .where(BrowserInstance.id.not_in(reserved))
+            .order_by(BrowserInstance.id)
+        )
+    ).all()
+    result = []
+    for instance in instances:
+        if not _has_agent_route(instance):
+            continue
+        bundle = await get_runtime_bundle(db, instance.runtime_bundle_id)
+        if bundle is not None:
+            manifest = browser_capability_service.RuntimeBundleManifest.model_validate(
+                bundle.manifest
+            )
+            result.append(
+                {"id": instance.id, "capabilities": [c.name for c in manifest.capabilities]}
+            )
+    return result
 
 
 async def create_space(
@@ -268,9 +342,15 @@ async def create_space(
             "invalid_request", "browser instance and capabilities are required", 422
         )
     await _validate_access(db, workspace_id, identity, owner_type=owner_type, owner_id=owner_id)
+    if identity is not None and not is_platform_admin(identity):
+        raise BrowserSpaceError(
+            "platform_admin_required", "global slot allocation requires admin", 403
+        )
     instance = await db.get(BrowserInstance, instance_id)
     if instance is None:
         raise BrowserSpaceError("not_found", "browser instance not found", 404)
+    if not _has_agent_route(instance):
+        raise BrowserSpaceError("isolation_unavailable", "managed runtime slot required", 409)
     if binding_id:
         binding = await db.get(BrowserBinding, binding_id)
         if binding is None or binding.browser_endpoint != instance.endpoint:
@@ -318,6 +398,7 @@ async def get_space(
         select(BrowserSpace)
         .where(BrowserSpace.workspace_id == workspace_id)
         .where(BrowserSpace.id == space_id)
+        .execution_options(populate_existing=True)
     )
     if for_update:
         statement = statement.with_for_update()
@@ -334,13 +415,14 @@ async def get_space(
 async def get_latest_task(
     db: AsyncSession,
     space_id: str,
+    *,
+    active_only: bool = True,
 ) -> BrowserSpaceTask | None:
+    statement = select(BrowserSpaceTask).where(BrowserSpaceTask.space_id == space_id)
+    if active_only:
+        statement = statement.where(BrowserSpaceTask.status.in_(("queued", "running")))
     return await db.scalar(
-        select(BrowserSpaceTask)
-        .where(BrowserSpaceTask.space_id == space_id)
-        .where(BrowserSpaceTask.status.in_(("queued", "running")))
-        .order_by(BrowserSpaceTask.created_at.desc(), BrowserSpaceTask.id.desc())
-        .limit(1)
+        statement.order_by(BrowserSpaceTask.created_at.desc(), BrowserSpaceTask.id.desc()).limit(1)
     )
 
 
@@ -371,7 +453,7 @@ async def _append_event(
             task_id=task_id,
             sequence=await _next_event_sequence(db, space_id),
             kind=kind.value,
-            payload=_bounded(_redact(payload or {}), fallback_reason="event_too_large"),
+            payload=_safe_result(payload or {}),
         )
         db.add(event)
         await db.flush()
@@ -382,6 +464,7 @@ _submission_locks: dict[Any, asyncio.Lock] = {}
 _finish_locks: dict[Any, dict[str, asyncio.Lock]] = {}
 _event_locks: dict[Any, dict[str, asyncio.Lock]] = {}
 _execution_tasks: dict[str, asyncio.Task[Any]] = {}
+
 
 def _finish_lock(task_id: str) -> asyncio.Lock:
     loop = asyncio.get_running_loop()
@@ -438,7 +521,9 @@ async def submit_task(
     )
     request_id = str(values.get("request_id") or "")
     capability = str(values.get("capability") or "")
-    args = values.get("args") or {}
+    args = values.get("args", {})
+    if args is None and legacy_call:
+        args = {}
     timeout_seconds = values.get("timeout_seconds", 60)
     if not request_id or len(request_id) > 64 or not capability or len(capability) > 255:
         raise BrowserSpaceError("invalid_request", "request_id and capability are required", 422)
@@ -448,10 +533,16 @@ async def submit_task(
         or not 1 <= timeout_seconds <= 600
     ):
         raise BrowserSpaceError("invalid_request", "invalid capability args or timeout", 422)
+    try:
+        encoded_args = json.dumps(args, allow_nan=False, ensure_ascii=False).encode()
+    except (TypeError, ValueError) as exc:
+        raise BrowserSpaceError("invalid_request", "invalid JSON args", 422) from exc
+    if len(encoded_args) > _MAX_PAYLOAD_BYTES:
+        raise BrowserSpaceError("invalid_request", "args exceed 64 KiB", 422)
 
     async with _submission_lock():
         space = await get_space(db, workspace_id, space_id, identity, for_update=True)
-        fingerprint = _fingerprint(capability, args, timeout_seconds)
+        fingerprint = _fingerprint(capability, args, timeout_seconds, values.get("gate"))
         existing = await db.scalar(
             select(BrowserSpaceTask).where(
                 BrowserSpaceTask.space_id == space_id,
@@ -461,9 +552,13 @@ async def submit_task(
         if existing is not None:
             if existing.request_fingerprint != fingerprint:
                 raise BrowserSpaceError("idempotency_conflict", "request_id was already used", 409)
-            return (existing if legacy_call else (existing, False))
+            return existing if legacy_call else (existing, False)
         if space.status == BrowserSpaceStatus.CLOSED.value:
             raise BrowserSpaceError("closed_space", "closed browser space rejects new tasks", 409)
+        if space.last_error_code == "runtime_cleanup_unconfirmed":
+            raise BrowserSpaceError(
+                "runtime_cleanup_unconfirmed", "runtime slot is quarantined", 409
+            )
         if capability not in set(space.granted_capabilities or []):
             raise BrowserSpaceError(
                 "capability_not_granted", "capability is not granted to this space", 422
@@ -477,6 +572,29 @@ async def submit_task(
             raise BrowserSpaceError(
                 "space_task_in_progress", "browser space already has an active task", 409
             )
+        instance = await db.get(BrowserInstance, space.browser_instance_id)
+        if instance is None:
+            raise BrowserSpaceError("not_found", "browser instance not found", 404)
+        if not _has_agent_route(instance):
+            raise BrowserSpaceError("isolation_unavailable", "managed runtime slot required", 409)
+        if space.binding_id:
+            binding = await db.get(BrowserBinding, space.binding_id)
+            if binding is None or binding.browser_endpoint != instance.endpoint:
+                raise BrowserSpaceError("not_found", "browser binding not found", 404)
+        bundle = (
+            await get_runtime_bundle(db, instance.runtime_bundle_id)
+            if instance.runtime_bundle_id
+            else None
+        )
+        definition = (
+            browser_capability_service._capability_for(bundle, capability) if bundle else None
+        )
+        if definition is None:
+            raise BrowserSpaceError("unknown_capability", "capability is not in the bundle", 422)
+        try:
+            browser_capability_service.validate_capability_args(definition, args)
+        except BrowserRuntimeError as exc:
+            raise BrowserSpaceError(exc.code, "invalid capability arguments", 422) from exc
         task = BrowserSpaceTask(
             space_id=space_id,
             workspace_id=workspace_id,
@@ -484,7 +602,7 @@ async def submit_task(
             operation_id=str(uuid.uuid4()),
             request_fingerprint=fingerprint,
             capability=capability,
-            args={"keys": sorted(args)},
+            args={"count": len(args)},
             status=BrowserSpaceTaskStatus.QUEUED.value,
         )
         db.add(task)
@@ -503,7 +621,7 @@ async def submit_task(
                 )
             )
             if existing is not None and existing.request_fingerprint == fingerprint:
-                return (existing if legacy_call else (existing, False))
+                return existing if legacy_call else (existing, False)
             raise BrowserSpaceError(
                 "space_task_in_progress", "browser space already has an active task", 409
             ) from exc
@@ -540,21 +658,23 @@ async def execute_task_in_background(
     task_id: str,
     raw_args: dict[str, Any],
     timeout_seconds: int = 60,
+    gate: str | None = None,
+    gate_authorized: bool = False,
 ) -> None:
     """Run a committed task after the HTTP response has been sent."""
     from backend.database import AsyncSessionLocal
 
-    current = asyncio.current_task()
-    if current is not None:
-        _execution_tasks[task_id] = current
-    try:
-        async with AsyncSessionLocal() as runtime_session:
-            task = await runtime_session.get(BrowserSpaceTask, task_id)
-            if task is None:
-                return
-            await execute_task(runtime_session, task, raw_args, timeout_seconds)
-    finally:
-        _execution_tasks.pop(task_id, None)
+    async with AsyncSessionLocal() as runtime_session:
+        task = await runtime_session.get(BrowserSpaceTask, task_id)
+        if task is None:
+            return
+        await execute_task(
+            runtime_session,
+            task,
+            raw_args,
+            timeout_seconds,
+            executor=CapabilityExecutor(gate, gate_authorized),
+        )
 
 
 async def execute_task(
@@ -618,6 +738,7 @@ async def execute_task(
     # persistence has committed; never hold this transaction over agent I/O.
     await db.commit()
     runner = executor or CapabilityExecutor()
+    managed_runtime = isinstance(runner, CapabilityExecutor)
     try:
         invocation = (
             runner(instance, task.capability, raw_args)
@@ -630,7 +751,12 @@ async def execute_task(
                 task_id=task.id,
             )
         )
-        result = await asyncio.wait_for(invocation, timeout=timeout_seconds)
+        # A local transport cancellation is not proof of remote browser cleanup.
+        # Only in-process executors can acknowledge cancellation by unwinding.
+        execution = asyncio.ensure_future(invocation)
+        if not managed_runtime:
+            _execution_tasks[task.id] = execution
+        result = await asyncio.wait_for(execution, timeout=timeout_seconds)
     except TimeoutError:
         await _finish_task(
             db,
@@ -638,16 +764,41 @@ async def execute_task(
             BrowserSpaceTaskStatus.FAILED,
             error_code="timeout",
             error_message="browser capability timed out",
+            quarantine=managed_runtime,
         )
     except asyncio.CancelledError:
-        await _finish_task(db, task.id, BrowserSpaceTaskStatus.CANCELLED)
+        if managed_runtime:
+            await _finish_task(
+                db,
+                task.id,
+                BrowserSpaceTaskStatus.FAILED,
+                error_code="runtime_cleanup_unconfirmed",
+                error_message="runtime cleanup could not be confirmed",
+                quarantine=True,
+            )
+        else:
+            await _finish_task(db, task.id, BrowserSpaceTaskStatus.CANCELLED)
     except Exception as exc:
+        code = getattr(exc, "code", None) or "capability_invocation_failed"
         await _finish_task(
             db,
             task.id,
             BrowserSpaceTaskStatus.FAILED,
-            error_code=getattr(exc, "code", None) or type(exc).__name__,
-            error_message=_safe_error(exc),
+            error_code=code,
+            error_message="browser capability invocation failed",
+            quarantine=managed_runtime
+            and code
+            not in {
+                "slot_not_ready",
+                "unknown_capability",
+                "invalid_capability_args",
+                "host_not_allowed",
+                "capability_component_unavailable",
+                "gate_not_satisfied",
+                "agent_route_unavailable",
+                "untrusted_agent_route",
+                "isolation_unavailable",
+            },
         )
     else:
         await db.refresh(task)
@@ -658,6 +809,7 @@ async def execute_task(
                 db, task.id, BrowserSpaceTaskStatus.COMPLETED, result=_safe_result(result)
             )
     finally:
+        _execution_tasks.pop(task.id, None)
         _cancel_requested.discard(task.id)
     await db.refresh(task)
     return task
@@ -671,12 +823,21 @@ async def _finish_task(
     result: dict[str, Any] | None = None,
     error_code: str | None = None,
     error_message: str | None = None,
+    quarantine: bool = False,
 ) -> BrowserSpaceTask | None:
     async with _finish_lock(task_id):
+        # Lifecycle writers acquire Space before Task, including cancel/close.
+        space_id = await db.scalar(
+            select(BrowserSpaceTask.space_id).where(BrowserSpaceTask.id == task_id)
+        )
+        if space_id is None:
+            return None
+        await db.scalar(select(BrowserSpace).where(BrowserSpace.id == space_id).with_for_update())
         task = await db.scalar(
             select(BrowserSpaceTask)
             .where(BrowserSpaceTask.id == task_id)
             .with_for_update()
+            .execution_options(populate_existing=True)
         )
         if task is None:
             return None
@@ -695,10 +856,21 @@ async def _finish_task(
         if space is not None and space.status != BrowserSpaceStatus.CLOSED.value:
             space.status = (
                 BrowserSpaceStatus.ERROR.value
-                if status == BrowserSpaceTaskStatus.FAILED and error_code == "isolation_unavailable"
+                if status == BrowserSpaceTaskStatus.FAILED
+                and error_code
+                in {
+                    "isolation_unavailable",
+                    "slot_not_ready",
+                    "agent_route_unavailable",
+                    "untrusted_agent_route",
+                    "capability_component_unavailable",
+                }
                 else BrowserSpaceStatus.IDLE.value
             )
             space.last_error_code = error_code if status == BrowserSpaceTaskStatus.FAILED else None
+            if quarantine:
+                space.status = BrowserSpaceStatus.ERROR.value
+                space.last_error_code = "runtime_cleanup_unconfirmed"
             space.revision += 1
         kind = {
             BrowserSpaceTaskStatus.COMPLETED: BrowserSpaceEventKind.COMPLETED,
@@ -733,12 +905,20 @@ async def cancel_task(
         .order_by(BrowserSpaceTask.created_at.desc())
     )
     if task is None:
-        raise BrowserSpaceError(
-            "no_active_task", "browser space has no active task to cancel", 409
-        )
-    task.cancel_requested = True
-    _cancel_requested.add(task.id)
-    await _append_event(db, space.id, BrowserSpaceEventKind.CANCEL_REQUESTED, task.id, {})
+        terminal = await get_latest_task(db, space.id, active_only=False)
+        if terminal is not None:
+            return terminal
+        raise BrowserSpaceError("no_active_task", "browser space has no active task to cancel", 409)
+    requested = await db.execute(
+        update(BrowserSpaceTask)
+        .where(BrowserSpaceTask.id == task.id)
+        .where(BrowserSpaceTask.cancel_requested.is_(False))
+        .where(BrowserSpaceTask.status.in_(("queued", "running")))
+        .values(cancel_requested=True)
+    )
+    if requested.rowcount:
+        _cancel_requested.add(task.id)
+        await _append_event(db, space.id, BrowserSpaceEventKind.CANCEL_REQUESTED, task.id, {})
     await db.commit()
     if executor is not None:
         if not await executor.cancel(task.id):
@@ -777,6 +957,8 @@ async def close_space(
     space = await get_space(db, workspace_id, space_id, identity, for_update=True)
     if space.status == BrowserSpaceStatus.CLOSED.value:
         return space
+    if space.last_error_code == "runtime_cleanup_unconfirmed":
+        raise BrowserSpaceError("runtime_cleanup_unconfirmed", "runtime slot is quarantined", 409)
     if (
         await db.scalar(
             select(BrowserSpaceTask.id)

@@ -72,6 +72,10 @@ def test_upgrade_head_creates_identity_and_operations_tables(monkeypatch):
         "iii_collection_lifecycle_observations",
         "analysis_snapshot_receipts",
         "analysis_findings",
+        "browser_spaces",
+        "browser_space_tasks",
+        "browser_space_events",
+        "browser_space_event_counters",
     } <= tables
 
 

@@ -15,6 +15,7 @@ EventKind = Literal["queued", "started", "completed", "failed", "cancel_requeste
 
 
 class BrowserSpaceCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     browser_instance_id: str = Field(min_length=1, max_length=64)
     binding_id: str | None = Field(default=None, min_length=1, max_length=64)
     owner_type: OwnerType
@@ -32,10 +33,12 @@ class BrowserSpaceCreate(BaseModel):
 
 
 class BrowserSpaceTaskCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     request_id: str = Field(min_length=1, max_length=64)
     capability: str = Field(min_length=1, max_length=255)
     args: dict[str, Any] = Field(default_factory=dict)
     timeout_seconds: int = Field(default=60, ge=1, le=600)
+    gate: str | None = Field(default=None, max_length=100)
 
     @field_validator("capability")
     @classmethod
@@ -48,7 +51,7 @@ class BrowserSpaceTaskCreate(BaseModel):
     @classmethod
     def validate_args(cls, value: dict[str, Any]) -> dict[str, Any]:
         try:
-            encoded = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+            encoded = json.dumps(value, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
         except (TypeError, ValueError) as exc:
             raise ValueError("args must be JSON-serializable") from exc
         if len(encoded.encode("utf-8")) > 65536:
@@ -84,8 +87,7 @@ class BrowserSpaceRead(BaseModel):
     created_at: datetime
     updated_at: datetime
     active_task: BrowserSpaceTaskRead | None = None
-
-
+    latest_task: BrowserSpaceTaskRead | None = None
 
 
 class BrowserSpaceEventRead(BaseModel):

@@ -49,6 +49,7 @@ export interface BrowserSpaceList {
 
 export type BrowserSpaceDetail = BrowserSpace & {
   active_task?: BrowserSpaceTask | null
+  latest_task?: BrowserSpaceTask | null
 }
 
 export interface BrowserSpaceTaskRequest {
@@ -84,6 +85,11 @@ const spacePath = (workspaceId: string, spaceId?: string) => {
   const base = `/workspaces/${encodeURIComponent(workspaceId)}/browser-spaces`
   return spaceId ? `${base}/${encodeURIComponent(spaceId)}` : base
 }
+
+export const listBrowserSpaceInstances = (workspaceId: string) =>
+  apiClient
+    .get<ApiResponse<{ id: string; capabilities: string[] }[]>>(`${spacePath(workspaceId)}/instances`)
+    .then((response) => response.data.data)
 
 export const listBrowserSpaces = (workspaceId: string, limit = 20) =>
   apiClient
@@ -128,9 +134,22 @@ export const listBrowserSpaceEvents = (
   spaceId: string,
   afterSequence = 0,
   limit = 100,
-) =>
-  apiClient
-    .get<ApiResponse<BrowserSpaceEvent[]>>(`${spacePath(workspaceId, spaceId)}/events`, {
-      params: { after_sequence: afterSequence, limit },
-    })
-    .then((response) => ({ events: response.data.data }))
+) => {
+  // Drain bounded replay pages so polling continues beyond the first 100 events.
+  const read = async () => {
+    const events: BrowserSpaceEvent[] = []
+    let cursor = afterSequence
+    while (true) {
+      const response = await apiClient.get<ApiResponse<BrowserSpaceEvent[]>>(
+        `${spacePath(workspaceId, spaceId)}/events`,
+        { params: { after_sequence: cursor, limit } },
+      )
+      const page = response.data.data
+      events.push(...page)
+      if (page.length < limit || page[page.length - 1].sequence <= cursor) break
+      cursor = page[page.length - 1].sequence
+    }
+    return { events }
+  }
+  return read()
+}

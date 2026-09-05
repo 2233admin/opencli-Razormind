@@ -73,6 +73,7 @@ async function mockBrowserSpaces(page, options = {}) {
       })
     }
     if (url.pathname === '/api/v1/workspaces') return json([workspace])
+    if (url.pathname.endsWith('/browser-spaces/instances')) return json([{ id: instance.id, capabilities: ['snapshot'] }])
     if (url.pathname.endsWith('/browser-spaces') && request.method() === 'GET') {
       return json(state.spaces)
     }
@@ -89,7 +90,7 @@ async function mockBrowserSpaces(page, options = {}) {
     }
     if (url.pathname.endsWith('/space-1') && request.method() === 'GET') {
       const space = state.spaces[0]
-      return json(space ? { ...space, active_task: space.latest_task ?? null } : null)
+      return json(space ? { ...space, latest_task: space.latest_task ?? null, active_task: space.latest_task?.status === 'running' ? space.latest_task : null } : null)
     }
     if (url.pathname.endsWith('/space-1/tasks')) {
       if (state.submitError) {
@@ -144,11 +145,11 @@ async function mockBrowserSpaces(page, options = {}) {
 test('creates a space only from an allowed existing browser instance', async ({ page }) => {
   await mockBrowserSpaces(page)
   await page.goto('/browsers')
-  await page.getByLabel('BrowserInstance ID').fill('instance-1')
+  await page.getByLabel('BrowserInstance ID').selectOption('instance-1')
   await page.getByLabel('Owner ID').fill('agent-7')
   await page.getByRole('button', { name: '创建 Browser Space' }).click()
   await expect(page.getByText('Browser Space 已创建')).toBeVisible()
-  await expect(page.getByText('instance-1').first()).toBeVisible()
+  await expect(page.locator('p').filter({ hasText: /^instance-1$/ })).toBeVisible()
 })
 
 test('submits a granted capability and redacts sensitive result fields', async ({ page }) => {
@@ -163,7 +164,7 @@ test('submits a granted capability and redacts sensitive result fields', async (
 test('shows the instance ownership typed error without a fallback', async ({ page }) => {
   await mockBrowserSpaces(page, { createError: 'browser_instance_in_use' })
   await page.goto('/browsers')
-  await page.getByLabel('BrowserInstance ID').fill('instance-1')
+  await page.getByLabel('BrowserInstance ID').selectOption('instance-1')
   await page.getByLabel('Owner ID').fill('agent-7')
   await page.getByRole('button', { name: '创建 Browser Space' }).click()
   await expect(page.locator('p[role="alert"]')).toContainText('browser_instance_in_use')

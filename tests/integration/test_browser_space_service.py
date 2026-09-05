@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from backend.models.browser import BrowserInstance
 from backend.models.identity import User, Workspace, WorkspaceMembership, WorkspaceRole
 from backend.services import browser_space_service as service
+from tests.browser_space_fixtures import configure_space_runtime
 
 
 async def _seed_space(db_session, suffix: str):
@@ -24,6 +25,7 @@ async def _seed_space(db_session, suffix: str):
         )
     )
     await db_session.commit()
+    await configure_space_runtime(db_session, instance)
     return await service.create_space(
         db_session,
         workspace_id=workspace.id,

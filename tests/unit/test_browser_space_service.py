@@ -22,6 +22,7 @@ from backend.services.browser_space_service import (
     list_events,
     submit_task,
 )
+from tests.browser_space_fixtures import configure_space_runtime
 
 
 class FakeExecutor:
@@ -56,6 +57,9 @@ class FakeExecutor:
 
 
 async def _space(db_session, workspace_id: str, instance_id: str, owner: str = "user-1"):
+    instance = await db_session.get(BrowserInstance, instance_id)
+    if not instance.runtime_bundle_id:
+        await configure_space_runtime(db_session, instance)
     return await create_space(
         db_session,
         workspace_id,
@@ -133,7 +137,6 @@ async def test_idempotency_calls_executor_once(db_session):
     assert executor.calls == [first.id]
 
 
-
 @pytest.mark.asyncio
 async def test_deferred_submission_commits_without_runtime_call(db_session):
     workspace = Workspace(name="W2-deferred", slug="w2-deferred")
@@ -160,12 +163,8 @@ async def test_deferred_submission_commits_without_runtime_call(db_session):
 @pytest.mark.asyncio
 async def test_latest_task_is_scoped_to_requested_space(db_session):
     workspace = Workspace(name="W2-latest", slug="w2-latest")
-    first_instance = BrowserInstance(
-        endpoint="http://browser-2-latest-a", profile_name="latest-a"
-    )
-    second_instance = BrowserInstance(
-        endpoint="http://browser-2-latest-b", profile_name="latest-b"
-    )
+    first_instance = BrowserInstance(endpoint="http://browser-2-latest-a", profile_name="latest-a")
+    second_instance = BrowserInstance(endpoint="http://browser-2-latest-b", profile_name="latest-b")
     db_session.add_all([workspace, first_instance, second_instance])
     await db_session.commit()
     first_space = await _space(db_session, workspace.id, first_instance.id, "u1")
@@ -261,9 +260,7 @@ async def test_cancellation_acknowledges_and_releases_once(db_session):
     )
     while not executor.calls:
         await asyncio.sleep(0)
-    cancelled = await cancel_task(
-        db_session, workspace.id, space.id, executor=executor
-    )
+    cancelled = await cancel_task(db_session, workspace.id, space.id, executor=executor)
     result, _ = await pending
     assert cancelled.status in {
         BrowserSpaceTaskStatus.RUNNING,
@@ -330,6 +327,7 @@ async def test_runtime_timeout_finishes_task_as_failed(db_session):
 
     assert finished.status == BrowserSpaceTaskStatus.FAILED
     assert finished.error_code == "timeout"
+
 
 @pytest.mark.asyncio
 async def test_distinct_spaces_can_execute_concurrently(db_session):

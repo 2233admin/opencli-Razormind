@@ -34,7 +34,7 @@ from backend.schemas.browser import (
     SlotRuntimeReport,
 )
 from backend.schemas.common import ApiResponse
-from backend.security.identity import RequestIdentity, get_request_identity
+from backend.security.identity import RequestIdentity, get_request_identity, is_platform_admin
 from backend.services import browser_capability_service, browser_service
 
 router = APIRouter(prefix="/browsers", tags=["browsers"])
@@ -59,12 +59,7 @@ def _runtime_http_error(exc: browser_service.BrowserRuntimeError) -> HTTPExcepti
 
 
 def _is_platform_admin(identity: RequestIdentity) -> bool:
-    if identity.is_platform_admin:
-        return True
-    roles = identity.claims.get("roles") if identity.claims else None
-    return isinstance(roles, (list, tuple)) and any(
-        isinstance(role, str) and role == "platform-admin" for role in roles
-    )
+    return is_platform_admin(identity)
 
 
 async def _get_restart_request_identity(request: Request) -> RequestIdentity:
