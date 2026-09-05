@@ -20,7 +20,6 @@ import {
   type ConnectorInstallation,
 } from '@/lib/api/connector-installations'
 import { BACKEND_HINT, EmptyState, ErrorState, LoadingState } from '@/components/shell/data-states'
-import { StatusBadge } from '@/components/shell/status-badge'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -205,6 +204,25 @@ function SecretInput({
   )
 }
 
+const CONNECTOR_STATUS_META = {
+  active: { label: '已启用', variant: 'secondary' },
+  enabled: { label: '已启用', variant: 'secondary' },
+  healthy: { label: '健康', variant: 'secondary' },
+  disabled: { label: '已停用', variant: 'outline' },
+  blocked: { label: '配置不可用', variant: 'destructive' },
+  revoked: { label: '已撤销', variant: 'destructive' },
+  degraded: { label: '需处理', variant: 'outline' },
+  failed: { label: '不可用', variant: 'destructive' },
+  error: { label: '不可用', variant: 'destructive' },
+} as const
+
+function ConnectorStatusBadge({ status }: { status?: string | null }) {
+  const normalized = status?.trim().toLowerCase() || 'unknown'
+  const meta = CONNECTOR_STATUS_META[normalized as keyof typeof CONNECTOR_STATUS_META]
+  const label = meta?.label ?? (status?.trim() ? `未知状态（${status.trim()}）` : '未知状态')
+  return <Badge variant={meta?.variant ?? 'outline'}>{label}</Badge>
+}
+
 function CapabilityState({ label, ready }: { label: string; ready: boolean }) {
   return (
     <span className={ready ? 'text-success' : 'text-muted-foreground'}>
@@ -270,14 +288,14 @@ function InstallationCard({ workspaceId, installation, canManageConfiguration }:
             </div>
             <p className="mt-1 break-all font-mono text-xs text-muted-foreground">App ID {installation.app_id} · Tenant {installation.tenant_key}</p>
           </div>
-          <StatusBadge status={installation.status} />
+          <ConnectorStatusBadge status={installation.status} />
         </div>
       </CardHeader>
       <CardContent className="space-y-3">
         <div className="rounded-md border bg-muted/20 p-3 text-xs">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="font-medium">接收健康</span>
-            {health.data ? <StatusBadge status={health.data.status} /> : <span className="text-muted-foreground">{health.isLoading ? '读取中…' : '未知'}</span>}
+            {health.data ? <ConnectorStatusBadge status={health.data.status} /> : <span className="text-muted-foreground">{health.isLoading ? '读取中…' : '未知状态'}</span>}
           </div>
           <div className="mt-2 grid gap-1 text-muted-foreground sm:grid-cols-2">
             <CapabilityState label="回调配置就绪" ready={health.data?.callback_ready === true} />
