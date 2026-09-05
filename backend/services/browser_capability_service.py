@@ -31,6 +31,19 @@ def _capability_for(bundle: BrowserRuntimeBundle, capability_name: str) -> Any:
     return next((item for item in manifest.capabilities if item.name == capability_name), None)
 
 
+def validate_capability_args(capability: Any, args: dict) -> None:
+    """Shared preflight used before Space task persistence and runtime dispatch."""
+    try:
+        validate(instance=args, schema=capability.args_schema)
+    except ValidationError as exc:
+        raise BrowserRuntimeError("invalid_capability_args", "invalid capability args") from exc
+    if capability.allowed_hosts:
+        candidate_url = args.get("url")
+        host = urlparse(candidate_url).hostname if isinstance(candidate_url, str) else None
+        if not host or not _host_allowed(host, capability.allowed_hosts):
+            raise BrowserRuntimeError("host_not_allowed", "requested host is not allowed")
+
+
 async def _dispatch_capability(
     instance: BrowserInstance,
     capability: Any,
@@ -89,6 +102,7 @@ async def invoke_capability(
     *,
     gate_authorized: bool = False,
     audit_input_payload: dict | None = None,
+    commit_before_dispatch: bool = False,
 ) -> BrowserCapabilityInvocation:
     deployment = await get_runtime_deployment(session, instance.id)
     bundle = (
@@ -123,18 +137,7 @@ async def invoke_capability(
                 "unknown_capability",
                 f"capability {capability_name!r} is not exposed by the desired bundle",
             )
-        try:
-            validate(instance=args, schema=capability.args_schema)
-        except ValidationError as exc:
-            raise BrowserRuntimeError("invalid_capability_args", exc.message) from exc
-        if capability.allowed_hosts:
-            candidate_url = args.get("url")
-            host = urlparse(candidate_url).hostname if isinstance(candidate_url, str) else None
-            if not host or not _host_allowed(host, capability.allowed_hosts):
-                raise BrowserRuntimeError(
-                    "host_not_allowed",
-                    f"capability {capability_name!r} is not allowed for the requested host",
-                )
+        validate_capability_args(capability, args)
         loaded_component_ids = {
             item.get("id")
             for item in component_versions
@@ -153,6 +156,10 @@ async def invoke_capability(
                 f"capability {capability_name!r} requires an authorized "
                 f"{capability.required_gate!r} gate",
             )
+        if commit_before_dispatch:
+            # Space executors use expire_on_commit=False and own this session.
+            # Persist the audit start, then release all locks before agent I/O.
+            await session.commit()
         result = await _dispatch_capability(instance, capability, args)
         invocation.output_payload = result
         invocation.page_before = result.get("page_before")
