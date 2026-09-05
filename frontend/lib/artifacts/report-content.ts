@@ -31,6 +31,7 @@ const markdown = new Marked(
 )
 
 const MARKDOWN_FORBIDDEN_TAGS = [
+  "audio",
   "base",
   "embed",
   "form",
@@ -41,8 +42,11 @@ const MARKDOWN_FORBIDDEN_TAGS = [
   "object",
   "script",
   "select",
+  "source",
   "style",
   "textarea",
+  "track",
+  "video",
 ] as const
 
 const HTML_FORBIDDEN_TAGS = [
@@ -177,6 +181,7 @@ export function renderMarkdownHtml(source: string): string {
   const purifier = browserPurifier()
   const parsed = markdown.parse(source) as string
   const sanitized = purifier.sanitize(parsed, {
+    USE_PROFILES: { html: true },
     FORBID_TAGS: [...MARKDOWN_FORBIDDEN_TAGS],
     FORBID_ATTR: ["style", "srcdoc"],
   })
@@ -219,11 +224,11 @@ export function createIsolatedHtmlDocument(source: string): string {
   return `<!doctype html>\n${document.documentElement.outerHTML}`
 }
 
-export function csvRows(source: string): string[][] {
+export function csvRows(source: string, delimiter: "," | "\t" = ","): string[][] {
   const workbook = XLSX.read(source, {
     type: "string",
-    raw: false,
-    FS: source.includes("\t") ? "\t" : ",",
+    raw: true,
+    FS: delimiter,
   })
   const firstSheet = workbook.Sheets[workbook.SheetNames[0] || ""]
   if (!firstSheet) return []

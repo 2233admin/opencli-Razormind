@@ -82,6 +82,7 @@ export function ReportContentView({
       content={content}
       kind={kind}
       className={className}
+      delimiter={mediaType?.split(";", 1)[0].toLowerCase() === "text/tab-separated-values" || fileName?.toLowerCase().endsWith(".tsv") ? "\t" : ","}
     />
   )
 }
@@ -91,11 +92,13 @@ function ReadyReportContent({
   kind,
   className,
   browserReady,
+  delimiter,
 }: {
   content: unknown
   kind: ReportContentKind
   className: string
   browserReady: boolean
+  delimiter: "," | "\t"
 }) {
   if (kind === "html") {
     return (
@@ -116,7 +119,7 @@ function ReadyReportContent({
     )
   }
   if (kind === "json") return <JsonReportPreview content={content} className={className} />
-  if (kind === "table") return <TableReportPreview content={content} className={className} />
+  if (kind === "table") return <TableReportPreview content={content} delimiter={delimiter} className={className} />
   return <PlainReportPreview content={coerceReportText(content)} code={kind === "code"} className={className} />
 }
 
@@ -219,7 +222,7 @@ function PlainReportPreview({
   )
 }
 
-function TableReportPreview({ content, className }: { content: unknown; className: string }) {
+function TableReportPreview({ content, className, delimiter }: { content: unknown; className: string; delimiter: "," | "\t" }) {
   const contentArray = Array.isArray(content) ? content : []
   const objectRows = contentArray.filter(
         (row): row is Record<string, unknown> =>
@@ -233,17 +236,17 @@ function TableReportPreview({ content, className }: { content: unknown; classNam
     ? objectRows.map((row) => headers.map((header) => coerceReportText(row[header])))
     : contentArray.length > 0 || Array.isArray(content)
       ? contentArray.map((row) => (Array.isArray(row) ? row.map(coerceReportText) : [coerceReportText(row)]))
-      : csvRows(coerceReportText(content))
+      : csvRows(coerceReportText(content), delimiter)
+  const csvTable = !Array.isArray(content)
   const columnHeaders = headers.length > 0
     ? headers
-    : rows[0]?.map((_value, index) => `Column ${index + 1}`) || []
-  const csvTable = !Array.isArray(content)
+    : csvTable ? rows[0] || [] : rows[0]?.map((_value, index) => `Column ${index + 1}`) || []
 
   return (
     <div className={`min-w-0 overflow-x-auto rounded-lg border border-border bg-card ${className}`} data-report-kind="table">
       <table className="min-w-full border-collapse text-left text-sm">
         <thead className="bg-muted/60">
-          <tr>{columnHeaders.map((header) => <th className="border-b px-3 py-2 font-medium" key={header}>{header}</th>)}</tr>
+          <tr>{columnHeaders.map((header, index) => <th className="border-b px-3 py-2 font-medium" key={`${index}-${header}`}>{header}</th>)}</tr>
         </thead>
         <tbody>
           {rows.slice(csvTable ? 1 : 0).map((row, rowIndex) => (

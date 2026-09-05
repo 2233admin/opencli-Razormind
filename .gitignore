@@ -92,3 +92,7 @@ odp-rs/target/
 .codex/
 .sentrux/
 artifacts/
+!frontend/components/artifacts/
+!frontend/components/artifacts/**
+!frontend/lib/artifacts/
+!frontend/lib/artifacts/**

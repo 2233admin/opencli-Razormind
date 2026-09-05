@@ -3,6 +3,7 @@
   "version": "0.4.1",
   "private": true,
   "scripts": {
+    "test:report-content": "playwright test --config playwright.report-content.config.mjs",
     "dev": "next dev",
     "build": "next build",
     "typecheck": "tsc --noEmit",

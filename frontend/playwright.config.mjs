@@ -9,6 +9,8 @@ const isolatedStudioUrl = process.env.STUDIO_TRACER_URL
 
 export default defineConfig({
   testDir: "./e2e",
+  // The report component has an isolated fixture app and its own test command.
+  testIgnore: '**/report-content.spec.mjs',
   use: {
     baseURL: `http://127.0.0.1:${port}`,
     browserName: "chromium",
