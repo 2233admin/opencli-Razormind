@@ -99,6 +99,26 @@ class ArtifactProvenance(BaseModel):
     source: str = Field(min_length=1, max_length=255)
     evidence_artifact_ids: list[str] = Field(default_factory=list, max_length=10_000)
     collected_at: datetime | None = None
+    conversation_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=36,
+        exclude_if=lambda value: value is None,
+    )
+
+
+class WorkflowConversationOrigin(BaseModel):
+    """Server-authorized Agent conversation bound to one workflow run."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    conversation_id: str = Field(min_length=1, max_length=36)
+    conversation_revision: int = Field(ge=0)
+    governed_workspace_id: str = Field(min_length=1, max_length=36)
+    studio_workspace_id: str = Field(min_length=1, max_length=36)
+    project_id: str = Field(min_length=1, max_length=36)
+    workflow_id: str = Field(min_length=1, max_length=36)
+    user_id: str = Field(min_length=1, max_length=36)
 
 
 class NativeIntelligenceArtifact(BaseModel):

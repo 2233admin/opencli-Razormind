@@ -687,9 +687,21 @@ class IntelligenceStore:
         validated_artifacts: list[NativeIntelligenceArtifact] = []
         try:
             for artifact in artifacts:
+                if artifact.provenance.conversation_id is not None:
+                    raise ValueError("artifact producer cannot declare conversation provenance")
+                conversation_id = self.run_context.get("conversation_id")
+                candidate = artifact
+                if conversation_id:
+                    candidate = artifact.model_copy(
+                        update={
+                            "provenance": artifact.provenance.model_copy(
+                                update={"conversation_id": conversation_id}
+                            )
+                        }
+                    )
                 contract = ARTIFACT_CONTRACTS[artifact.kind]
                 validated_artifacts.append(
-                    contract.model_validate(artifact.model_dump(mode="python"))
+                    contract.model_validate(candidate.model_dump(mode="python"))
                 )
         except (KeyError, ValueError, ValidationError) as exc:
             raise IntelligenceArtifactInvariantError(

@@ -133,6 +133,7 @@ from backend.workflow.last30days_provider import Last30DaysProviderError
 from backend.workflow.managed_gaojixing_question_batches import (
     resolve_managed_question_batch,
 )
+from backend.workflow.native_intelligence_contracts import WorkflowConversationOrigin
 from backend.workflow.native_intelligence_executor import (
     NATIVE_INTELLIGENCE_ACTION_BY_TOOL_ID,
     NATIVE_INTELLIGENCE_EXECUTOR,
@@ -221,6 +222,7 @@ class _StoredWorkflowRun:
     events: list[WorkflowNodeRunEvent]
     workflow_version_id: str | None = None
     studio_workflow_version_id: str | None = None
+    conversation_origin: WorkflowConversationOrigin | None = None
 
 
 class _GaojixingToolTerminalError(Exception):
@@ -260,6 +262,7 @@ class _FeishuBitableWorkflowError(RuntimeError):
 
 
 _RUNS: dict[str, _StoredWorkflowRun] = {}
+_SERVER_CONVERSATION_ORIGIN_KEY = "_serverConversationOrigin"
 _DATA_OPERATOR_BINDING_IDS = set(DATA_OPERATOR_CATALOG_BINDINGS.values())
 _LEGACY_DATA_OPERATOR_PACK_VERSION = "1.0.0"
 _COLLECTOR_MAX_SOURCES = 64
@@ -403,6 +406,7 @@ async def start_workflow_run(
     graphon_client: DifyGraphonClient | None = None,
     replay_source_node_ids: set[str] | None = None,
     plugins: WorkflowPluginRegistry | None = None,
+    conversation_origin: WorkflowConversationOrigin | None = None,
 ) -> WorkflowRunProjection:
     """Create a replayable workflow run projection from a compiled WorkflowProject."""
 
@@ -456,6 +460,7 @@ async def start_workflow_run(
                 workflow_version_id=workflow_version_id,
                 studio_workflow_version_id=studio_workflow_version_id,
                 plugins=plugins,
+                conversation_origin=conversation_origin,
             )
             return projection
         scope_project = scope_result.project
@@ -510,6 +515,7 @@ async def start_workflow_run(
             workflow_version_id=workflow_version_id,
             studio_workflow_version_id=studio_workflow_version_id,
             plugins=plugins,
+            conversation_origin=conversation_origin,
         )
         return projection
 
@@ -557,6 +563,7 @@ async def start_workflow_run(
             workflow_version_id=workflow_version_id,
             studio_workflow_version_id=studio_workflow_version_id,
             plugins=plugins,
+            conversation_origin=conversation_origin,
         )
         return projection
 
@@ -582,6 +589,7 @@ async def start_workflow_run(
             workflow_version_id=workflow_version_id,
             studio_workflow_version_id=studio_workflow_version_id,
             plugins=plugins,
+            conversation_origin=conversation_origin,
         )
     should_trace_opencli = any(
         _binding_id(node) == OPENCLI_BINDING_ID for node in runtime_nodes
@@ -1468,6 +1476,7 @@ async def start_workflow_run(
                         body.project.agentPermissions.canSendNotifications
                     ),
                     workflow_input=body.input.payload,
+                    conversation_origin=conversation_origin,
                 )
             except _GaojixingToolTerminalError as exc:
                 output_items = exc.output_items
@@ -2084,6 +2093,7 @@ async def start_workflow_run(
         workflow_version_id=workflow_version_id,
         studio_workflow_version_id=studio_workflow_version_id,
         plugins=plugins,
+        conversation_origin=conversation_origin,
     )
     if session is not None:
         stored = await _load_workflow_run(run_id, session=session, cache=False)
@@ -2108,6 +2118,7 @@ async def start_workflow_run(
                 workflow_version_id=workflow_version_id,
                 studio_workflow_version_id=studio_workflow_version_id,
                 plugins=plugins,
+                conversation_origin=conversation_origin,
             )
     await _materialize_waiting_image_jobs(
         body,
@@ -2427,6 +2438,7 @@ async def replay_downstream_from_persisted_gaojixing_source(
         studio_workflow_version_id=expected_studio_workflow_version_id,
         replay_source_node_ids=set(source_outputs),
         plugins=plugins,
+        conversation_origin=source_run.conversation_origin,
     )
 
 
@@ -2491,6 +2503,7 @@ async def continue_workflow_run_with_source_outputs(
             workflow_version_id=stored.workflow_version_id,
             studio_workflow_version_id=stored.studio_workflow_version_id,
             plugins=plugins,
+            conversation_origin=stored.conversation_origin,
         )
 
 
@@ -2562,6 +2575,7 @@ async def resume_gaojixing_workflow_run(
             workflow_version_id=stored.workflow_version_id,
             studio_workflow_version_id=stored.studio_workflow_version_id,
             plugins=plugins,
+            conversation_origin=stored.conversation_origin,
         )
         if projection.status == "completed":
             await mark_collection_succeeded(session, workflow_run_id=run_id)
@@ -2608,6 +2622,7 @@ async def refresh_gaojixing_workflow_run(
             workflow_version_id=stored.workflow_version_id,
             studio_workflow_version_id=stored.studio_workflow_version_id,
             plugins=plugins,
+            conversation_origin=stored.conversation_origin,
         )
 
 
@@ -2621,6 +2636,7 @@ async def _store_workflow_run(
     workflow_version_id: str | None = None,
     studio_workflow_version_id: str | None = None,
     plugins: WorkflowPluginRegistry | None = None,
+    conversation_origin: WorkflowConversationOrigin | None = None,
 ) -> None:
     events_to_mirror = list(events)
     stored_events = list(events)
@@ -2637,7 +2653,12 @@ async def _store_workflow_run(
         row.package_node_id = projection.packageNodeId
         row.workflow_version_id = workflow_version_id
         row.studio_workflow_version_id = studio_workflow_version_id
-        row.request = request.model_dump(mode="json")
+        stored_request = request.model_dump(mode="json")
+        if conversation_origin is not None:
+            stored_request[_SERVER_CONVERSATION_ORIGIN_KEY] = conversation_origin.model_dump(
+                mode="json"
+            )
+        row.request = stored_request
         row.projection = projection.model_dump(mode="json")
 
         append_result = await append_workflow_run_events(
@@ -2655,6 +2676,7 @@ async def _store_workflow_run(
         stored_events,
         workflow_version_id,
         studio_workflow_version_id,
+        conversation_origin,
     )
     if session is None:
         _RUNS[run_id] = stored
@@ -2715,12 +2737,19 @@ async def _load_workflow_run(
         .scalars()
         .all()
     )
+    stored_request = dict(row.request)
+    raw_conversation_origin = stored_request.pop(_SERVER_CONVERSATION_ORIGIN_KEY, None)
     stored = _StoredWorkflowRun(
-        request=WorkflowRunStartRequest.model_validate(row.request),
+        request=WorkflowRunStartRequest.model_validate(stored_request),
         projection=WorkflowRunProjection.model_validate(row.projection),
         events=[WorkflowNodeRunEvent.model_validate(event_row.payload) for event_row in event_rows],
         workflow_version_id=row.workflow_version_id,
         studio_workflow_version_id=row.studio_workflow_version_id,
+        conversation_origin=(
+            WorkflowConversationOrigin.model_validate(raw_conversation_origin)
+            if raw_conversation_origin is not None
+            else None
+        ),
     )
     if cache:
         _RUNS[run_id] = stored
@@ -4910,6 +4939,7 @@ async def _execute_native_node(
     materialized_source_tasks: dict[str, tuple[str, str]] | None = None,
     agent_can_send_notifications: bool = False,
     workflow_input: dict[str, Any] | None = None,
+    conversation_origin: WorkflowConversationOrigin | None = None,
 ) -> tuple[dict[str, object], list[dict[str, Any]]]:
     binding_id = _binding_id(node)
     input_items = _upstream_outputs(node, outputs_by_node)
@@ -5208,6 +5238,7 @@ async def _execute_native_node(
             binding_input=binding_input,
             agent_can_send_notifications=agent_can_send_notifications,
             workflow_input=workflow_input or {},
+            conversation_origin=conversation_origin,
         )
         return (
             {
@@ -5448,6 +5479,7 @@ async def _execute_external_tool_capability(
     binding_input: dict[str, Any],
     agent_can_send_notifications: bool,
     workflow_input: dict[str, Any],
+    conversation_origin: WorkflowConversationOrigin | None,
 ) -> list[dict[str, Any]]:
     if (
         binding_input.get("executorMode") == GAOJIXING_DOUBAO_BATCH_EXECUTOR
@@ -5610,6 +5642,7 @@ async def _execute_external_tool_capability(
                 run_id=run_id,
                 trace_id=trace_id,
                 node_id=node.id,
+                conversation_origin=conversation_origin,
                 commit_each_command=False,
             )
 

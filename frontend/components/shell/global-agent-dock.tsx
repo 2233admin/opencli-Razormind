@@ -87,6 +87,21 @@ function matchesRequestedWorkspace(
     : detail.workspace_id === workspaceId && !detail.context_binding.studio_workspace_id
 }
 
+function workflowDraftHref(
+  workspaceId: string,
+  projectId: string,
+  workflowId: string,
+  conversationId?: string | null,
+) {
+  const query = new URLSearchParams({
+    workspace: workspaceId,
+    project: projectId,
+    workflow: workflowId,
+  })
+  if (conversationId) query.set('conversation', conversationId)
+  return `/studio/workflow?${query.toString()}`
+}
+
 
 export function GlobalAgentDock({
   open,
@@ -438,7 +453,12 @@ export function GlobalAgentDock({
         await queryClient.invalidateQueries({ queryKey: ['workspace-projects', resultWorkspaceId] })
         await queryClient.invalidateQueries({ queryKey: ['project-workflows', resultWorkspaceId, resultProjectId] })
         if (requestGenerationRef.current !== requestGeneration) return
-        setCompletedResultHref(`/studio/workflow?workspace=${resultWorkspaceId}&project=${resultProjectId}&workflow=${resultWorkflowId}`)
+        setCompletedResultHref(workflowDraftHref(
+          resultWorkspaceId,
+          resultProjectId,
+          resultWorkflowId,
+          sessionId,
+        ))
       }
       setProposal(null)
       await Promise.all(proposalQueryKeys(proposalToConfirm).map((queryKey) =>
@@ -592,7 +612,7 @@ export function GlobalAgentDock({
             {selectedSession?.context_binding && (selectedSession.context_binding.project_id || selectedSession.context_binding.workflow_id || selectedSession.context_binding.run_id) ? (
               <nav className="flex flex-wrap gap-2 border-t pt-3 text-xs" aria-label="会话上下文链接">
                 {selectedSession.context_binding.project_id ? <Link className="underline underline-offset-4" href={`/studio/projects/${selectedSession.context_binding.project_id}?workspace=${workspaceId}`}>项目</Link> : null}
-                {selectedSession.context_binding.workflow_id && selectedSession.context_binding.project_id ? <Link className="underline underline-offset-4" href={`/studio/workflow?workspace=${workspaceId}&project=${selectedSession.context_binding.project_id}&workflow=${selectedSession.context_binding.workflow_id}`}>工作流草稿</Link> : null}
+                {selectedSession.context_binding.workflow_id && selectedSession.context_binding.project_id && workspaceId ? <Link className="underline underline-offset-4" href={workflowDraftHref(workspaceId, selectedSession.context_binding.project_id, selectedSession.context_binding.workflow_id, selectedSession.id)}>工作流草稿</Link> : null}
                 {selectedSession.context_binding.run_id ? <Link className="underline underline-offset-4" href={buildRunUrl('operations', { workspace: workspaceId ?? undefined, project: selectedSession.context_binding.project_id ?? undefined, workflow: selectedSession.context_binding.workflow_id ?? undefined, run: selectedSession.context_binding.run_id }) ?? '/studio'}>运行</Link> : null}
               </nav>
             ) : null}

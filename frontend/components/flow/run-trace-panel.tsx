@@ -146,6 +146,7 @@ export function RunTracePanel({
       ? { workspaceId, projectId, workflowId }
       : undefined
   }, [searchParams])
+  const conversationId = searchParams.get("conversation")?.trim() || null
 
   useEffect(() => {
     setRunInputText(runInputTemplateText)
@@ -249,12 +250,13 @@ export function RunTracePanel({
       const token = getApiAuthToken()
       const authorization = token ? `Bearer ${token}` : null
       const started = scope && !runFileInput
-        ? await startWorkspaceWorkflowRun(scope, { authorization, input })
+        ? await startWorkspaceWorkflowRun(scope, { authorization, input, conversationId })
         : await startWorkflowRun(workflowProject, {
         authorization,
         sourceOutputs,
         input,
         ...(runFileInput && workflowRunScope ? { scope: workflowRunScope } : {}),
+        ...(runFileInput && workflowRunScope ? { conversationId } : {}),
         ...(submittedQuestionBankFile ? { questionBankFile: submittedQuestionBankFile } : {}),
       })
       setQuestionBankFile((current) => current === submittedQuestionBankFile ? null : current)

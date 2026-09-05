@@ -432,6 +432,7 @@ export async function startWorkflowRun(
     input?: WorkflowRunInput
     questionBankFile?: File
     scope?: WorkflowRunScope
+    conversationId?: string | null
   } = {},
 ): Promise<WorkflowRunProjection> {
   if (options.questionBankFile && options.sourceOutputs) {
@@ -454,6 +455,7 @@ export async function startWorkflowRun(
         user: options.input?.sourceId?.trim() || "studio-operator",
         ...(trigger.requestId ? { request_id: trigger.requestId } : {}),
         ...(trigger.idempotencyKey ? { idempotency_key: trigger.idempotencyKey } : {}),
+        ...(options.conversationId ? { conversation_id: options.conversationId } : {}),
       }
     : draftRequest
   const questionBankBody = options.questionBankFile ? new FormData() : null
@@ -483,7 +485,11 @@ export async function startWorkflowRun(
 
 export async function startWorkspaceWorkflowRun(
   scope: WorkspaceWorkflowRunScope,
-  options: { authorization?: string | null; input?: WorkflowRunInput } = {},
+  options: {
+    authorization?: string | null
+    input?: WorkflowRunInput
+    conversationId?: string | null
+  } = {},
 ): Promise<WorkflowRunProjection> {
   const response = await fetch(workspaceWorkflowRunEndpoint(scope), {
     method: "POST",
@@ -494,6 +500,7 @@ export async function startWorkspaceWorkflowRun(
     body: JSON.stringify({
       inputs: options.input?.payload ?? {},
       user: "studio-run-trace",
+      ...(options.conversationId ? { conversation_id: options.conversationId } : {}),
     }),
   })
   return readApiResponse(response, "Published Studio workflow run failed")

@@ -29,6 +29,7 @@ from backend.workflow.native_intelligence_contracts import (
     ReportArtifact,
     ResearchArtifact,
     SimulationArtifact,
+    WorkflowConversationOrigin,
     canonical_hash,
 )
 from backend.workflow.runtime_contracts import (
@@ -335,6 +336,7 @@ async def execute_native_intelligence_action(
     run_id: str,
     trace_id: str,
     node_id: str,
+    conversation_origin: WorkflowConversationOrigin | None = None,
     commit_each_command: bool = True,
 ) -> dict[str, Any]:
     """Execute one registered action against the durable aggregate."""
@@ -363,14 +365,17 @@ async def execute_native_intelligence_action(
     params = dict(params)
     session_ref = _intelligence_session_ref(input_items, params)
     session_id = _session_id(session_ref, workflow_id, run_id)
+    run_context = {
+        "run_id": run_id,
+        "workflow_id": workflow_id,
+        "trace_id": trace_id,
+        "node_id": node_id,
+    }
+    if conversation_origin is not None:
+        run_context["conversation_id"] = conversation_origin.conversation_id
     store = IntelligenceStore(
         session,
-        run_context={
-            "run_id": run_id,
-            "workflow_id": workflow_id,
-            "trace_id": trace_id,
-            "node_id": node_id,
-        },
+        run_context=run_context,
         commit_each_command=commit_each_command,
     )
     stages = NativeIntelligenceStages(store, worker_id=f"workflow:{run_id}")

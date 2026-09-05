@@ -55,11 +55,13 @@ from backend.models.workflow_run import WorkflowRun
 from backend.schemas import workflow as workflow_schemas
 from backend.schemas.common import ApiResponse, PaginationMeta
 from backend.schemas.workflow_runtime import WorkflowRunStatus, WorkflowRunTraceResponse
+from backend.security.identity import RequestIdentity, get_request_identity
 from backend.services.agent_project_service import update_workflow_draft
 from backend.services.gaojixing_collection_service import (
     GaojixingCollectionConflictError,
     resume_collection,
 )
+from backend.services.workflow_conversation_origin import resolve_workflow_conversation_origin
 from backend.workflow.managed_gaojixing_question_batches import (
     MAX_QUESTION_BANK_BYTES,
     ManagedQuestionBatchConflictError,
@@ -69,6 +71,7 @@ from backend.workflow.managed_gaojixing_question_batches import (
     cleanup_managed_question_batch,
     stage_managed_question_batch,
 )
+from backend.workflow.native_intelligence_contracts import WorkflowConversationOrigin
 from backend.workflow.opencli_hda_tracer import (
     get_workflow_run_checkpoint,
     get_workflow_run_projection,
@@ -78,6 +81,14 @@ from backend.workflow.opencli_hda_tracer import (
 )
 
 router = APIRouter()
+
+
+async def _optional_request_identity(request: Request) -> RequestIdentity | None:
+    """Authenticate when a caller supplies credentials, preserving public runs."""
+
+    if not request.headers.get("authorization"):
+        return None
+    return await get_request_identity(request)
 
 
 def _canonical_run_identity(*, inputs: dict, user: str) -> str:
@@ -469,6 +480,7 @@ async def _existing_published_run_projection(
     workflow_id: str,
     version_id: str,
     requested_identity: str,
+    conversation_origin: WorkflowConversationOrigin | None,
 ) -> workflow_schemas.WorkflowRunProjection | None:
     existing = await db.get(WorkflowRun, run_id)
     if existing is None:
@@ -476,6 +488,11 @@ async def _existing_published_run_projection(
     existing_input = existing.request.get("input") if isinstance(existing.request, dict) else None
     existing_payload = existing_input.get("payload") if isinstance(existing_input, dict) else None
     existing_user = existing_input.get("sourceId") if isinstance(existing_input, dict) else None
+    stored_origin = (
+        existing.request.get("_serverConversationOrigin")
+        if isinstance(existing.request, dict)
+        else None
+    )
     identity_matches = (
         isinstance(existing_payload, dict)
         and isinstance(existing_user, str)
@@ -486,6 +503,8 @@ async def _existing_published_run_projection(
         existing.workflow_id != workflow_id
         or existing.studio_workflow_version_id != version_id
         or not identity_matches
+        or stored_origin
+        != (conversation_origin.model_dump(mode="json") if conversation_origin else None)
     ):
         raise HTTPException(
             status.HTTP_409_CONFLICT,
@@ -515,6 +534,7 @@ async def _start_published_version_run(
     trigger_node_id: str | None = None,
     idempotency_key: str | None = None,
     run_id: str | None = None,
+    conversation_origin: WorkflowConversationOrigin | None = None,
     plugins=None,
 ) -> ApiResponse:
     version_id = version.id
@@ -537,6 +557,7 @@ async def _start_published_version_run(
             workflow_id=workflow_id,
             version_id=version_id,
             requested_identity=requested_identity,
+            conversation_origin=conversation_origin,
         )
         if existing_projection is not None:
             return ApiResponse.ok(existing_projection)
@@ -562,6 +583,7 @@ async def _start_published_version_run(
             ),
             session=db,
             studio_workflow_version_id=version_id,
+            conversation_origin=conversation_origin,
             plugins=plugins,
         )
     except IntegrityError:
@@ -574,6 +596,7 @@ async def _start_published_version_run(
             workflow_id=workflow_id,
             version_id=version_id,
             requested_identity=requested_identity,
+            conversation_origin=conversation_origin,
         )
         if projection is None:
             raise
@@ -595,6 +618,7 @@ async def start_published_workflow_run(
     request: Request,
     idempotency_header: str | None = Header(default=None, alias="Idempotency-Key"),
     request_id_header: str | None = Header(default=None, alias="X-Request-ID"),
+    identity: RequestIdentity | None = Depends(_optional_request_identity),
     db: AsyncSession = Depends(get_db),
 ) -> ApiResponse:
     """Run the immutable published graph without accepting graph replacement."""
@@ -607,6 +631,18 @@ async def start_published_workflow_run(
     )
     request_id = body.request_id or request_id_header or str(uuid.uuid4())
     idempotency_key = body.idempotency_key or idempotency_header
+    conversation_origin = None
+    if body.conversation_id is not None:
+        if identity is None:
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Bearer token required")
+        conversation_origin = await resolve_workflow_conversation_origin(
+            db,
+            identity,
+            conversation_id=body.conversation_id,
+            studio_workspace_id=workspace_id,
+            project_id=project_id,
+            workflow_id=workflow_id,
+        )
     return await _start_published_version_run(
         plugins=request.app.state.workflow_plugins,
         db=db,
@@ -625,6 +661,7 @@ async def start_published_workflow_run(
         response_mode=body.response_mode,
         trigger_kind=body.trigger_kind,
         trigger_node_id=body.trigger_node_id,
+        conversation_origin=conversation_origin,
     )
 
 
@@ -642,6 +679,7 @@ async def start_published_workflow_run_from_question_bank(
     request: str = Form(...),
     idempotency_header: str | None = Header(default=None, alias="Idempotency-Key"),
     request_id_header: str | None = Header(default=None, alias="X-Request-ID"),
+    identity: RequestIdentity | None = Depends(_optional_request_identity),
     db: AsyncSession = Depends(get_db),
 ) -> ApiResponse:
     """Run the immutable published graph from one managed question package."""
@@ -670,6 +708,18 @@ async def start_published_workflow_run_from_question_bank(
             version_id=version.id,
             idempotency_key=idempotency_key,
         ) or str(uuid.uuid4())
+        conversation_origin = None
+        if body.conversation_id is not None:
+            if identity is None:
+                raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Bearer token required")
+            conversation_origin = await resolve_workflow_conversation_origin(
+                db,
+                identity,
+                conversation_id=body.conversation_id,
+                studio_workspace_id=workspace_id,
+                project_id=project_id,
+                workflow_id=workflow_id,
+            )
         payload = await question_bank.read(MAX_QUESTION_BANK_BYTES + 1)
         staged = stage_managed_question_batch(
             payload,
@@ -704,6 +754,7 @@ async def start_published_workflow_run_from_question_bank(
             trigger_kind=body.trigger_kind,
             trigger_node_id=body.trigger_node_id,
             run_id=run_id,
+            conversation_origin=conversation_origin,
             plugins=http_request.app.state.workflow_plugins,
         )
     except Exception:
