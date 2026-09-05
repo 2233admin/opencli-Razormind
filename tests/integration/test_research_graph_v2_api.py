@@ -42,7 +42,8 @@ async def test_authenticated_studio_review_rejects_self_review_and_pins_fold(cli
     route = _route(scope)
     proposer = User(id="graph-proposer", subject="graph-proposer")
     reviewer = User(id="graph-reviewer", subject="graph-reviewer")
-    workspace = Workspace(id=scope["workspace"].id, name="Graph", slug="graph")
+    workspace = await db_session.get(Workspace, scope["workspace"].id)
+    assert workspace is not None
     db_session.add_all(
         [
             proposer,

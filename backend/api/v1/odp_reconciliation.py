@@ -27,6 +27,12 @@ from backend.odp.query_client import (
     post_reconciliation_query,
 )
 from backend.schemas.common import ApiResponse
+from backend.security.identity import RequestIdentity, get_request_identity
+from backend.security.workspace_rbac import (
+    WorkspacePermission,
+    get_workspace_access,
+    require_permission,
+)
 from backend.workflow.iii_collection_store import (
     IIICollectionNotFoundError,
     get_scoped_command,
@@ -114,8 +120,11 @@ async def reconcile_iii_collection_odp(
     cursor: str | None = Query(default=None, max_length=4096),
     page_size: int | None = Query(default=None, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
+    identity: RequestIdentity = Depends(get_request_identity),
 ) -> ApiResponse[dict[str, Any]]:
-    """Reconcile one Admin-owned III attempt through the internal ODP reader."""
+    """Read one scoped attempt page through the internal ODP reader."""
+    access = await get_workspace_access(db, workspace_id, identity)
+    require_permission(access, WorkspacePermission.READ)
     if mode != "attempt_page":
         # B1's immutable expected-key ledger has not landed. Exact/DLQ
         # reconciliation therefore has no server-derived key set and must not

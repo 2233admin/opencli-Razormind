@@ -196,14 +196,14 @@ def sanitize_query_response(payload: Any, request: dict[str, Any]) -> dict[str, 
         or mode not in {"exact", "attempt_page", "dlq"}
         or payload.get("query_fingerprint") != delegation.get("query_fingerprint")
         or payload.get("mode") != mode
-        or payload.get("retention_state") != "unknown"
+        or payload.get("retention_state") not in {"unknown", "retained"}
         or payload.get("redaction_profile_version") != REDACTION_PROFILE_VERSION
     ):
         raise ValueError("invalid odp-query response")
     output: dict[str, Any] = {
         "mode": payload["mode"],
         "query_fingerprint": payload["query_fingerprint"],
-        "retention_state": "unknown",
+        "retention_state": payload["retention_state"],
         "redaction_profile_version": REDACTION_PROFILE_VERSION,
         "records": [_sanitize_reference(record) for record in payload.get("records", [])],
         "results": [_sanitize_result(result) for result in payload.get("results", [])],
@@ -217,6 +217,14 @@ def sanitize_query_response(payload: Any, request: dict[str, Any]) -> dict[str, 
                 raise ValueError("invalid odp-query response")
             output[name] = value
     _validate_response_scope(output, request)
+    if output["retention_state"] == "retained" and (
+        not output["results"]
+        or any(
+            result["classification"] != "dlq" or result["retention_state"] != "retained"
+            for result in output["results"]
+        )
+    ):
+        raise ValueError("invalid odp-query retained response")
     if len(json.dumps(output, separators=(",", ":")).encode()) > MAX_RESPONSE_BYTES:
         raise ValueError("oversized odp-query response")
     return output
@@ -271,12 +279,16 @@ def _sanitize_result(value: Any) -> dict[str, Any]:
         or value.get("classification") not in {"present", "dlq", "unknown"}
     ):
         raise ValueError("invalid odp-query reconciliation result")
-    if value.get("retention_state") != "unknown":
+    classification = value["classification"]
+    retention_state = value.get("retention_state")
+    if retention_state not in {"unknown", "retained"} or (
+        classification == "dlq"
+    ) != (retention_state == "retained"):
         raise ValueError("invalid odp-query reconciliation result")
     result = {
         "key": _sanitize_key(value["key"]),
-        "classification": value["classification"],
-        "retention_state": "unknown",
+        "classification": classification,
+        "retention_state": retention_state,
     }
     if "record" in value:
         if value["record"] is None:

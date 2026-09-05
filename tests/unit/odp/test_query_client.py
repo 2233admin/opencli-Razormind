@@ -100,6 +100,37 @@ def test_admin_client_strips_unredacted_service_fields():
     assert "raw_data" not in response["records"][0]
 
 
+
+def test_admin_client_accepts_durable_dlq_retention_without_payload():
+    request = build_dlq_request(scope(), [OdpRecordKey(SOURCE_ID, "event")])
+    response = sanitize_query_response(
+        {
+            "mode": "dlq",
+            "query_fingerprint": request["delegation"]["query_fingerprint"],
+            "retention_state": "retained",
+            "redaction_profile_version": "odp-query-reference-v1",
+            "records": [],
+            "results": [
+                {
+                    "key": {"source_id": str(SOURCE_ID), "event_id": "event"},
+                    "classification": "dlq",
+                    "retention_state": "retained",
+                    "payload": {"cookie": "secret"},
+                }
+            ],
+        },
+        request,
+    )
+
+    assert response["retention_state"] == "retained"
+    assert response["results"] == [
+        {
+            "key": {"source_id": str(SOURCE_ID), "event_id": "event"},
+            "classification": "dlq",
+            "retention_state": "retained",
+        }
+    ]
+
 def test_fingerprint_is_stable_across_delegation_renewal_and_mode_order():
     original = scope(modes=("dlq", "exact", "attempt_page"))
     renewed = OdpReconciliationDelegation(

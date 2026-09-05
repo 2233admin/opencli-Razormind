@@ -61,7 +61,9 @@ class IIICollectionLifecycleV1(_V1Model):
     payload_sha256: str = Field(min_length=64, max_length=64)
     sequence: int = Field(ge=1)
     event_type: Literal["bridge_accepted", "collector_started", "collector_returned"]
-    summary: IIICollectionLifecycleSummaryV1 = Field(default_factory=IIICollectionLifecycleSummaryV1)
+    summary: IIICollectionLifecycleSummaryV1 = Field(
+        default_factory=IIICollectionLifecycleSummaryV1
+    )
 
 
 class IIICollectionSubmitReadV1(_V1Model):
@@ -91,9 +93,7 @@ class VerticalEvidenceReferenceV1(_V1Model):
 
     kind: Literal["lifecycle", "expected_key_report", "ingress_receipt"]
     hash: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
-    event_type: Literal[
-        "bridge_accepted", "collector_started", "collector_returned"
-    ] | None = None
+    event_type: Literal["bridge_accepted", "collector_started", "collector_returned"] | None = None
 
 
 class VerticalStatusV1(_V1Model):
@@ -146,7 +146,7 @@ class CollectorFinalExpectedKeyReportV1(_V1Model):
     report_hash: str = Field(min_length=64, max_length=64)
 
     @model_validator(mode="after")
-    def validate_declared_counts(self) -> "CollectorFinalExpectedKeyReportV1":
+    def validate_declared_counts(self) -> CollectorFinalExpectedKeyReportV1:
         if self.item_count != len(self.expected_keys):
             raise ValueError("item_count must equal the expected key set")
         if self.zero_count != int(self.item_count == 0):
@@ -161,7 +161,7 @@ class ODPIngressOutcomeV1(_V1Model):
     rejection_reason: str | None = Field(default=None, max_length=256)
 
     @model_validator(mode="after")
-    def validate_rejection_reason(self) -> "ODPIngressOutcomeV1":
+    def validate_rejection_reason(self) -> ODPIngressOutcomeV1:
         if self.outcome == "rejected" and not self.rejection_reason:
             raise ValueError("rejected outcome requires a bounded rejection_reason")
         if self.outcome != "rejected" and self.rejection_reason is not None:
@@ -245,8 +245,11 @@ class EvidenceBatchMaterializationReadV1(_V1Model):
     legacy_status: Literal["running", "completed", "partial", "failed", "blocked"]
     item_count: int = Field(ge=0)
     record_count: int = Field(ge=0)
+    manifest_hash: str = Field(min_length=64, max_length=64)
     counts: dict[str, int]
-    record_references: list[EvidenceBatchRecordReferenceV1] = Field(default_factory=list, max_length=1000)
+    record_references: list[EvidenceBatchRecordReferenceV1] = Field(
+        default_factory=list, max_length=1000
+    )
     blocker: str | None = Field(default=None, max_length=256)
     recovery_action: str
     query_fingerprint: str | None = Field(default=None, max_length=64)

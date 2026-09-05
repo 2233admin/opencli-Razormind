@@ -5,7 +5,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.api.v1.studio_projects import bootstrap_project
 from backend.api.v1.studio_schemas import ProjectBootstrapCreate
 from backend.database import get_db
-from backend.models.identity import Team, User, Workspace, WorkspaceMembership, WorkspaceRole
+from backend.models.identity import (
+    Team,
+    User,
+    Workspace,
+    WorkspaceMembership,
+    WorkspaceRole,
+)
+from backend.models.studio import StudioWorkspace
 from backend.models.workflow import Project
 from backend.schemas.common import ApiResponse
 from backend.schemas.workflow_asset import ProjectRead
@@ -56,6 +63,7 @@ async def _get_or_create_user(
         raise HTTPException(status.HTTP_409_CONFLICT, "Disabled user cannot join a Workspace")
     return user
 
+
 async def _ensure_local_admin_workspace(
     db: AsyncSession,
     identity: RequestIdentity,
@@ -93,9 +101,7 @@ async def _ensure_local_admin_workspace(
         )
 
     team = await db.scalar(
-        select(Team)
-        .where(Team.workspace_id == workspace.id)
-        .where(Team.slug == "default")
+        select(Team).where(Team.workspace_id == workspace.id).where(Team.slug == "default")
     )
     if team is None:
         db.add(Team(workspace_id=workspace.id, name="默认团队", slug="default"))
@@ -154,6 +160,8 @@ async def list_governance_projects(
         .all()
     )
     return ApiResponse.ok([ProjectRead.model_validate(row) for row in rows])
+
+
 @router.post(
     "/governance/workspaces/{workspace_id}/projects/bootstrap",
     response_model=ApiResponse,
@@ -194,6 +202,7 @@ async def create_workspace(
     workspace = Workspace(name=body.name, slug=body.slug)
     db.add(workspace)
     await db.flush()
+    db.add(StudioWorkspace(id=workspace.id, name=workspace.name, slug=workspace.slug))
     membership = WorkspaceMembership(
         workspace_id=workspace.id,
         user_id=first_admin.id,

@@ -5,6 +5,7 @@ from sqlalchemy import select
 from backend.api.v1.workspaces import router
 from backend.database import get_db
 from backend.models.identity import User, Workspace, WorkspaceMembership, WorkspaceRole
+from backend.models.studio import StudioWorkspace
 from backend.models.workflow import Project
 from backend.security.identity import RequestIdentity, get_request_identity
 
@@ -118,6 +119,12 @@ async def test_platform_admin_creates_workspace_with_explicit_first_admin(db_ses
 
     platform_user = await db_session.scalar(select(User).where(User.subject == "platform-root"))
     assert platform_user is None
+    studio_workspace = await db_session.get(StudioWorkspace, data["id"])
+    assert studio_workspace is not None
+    assert (studio_workspace.name, studio_workspace.slug) == (
+        "News Operations",
+        "news-operations",
+    )
 
 
 async def test_non_platform_admin_cannot_create_workspace(db_session):

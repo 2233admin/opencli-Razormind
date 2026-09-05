@@ -19,7 +19,7 @@ import sys
 import tempfile
 import time
 import uuid
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -218,8 +218,13 @@ def _b64url(value: bytes) -> str:
     return base64.urlsafe_b64encode(value).rstrip(b"=").decode("ascii")
 
 
-def _make_identities(ledger: RunLedger, values: dict[str, str]) -> None:
-    """Create the one-run OIDC key set and separate proposer/reviewer tokens."""
+def _make_identities(
+    ledger: RunLedger,
+    values: dict[str, str],
+    *,
+    governance_scope: Mapping[str, str] | None = None,
+) -> None:
+    """Create proof-admin identities and optional failure-governance identities."""
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     public = key.public_key().public_numbers()
     jwk = {
@@ -255,6 +260,31 @@ def _make_identities(ledger: RunLedger, values: dict[str, str]) -> None:
             headers={"kid": jwk["kid"]},
         )
     values["BOOTSTRAP_ADMIN_TOKEN"] = secrets.token_urlsafe(36)
+    if governance_scope is not None:
+        if set(governance_scope) != {"workspace", "project", "workflow", "run"} or any(
+            not isinstance(value, str) or not value for value in governance_scope.values()
+        ):
+            raise ValueError("governance scope must use the exact proof scope")
+        scope = dict(governance_scope)
+        for environment, role in (
+            ("PROOF_BUNDLE_WRITER_JWT", "bundle-writer"),
+            ("PROOF_KEY_ADMIN_JWT", "key-admin"),
+        ):
+            subject = f"proof-{role}"
+            values[environment] = jwt.encode(
+                {
+                    "sub": subject,
+                    "iss": "http://proof-oidc",
+                    "aud": "proof-governance",
+                    "iat": now,
+                    "exp": now + 600,
+                    "role": role,
+                    "proof_scope": scope,
+                },
+                private,
+                algorithm="RS256",
+                headers={"kid": jwk["kid"]},
+            )
 
 
 def _compose(ledger: RunLedger, env: dict[str, str], *arguments: str) -> str:
@@ -424,7 +454,13 @@ def _admit(ledger: RunLedger, env: dict[str, str], fixture_digest: str) -> None:
     if cli != "0.19.4":
         raise ProofRejected("copied III CLI is not exactly 0.19.4")
     actual_fixture = _compose(
-        ledger, env, "exec", "-T", "proof-collector", "sha256sum", "/proof/opencli-proof"
+        ledger,
+        env,
+        "exec",
+        "-T",
+        "proof-collector",
+        "sha256sum",
+        "/proof/opencli-proof",
     ).split()[0]
     if actual_fixture != fixture_digest:
         raise ProofRejected("collector fixture digest mismatch")
@@ -580,11 +616,13 @@ def _sign(ledger: RunLedger, evidence: dict[str, Any]) -> None:
     public.verify(signature, payload)
     (staging / "proof.json").write_bytes(payload + b"\n")
     (staging / "proof.json.sig").write_text(
-        base64.b64encode(signature).decode() + "\n", encoding="ascii"
+        base64.b64encode(signature).decode() + "\n",
+        encoding="ascii",
     )
     public_bytes = public.public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
     (staging / "proof.pub").write_text(
-        base64.b64encode(public_bytes).decode() + "\n", encoding="ascii"
+        base64.b64encode(public_bytes).decode() + "\n",
+        encoding="ascii",
     )
     if ledger.artifact_dir.exists():
         raise ProofRejected("run-specific artifact directory already exists")
@@ -599,7 +637,13 @@ def _cleanup(ledger: RunLedger, env: dict[str, str]) -> list[str]:
     def attempt(label: str, command: list[str]) -> str:
         try:
             completed = subprocess.run(
-                command, cwd=ROOT, env=env, text=True, capture_output=True, check=False, timeout=120
+                command,
+                cwd=ROOT,
+                env=env,
+                text=True,
+                capture_output=True,
+                check=False,
+                timeout=120,
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
             diagnostics.append(f"{label}: {exc}")
@@ -630,7 +674,8 @@ def _cleanup(ledger: RunLedger, env: dict[str, str]) -> list[str]:
     label = f"com.docker.compose.project={ledger.project}"
     for kind, list_command in resources:
         identifiers = attempt(
-            f"inspect labeled {kind}", [*list_command, "--filter", f"label={label}"]
+            f"inspect labeled {kind}",
+            [*list_command, "--filter", f"label={label}"],
         ).split()
         if identifiers:
             remove = {
@@ -640,7 +685,8 @@ def _cleanup(ledger: RunLedger, env: dict[str, str]) -> list[str]:
             }[kind]
             attempt(f"remove labeled {kind}", [*remove, *identifiers])
         remaining = attempt(
-            f"verify labeled {kind}", [*list_command, "--filter", f"label={label}"]
+            f"verify labeled {kind}",
+            [*list_command, "--filter", f"label={label}"],
         ).split()
         if remaining:
             diagnostics.append(f"ledger-labeled {kind} remain: {', '.join(remaining)}")

@@ -76,12 +76,19 @@ def source_binding_hash(
 
 
 def post(
-    client: httpx.Client, path: str, body: dict[str, Any], headers: dict[str, str] | None = None
+    client: httpx.Client,
+    path: str,
+    body: dict[str, Any],
+    headers: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     return data(client.post(f"{BASE}{path}", json=body, headers=headers))
 
 
-def get(client: httpx.Client, path: str, headers: dict[str, str] | None = None) -> dict[str, Any]:
+def get(
+    client: httpx.Client,
+    path: str,
+    headers: dict[str, str] | None = None,
+) -> dict[str, Any]:
     return data(client.get(f"{BASE}{path}", headers=headers))
 
 
@@ -140,7 +147,10 @@ def wait_for_materialization(
     last: dict[str, Any] | None = None
     last_status: dict[str, Any] | None = None
     while time.monotonic() < deadline:
-        response = client.post(f"{BASE}{route}/{command_id}/materialize", headers=headers)
+        response = client.post(
+            f"{BASE}{route}/{command_id}/materialize",
+            headers=headers,
+        )
         if response.status_code == 200:
             last = data(response)
             last_status = get(client, f"{route}/{command_id}", headers)
@@ -161,13 +171,6 @@ def wait_for_materialization(
             sort_keys=True,
         )
     )
-
-
-async def seed_studio_workspace(workspace_id: str, slug: str) -> None:
-    """The Studio workspace is bootstrap identity state, not a workflow fact."""
-    async with AsyncSessionLocal() as session:
-        session.add(StudioWorkspace(id=workspace_id, name="Non-bypass proof", slug=slug))
-        await session.commit()
 
 
 def graph() -> dict[str, Any]:
@@ -278,7 +281,6 @@ def main() -> int:
                 },
                 bootstrap,
             )
-        asyncio.run(seed_studio_workspace(workspace_id, args.run))
         bootstrap_result = post(
             client,
             f"/workspaces/{workspace_id}/projects/bootstrap",
@@ -295,7 +297,10 @@ def main() -> int:
             f"/workspaces/{workspace_id}/projects/{project['id']}/workflows/{workflow['id']}/runs"
         )
         validation = post(
-            client, route.rsplit("/runs", 1)[0] + "/draft/validation-runs", {}, proposer
+            client,
+            route.rsplit("/runs", 1)[0] + "/draft/validation-runs",
+            {},
+            proposer,
         )
         if not validation.get("valid"):
             raise RuntimeError(
@@ -345,17 +350,21 @@ def main() -> int:
         )
         command_id, attempt_id = submission["commandId"], submission["attemptId"]
         materialization = wait_for_materialization(
-            client, collection_route, command_id, attempt_id, proposer
+            client,
+            collection_route,
+            command_id,
+            attempt_id,
+            proposer,
         )
         manifest_ref = materialization["researchGraphManifestRef"]
+        claim_id = f"vertical-proof-{args.run}"
+        claim_hash = manifest_ref["manifestHash"]
         if manifest_ref.get("materializationStatus") != "completed":
             raise RuntimeError("only completed materialization can enter ResearchGraph")
         # The graph receives this exact scoped manifest reference. The proof
         # bundle below instead emits a deliberately narrower redacted DTO.
         graph_route = f"{route}/{run_id}/research-graph-v2"
         state = get(client, graph_route, proposer)
-        claim_id = f"claim-{args.run}"
-        claim_hash = __import__("hashlib").sha256(args.run.encode()).hexdigest()
         proposed = post(
             client,
             graph_route + "/mutations",

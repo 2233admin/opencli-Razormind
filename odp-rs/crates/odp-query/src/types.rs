@@ -98,12 +98,14 @@ pub struct SanitizedRecordRef {
 #[serde(rename_all = "snake_case")]
 pub enum ReconciliationClassification {
     Present,
+    Dlq,
     Unknown,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum RetentionState {
+    Retained,
     Unknown,
 }
 

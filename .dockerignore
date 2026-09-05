@@ -16,6 +16,20 @@ tests/
 .gitignore
 *.md
 
+.artifacts/
+node_modules/
+**/target/
+odp-rs/target/
+.nx/
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+.sentrux/
+_bmad/
+_bmad-output/
+.agents/
+.claude/
+.omc/
 # The acceptance-only Docker target copies these deterministic harness inputs.
 !tests/
 !tests/acceptance/
@@ -23,3 +37,13 @@ tests/
 !tests/acceptance/fixtures/
 !tests/acceptance/fixtures/opencli-proof
 !tests/acceptance/fixtures/opencli-proof.sha256
+!tests/acceptance/fixtures/opencli-failure-proof
+!tests/acceptance/fixtures/opencli-failure-proof.sha256
+!tests/acceptance/non_bypass_failure_matrix.py
+!tests/acceptance/non_bypass_failure_driver.py
+!tests/acceptance/fault_tools/
+!scripts/patch-opencli.js
+!scripts/install-agent.sh
+!scripts/proof_bundle_governance.py
+!scripts/proof_bundle_governance_http.py
+!scripts/non_bypass_failure_proof_contract.py

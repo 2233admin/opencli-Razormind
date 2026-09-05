@@ -8,6 +8,7 @@ from fastapi import HTTPException
 
 from backend.api.v1 import odp_reconciliation
 from backend.odp.query_client import OdpReconciliationDelegation
+from backend.security.identity import RequestIdentity
 
 SOURCE_ID = UUID("00000000-0000-0000-0000-000000000001")
 TASK_ID = UUID("00000000-0000-0000-0000-000000000002")
@@ -28,6 +29,15 @@ def delegation(mode="exact"):
         allowed_modes=(mode,),
         expires_at=datetime.now(UTC) + timedelta(minutes=5),
     )
+
+
+def _allow_read(monkeypatch):
+    monkeypatch.setattr(
+        odp_reconciliation,
+        "get_workspace_access",
+        AsyncMock(return_value=SimpleNamespace()),
+    )
+    monkeypatch.setattr(odp_reconciliation, "require_permission", lambda *_: None)
 
 
 @pytest.mark.asyncio
@@ -77,6 +87,7 @@ async def test_proxy_fails_closed_for_browser_supplied_exact_keys(monkeypatch):
     ledger = AsyncMock(return_value=delegated)
     monkeypatch.setattr(odp_reconciliation, "_ledger_delegation", ledger)
     monkeypatch.setattr(odp_reconciliation, "post_reconciliation_query", forwarded)
+    _allow_read(monkeypatch)
 
     with pytest.raises(HTTPException) as exc:
         await odp_reconciliation.reconcile_iii_collection_odp(
@@ -90,6 +101,7 @@ async def test_proxy_fails_closed_for_browser_supplied_exact_keys(monkeypatch):
             cursor=None,
             page_size=None,
             db=object(),
+            identity=RequestIdentity(subject="member"),
         )
 
     assert exc.value.status_code == 409
@@ -104,6 +116,7 @@ async def test_proxy_rejects_cross_mode_predicates_before_query(monkeypatch):
     monkeypatch.setattr(odp_reconciliation, "_ledger_delegation", AsyncMock(return_value=delegated))
     monkeypatch.setattr(odp_reconciliation, "post_reconciliation_query", forwarded)
 
+    _allow_read(monkeypatch)
     with pytest.raises(HTTPException) as exc_info:
         await odp_reconciliation.reconcile_iii_collection_odp(
             "workspace",
@@ -114,6 +127,7 @@ async def test_proxy_rejects_cross_mode_predicates_before_query(monkeypatch):
             "attempt_page",
             event_id=["browser-predicate"],
             db=object(),
+            identity=RequestIdentity(subject="member"),
         )
 
     assert exc_info.value.status_code == 400

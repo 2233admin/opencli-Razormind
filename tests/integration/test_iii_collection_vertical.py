@@ -421,7 +421,7 @@ async def test_lifecycle_ingress_requires_bridge_token_and_rejects_scope_hash_co
             f"/api/v1/workspaces/other/projects/{scope['project'].id}/workflows/"
             f"{scope['workflow'].id}/runs/{scope['run'].id}/iii-collections/{command.id}"
         )
-    ).status_code == 404
+    ).status_code == 403
     assert (
         await client.get(
             f"/api/v1/workspaces/{scope['workspace'].id}/projects/{scope['project'].id}/workflows/"

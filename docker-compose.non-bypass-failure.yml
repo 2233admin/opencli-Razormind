@@ -1,0 +1,388 @@
+name: non-bypass-failure
+
+x-failure-labels: &failure-labels
+  com.opencli.proof.release: "failure-recovery"
+  com.opencli.proof.scenario: ${PROOF_SCENARIO:-unbound}
+
+services:
+  proof-admin:
+    image: "opencli-proof-root:${PROOF_CATALOG_DIGEST:-unbound}"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://proof:proof@proof-admin-pg-relay:5432/proof_admin
+    depends_on:
+      proof-admin-pg-relay: {condition: service_healthy}
+    networks: !override [proof-control, proof-query, proof-callback, proof-failure-receiver, proof-iii-admin]
+    labels: *failure-labels
+  proof-driver:
+    image: "opencli-proof-root:${PROOF_CATALOG_DIGEST:-unbound}"
+    labels: *failure-labels
+    environment:
+      PROOF_BUNDLE_WRITER_JWT: ${PROOF_BUNDLE_WRITER_JWT:-runtime-token-required}
+      PROOF_KEY_ADMIN_JWT: ${PROOF_KEY_ADMIN_JWT:-runtime-token-required}
+    networks: [proof-control, proof-fault]
+    depends_on:
+      proof-admin-control: {condition: service_healthy}
+      proof-governance: {condition: service_healthy}
+      proof-iii-actuator: {condition: service_healthy}
+      proof-odp-http-gateway: {condition: service_healthy}
+      proof-odp-ingest-redis-gateway: {condition: service_healthy}
+      proof-odp-ingest-redis-mutator: {condition: service_healthy}
+      proof-odp-store-pg-gateway: {condition: service_healthy}
+      proof-odp-store-redis-gateway: {condition: service_healthy}
+    volumes:
+      - ${PROOF_ARTIFACT_DIR:-./.artifacts/non-bypass-failures}:/proof-artifacts
+  proof-admin-postgres:
+    labels: *failure-labels
+  # Acceptance-only protocol boundary: primary Admin is relayed; the control
+  # Admin retains its direct database connection for independent public reads.
+  proof-admin-pg-relay:
+    image: "opencli-proof-root:${PROOF_CATALOG_DIGEST:-unbound}"
+    build:
+      context: .
+      target: non-bypass-acceptance
+    command: [uvicorn, tests.acceptance.fault_tools.admin_pg_protocol_relay:app, --host, 0.0.0.0, --port, "8080"]
+    environment:
+      API_AUTH_TOKEN: ${API_AUTH_TOKEN:-runtime-secret-required}
+      TARGET_HOST: proof-admin-postgres
+      TARGET_PORT: "5432"
+      GATE_PORT: "5432"
+      PROOF_ARTIFACT_DIR: /proof-artifacts
+    volumes:
+      - ${PROOF_ARTIFACT_DIR:-./.artifacts/non-bypass-failures}:/proof-artifacts
+    networks: [proof-control, proof-fault]
+    depends_on:
+      proof-admin-postgres: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, curl, -fsS, http://localhost:8080/health]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    labels: *failure-labels
+  proof-redis:
+    labels: *failure-labels
+  proof-iii:
+    labels: *failure-labels
+  proof-collector:
+    image: "opencli-proof-collector:${PROOF_CATALOG_DIGEST:-unbound}"
+    labels: *failure-labels
+    environment:
+      PROOF_SCENARIO: ${PROOF_SCENARIO:-unbound}
+      ODP_INGEST_URL: http://proof-odp-http-gateway:8040
+    command: [/bin/sh, -ec, 'case "$$PROOF_SCENARIO" in signed-zero) mode=zero;; query-page-race) mode=hundred;; *) mode=one;; esac; printf "%s\n" "#!/bin/sh" "exec /proof/opencli-failure-proof $$mode" > /tmp/opencli-proof; chmod 0555 /tmp/opencli-proof; exec python worker/src/main.py']
+    volumes:
+      - ./tests/acceptance/fixtures/opencli-failure-proof:/proof/opencli-failure-proof:ro
+  proof-bridge:
+    image: "opencli-proof-bridge:${PROOF_CATALOG_DIGEST:-unbound}"
+    labels: *failure-labels
+    environment:
+      ODP_INGEST_URL: http://proof-odp-http-gateway:8040
+  proof-odp-ingest:
+    image: "opencli-proof-ingest:${PROOF_CATALOG_DIGEST:-unbound}"
+    labels: *failure-labels
+    environment:
+      ODP_REDIS_URL: redis://proof-odp-ingest-redis-mutator:6379/2
+  proof-relay:
+    build:
+      context: .
+      target: non-bypass-acceptance
+    image: "opencli-proof-root:${PROOF_CATALOG_DIGEST:-unbound}"
+    entrypoint: []
+    command: [uvicorn, tests.acceptance.fault_tools.callback_relay:app, --host, 0.0.0.0, --port, "8080"]
+    environment:
+      API_AUTH_TOKEN: ${API_AUTH_TOKEN:-runtime-secret-required}
+      PROOF_PRIMARY_ADMIN: http://proof-admin:8000
+      PROOF_CONTROL_ADMIN: http://proof-admin-control:8000
+    healthcheck:
+      test: [CMD, curl, -fsS, http://localhost:8080/health]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [proof-control, proof-callback, proof-iii-worker, proof-fault]
+    labels: *failure-labels
+  proof-odp-query:
+    image: "opencli-proof-query:${PROOF_CATALOG_DIGEST:-unbound}"
+    environment:
+      ODP_QUERY_DATABASE_URL: postgresql://proof:proof@proof-odp-query-pg-gate:5432/proof_odp
+    depends_on:
+      proof-odp-query-pg-gate: {condition: service_healthy}
+    labels: *failure-labels
+  proof-odp-postgres:
+    labels: *failure-labels
+  proof-oidc:
+    labels: *failure-labels
+  # Admin's public registry address resolves to the proxy only.  The actual
+  # receiver and its database have no shared Admin route.
+  proof-delivery-proxy:
+    profiles: [receiver]
+    image: "opencli-proof-root:${PROOF_CATALOG_DIGEST:-unbound}"
+    build:
+      context: .
+      target: non-bypass-acceptance
+    command: [uvicorn, tests.acceptance.fault_tools.proof_delivery_proxy:app, --host, 0.0.0.0, --port, "8000", --ssl-keyfile, /run/proof/receiver-key.pem, --ssl-certfile, /run/proof/receiver-cert.pem]
+    environment:
+      API_AUTH_TOKEN: ${API_AUTH_TOKEN:-runtime-secret-required}
+      PROOF_RECEIVER_BACKEND_URL: https://proof-controlled-receiver:8000
+      SSL_CERT_FILE: /run/proof/ca.pem
+      CONTROLLED_RECEIVER_REGISTRY_JSON: ${CONTROLLED_RECEIVER_REGISTRY_JSON:-{}}
+      CONTROLLED_RECEIVER_RECEIPT_KEYS_JSON: ${CONTROLLED_RECEIVER_RECEIPT_KEYS_JSON:-{}}
+    volumes:
+      - ${PROOF_SECRETS_DIR:-./.artifacts/non-bypass-secrets}:/run/proof:ro
+    networks:
+      proof-failure-receiver:
+        ipv4_address: ${PROOF_RECEIVER_IP:?required}
+      proof-receiver-backend: {}
+      proof-fault: {}
+    depends_on:
+      proof-controlled-receiver: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, curl, -fsS, https://localhost:8000/health, -k]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    labels: *failure-labels
+  proof-controlled-receiver:
+    profiles: [receiver]
+    image: "opencli-proof-root:${PROOF_CATALOG_DIGEST:-unbound}"
+    networks: !override [proof-receiver-backend, proof-receiver-db]
+    labels: *failure-labels
+  proof-receiver-postgres:
+    profiles: [receiver]
+    networks: !override [proof-receiver-db]
+    labels: *failure-labels
+
+  proof-admin-control:
+    image: "opencli-proof-root:${PROOF_CATALOG_DIGEST:-unbound}"
+    build:
+      context: .
+      target: non-bypass-acceptance
+    # Primary performs the one schema migration; control only serves the same
+    # public API against that completed schema, avoiding a migration race.
+    entrypoint: []
+    command: [uvicorn, backend.main:app, --host, 0.0.0.0, --port, "8000"]
+    environment:
+      SSL_CERT_FILE: /run/proof/ca.pem
+      API_AUTH_TOKEN: ${API_AUTH_TOKEN:-runtime-secret-required}
+      III_LIFECYCLE_TOKEN: ${III_LIFECYCLE_TOKEN:-runtime-secret-required}
+      III_INGRESS_RECEIPT_SECRET: ${III_INGRESS_RECEIPT_SECRET:-runtime-secret-required}
+      ODP_QUERY_ADMIN_CREDENTIAL: ${ODP_QUERY_ADMIN_CREDENTIAL:-runtime-secret-required}
+      ODP_QUERY_CURSOR_SECRET: ${ODP_QUERY_CURSOR_SECRET:-runtime-secret-required}
+      DATABASE_URL: postgresql+asyncpg://proof:proof@proof-admin-postgres:5432/proof_admin
+      REDIS_URL: redis://proof-redis:6379/0
+      ODP_QUERY_URL: http://proof-odp-query:8042
+      III_URL: ws://proof-iii:49134
+      III_LIFECYCLE_URL: http://proof-relay:8080/api/v1/iii-collections/lifecycle
+      III_CLI_PATH: /opt/iii/iii
+      OIDC_ISSUER: http://proof-oidc
+      OIDC_AUDIENCE: proof-admin
+      CONTROLLED_RECEIVER_REGISTRY_JSON: ${CONTROLLED_RECEIVER_REGISTRY_JSON:-{}}
+      CONTROLLED_RECEIVER_CREDENTIALS_JSON: ${CONTROLLED_RECEIVER_CREDENTIALS_JSON:-{}}
+      CONTROLLED_RECEIVER_RECEIPT_KEYS_JSON: ${CONTROLLED_RECEIVER_RECEIPT_KEYS_JSON:-{}}
+      OIDC_JWKS_URL: http://proof-oidc/jwks.json
+      BOOTSTRAP_ADMIN_TOKEN: ${BOOTSTRAP_ADMIN_TOKEN:-runtime-secret-required}
+    volumes:
+      - ${PROOF_SECRETS_DIR:-./.artifacts/non-bypass-secrets}:/run/proof:ro
+    networks: !override [proof-control, proof-query, proof-callback, proof-failure-receiver, proof-iii-admin]
+    depends_on:
+      proof-admin: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, curl, -fsS, http://localhost:8000/health]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    labels: *failure-labels
+
+  proof-iii-actuator:
+    image: "opencli-proof-root:${PROOF_CATALOG_DIGEST:-unbound}"
+    build:
+      context: .
+      target: non-bypass-acceptance
+    command: [uvicorn, tests.acceptance.fault_tools.proof_iii_actuator:app, --host, 0.0.0.0, --port, "8000"]
+    environment:
+      PROOF_III_URL: ws://proof-iii:49134
+      III_CLI_PATH: /opt/iii/iii
+      API_AUTH_TOKEN: ${API_AUTH_TOKEN:-runtime-secret-required}
+    networks: [proof-fault, proof-iii-worker]
+    depends_on:
+      proof-iii: {condition: service_started}
+    healthcheck:
+      test: [CMD, curl, -fsS, http://localhost:8000/health]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  proof-odp-query-pg-gate:
+    image: "opencli-proof-root:${PROOF_CATALOG_DIGEST:-unbound}"
+    build:
+      context: .
+      target: non-bypass-acceptance
+    command: [uvicorn, tests.acceptance.fault_tools.odp_query_pg_gate:app, --host, 0.0.0.0, --port, "8000"]
+    environment:
+      TARGET_HOST: proof-odp-postgres
+      TARGET_PORT: "5432"
+      GATE_PORT: "5432"
+      API_AUTH_TOKEN: ${API_AUTH_TOKEN:-runtime-secret-required}
+    networks: [proof-fault, proof-odp]
+    depends_on:
+      proof-odp-postgres: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, curl, -fsS, http://localhost:8000/health]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    labels: *failure-labels
+  proof-governance-key-init:
+    image: "opencli-proof-root:${PROOF_CATALOG_DIGEST:-unbound}"
+    entrypoint: [/bin/sh, -ec]
+    command:
+      - chown appuser:appuser /proof-governance-keys && chmod 0700 /proof-governance-keys
+    user: "0:0"
+    volumes:
+      - proof-governance-keys:/proof-governance-keys
+    network_mode: none
+    labels: *failure-labels
+
+
+  proof-governance:
+    image: "opencli-proof-root:${PROOF_CATALOG_DIGEST:-unbound}"
+    build:
+      context: .
+      target: non-bypass-acceptance
+    command: [uvicorn, scripts.proof_bundle_governance_http:app, --host, 0.0.0.0, --port, "8000"]
+    environment:
+      PROOF_GOVERNANCE_ROOT: /proof-artifacts/governance
+      PROOF_GOVERNANCE_KEY_ROOT: /proof-governance-keys
+      PROOF_GOVERNANCE_JWKS_URL: http://proof-oidc/jwks.json
+      PROOF_GOVERNANCE_ISSUER: http://proof-oidc
+      PROOF_GOVERNANCE_AUDIENCE: proof-governance
+    volumes:
+      - ${PROOF_ARTIFACT_DIR:-./.artifacts/non-bypass-failures}:/proof-artifacts
+      - proof-governance-keys:/proof-governance-keys
+    networks: [proof-control]
+    depends_on:
+      proof-oidc: {condition: service_healthy}
+      proof-governance-key-init: {condition: service_completed_successfully}
+    healthcheck:
+      test: [CMD, curl, -fsS, http://localhost:8000/health]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    labels: *failure-labels
+
+  proof-odp-http-gateway:
+    image: "opencli-proof-root:${PROOF_CATALOG_DIGEST:-unbound}"
+    build: {context: ., target: non-bypass-acceptance}
+    entrypoint: [uvicorn, tests.acceptance.fault_tools.odp_fault_gateways:app, --host, 0.0.0.0, --port, "8040"]
+    environment:
+      API_AUTH_TOKEN: ${API_AUTH_TOKEN:-runtime-secret-required}
+      HTTP_UPSTREAM_URL: http://proof-odp-ingest:8040
+    networks: [proof-odp, proof-fault]
+    labels: *failure-labels
+    healthcheck:
+      test: [CMD, curl, -fsS, http://localhost:8040/health]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  proof-odp-ingest-redis-gateway:
+    image: "opencli-proof-root:${PROOF_CATALOG_DIGEST:-unbound}"
+    build: {context: ., target: non-bypass-acceptance}
+    entrypoint: [python, tests/acceptance/fault_tools/odp_fault_gateways.py]
+    environment:
+      API_AUTH_TOKEN: ${API_AUTH_TOKEN:-runtime-secret-required}
+      GATEWAY_MODE: ingest-redis-cut
+      GATEWAY_PORT: "6379"
+      CONTROL_PORT: "8081"
+      UPSTREAM_HOST: proof-redis
+      UPSTREAM_PORT: "6379"
+    networks: [proof-odp, proof-fault]
+    labels: *failure-labels
+    healthcheck:
+      test: [CMD, curl, -fsS, http://localhost:8081/health]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  proof-odp-ingest-redis-mutator:
+    image: "opencli-proof-root:${PROOF_CATALOG_DIGEST:-unbound}"
+    build: {context: ., target: non-bypass-acceptance}
+    entrypoint: [python, tests/acceptance/fault_tools/odp_fault_gateways.py]
+    environment:
+      API_AUTH_TOKEN: ${API_AUTH_TOKEN:-runtime-secret-required}
+      GATEWAY_MODE: ingest-redis-payload-mutator
+      GATEWAY_PORT: "6379"
+      CONTROL_PORT: "8084"
+      UPSTREAM_HOST: proof-odp-ingest-redis-gateway
+      UPSTREAM_PORT: "6379"
+    networks: [proof-odp, proof-fault]
+    labels: *failure-labels
+    healthcheck:
+      test: [CMD, curl, -fsS, http://localhost:8084/health]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  proof-odp-store-pg-gateway:
+    image: "opencli-proof-root:${PROOF_CATALOG_DIGEST:-unbound}"
+    build: {context: ., target: non-bypass-acceptance}
+    entrypoint: [python, tests/acceptance/fault_tools/odp_fault_gateways.py]
+    environment:
+      API_AUTH_TOKEN: ${API_AUTH_TOKEN:-runtime-secret-required}
+      GATEWAY_MODE: store-pg-cut
+      GATEWAY_PORT: "5432"
+      CONTROL_PORT: "8082"
+      UPSTREAM_HOST: proof-odp-postgres
+      UPSTREAM_PORT: "5432"
+    volumes:
+      - ${PROOF_ARTIFACT_DIR:-./.artifacts/non-bypass-failures}/gateway-coordination:/coordination
+    networks: [proof-odp, proof-fault]
+    labels: *failure-labels
+    healthcheck:
+      test: [CMD, curl, -fsS, http://localhost:8082/health]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  proof-odp-store-redis-gateway:
+    image: "opencli-proof-root:${PROOF_CATALOG_DIGEST:-unbound}"
+    build: {context: ., target: non-bypass-acceptance}
+    entrypoint: [python, tests/acceptance/fault_tools/odp_fault_gateways.py]
+    environment:
+      API_AUTH_TOKEN: ${API_AUTH_TOKEN:-runtime-secret-required}
+      GATEWAY_MODE: store-redis-committed-xadd
+      GATEWAY_PORT: "6379"
+      CONTROL_PORT: "8083"
+      UPSTREAM_HOST: proof-redis
+      UPSTREAM_PORT: "6379"
+    volumes:
+      - ${PROOF_ARTIFACT_DIR:-./.artifacts/non-bypass-failures}/gateway-coordination:/coordination
+    networks: [proof-odp, proof-fault]
+    labels: *failure-labels
+    healthcheck:
+      test: [CMD, curl, -fsS, http://localhost:8083/health]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  proof-odp-store:
+    image: "opencli-proof-store:${PROOF_CATALOG_DIGEST:-unbound}"
+    environment:
+      ODP_REDIS_URL: redis://proof-odp-store-redis-gateway:6379/2
+      ODP_DATABASE_URL: postgresql://proof:proof@proof-odp-store-pg-gateway:5432/proof_odp
+
+volumes:
+  proof-governance-keys:
+    labels: *failure-labels
+
+networks:
+  proof-fault:
+    internal: true
+  proof-receiver: !override
+    internal: true
+    ipam:
+      config:
+        - subnet: 1.1.2.0/24
+  proof-failure-receiver:
+    internal: true
+    ipam:
+      config:
+        - subnet: ${PROOF_RECEIVER_SUBNET:?required}
+          gateway: ${PROOF_RECEIVER_GATEWAY:?required}
+  proof-receiver-backend:
+    internal: true
+  proof-receiver-db:
+    internal: true

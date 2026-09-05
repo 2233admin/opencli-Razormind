@@ -54,7 +54,8 @@ async def test_authenticated_authorization_freezes_pinned_claims_replays_and_red
     client, db_session, monkeypatch
 ):
     scope = await create_scoped_run(db_session)
-    workspace = Workspace(id=scope["workspace"].id, name="Delivery", slug="delivery")
+    workspace = await db_session.get(Workspace, scope["workspace"].id)
+    assert workspace is not None
     proposer = User(id="delivery-proposer", subject="delivery-proposer")
     approver = User(id="delivery-approver", subject="delivery-approver")
     manager = User(id="delivery-manager", subject="delivery-manager")
@@ -423,7 +424,8 @@ async def test_authenticated_authorization_freezes_pinned_claims_replays_and_red
 @pytest.mark.asyncio
 async def test_authorization_rejects_self_approval_and_unpinned_graph(client, db_session):
     scope = await create_scoped_run(db_session)
-    workspace = Workspace(id=scope["workspace"].id, name="Delivery Denial", slug="delivery-denial")
+    workspace = await db_session.get(Workspace, scope["workspace"].id)
+    assert workspace is not None
     member = User(id="delivery-member", subject="delivery-member")
     db_session.add_all(
         [
@@ -477,7 +479,8 @@ async def test_authorization_rejects_self_approval_and_unpinned_graph(client, db
 @pytest.mark.asyncio
 async def test_delivery_routes_enforce_mutation_permissions(client, db_session):
     scope = await create_scoped_run(db_session)
-    workspace = Workspace(id=scope["workspace"].id, name="Delivery Permissions", slug="delivery-permissions")
+    workspace = await db_session.get(Workspace, scope["workspace"].id)
+    assert workspace is not None
     viewer = User(id="delivery-scope-viewer", subject="delivery-scope-viewer")
     outsider = User(id="delivery-scope-outsider", subject="delivery-scope-outsider")
     db_session.add_all(

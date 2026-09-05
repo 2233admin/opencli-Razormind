@@ -1,0 +1,25 @@
+#!/bin/sh
+# Pinned acceptance fixture: deterministic records only; never reaches a network.
+set -eu
+case "${1:-}" in
+  one)
+    printf '%s\n' '[{"sourceEventKey":"failure-proof-001","title":"one"}]'
+    ;;
+  zero)
+    printf '%s\n' '[]'
+    ;;
+  hundred)
+    i=1
+    printf '%s' '['
+    while [ "$i" -le 100 ]; do
+      [ "$i" -gt 1 ] && printf ','
+      printf '{"sourceEventKey":"failure-proof-%03d","title":"record-%03d"}' "$i" "$i"
+      i=$((i + 1))
+    done
+    printf '%s\n' ']'
+    ;;
+  *)
+    printf '%s\n' 'usage: opencli-failure-proof {one|zero|hundred}' >&2
+    exit 64
+    ;;
+esac

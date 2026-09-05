@@ -50,8 +50,11 @@ COPY alembic.ini .
 COPY entrypoint.sh /entrypoint.sh
 RUN sed -i 's/\r$//' /entrypoint.sh && chmod +x /entrypoint.sh
 
-# Non-root user for security; pre-create /data so the SQLite volume is writable
-RUN useradd -m -u 1000 appuser && \
+# This makes each content-addressed proof image reconstruct and verify its
+# account layer rather than inheriting a stale local BuildKit user database.
+ARG PROOF_CATALOG_DIGEST=runtime
+RUN test -n "$PROOF_CATALOG_DIGEST" && useradd -m -u 1000 appuser && \
+    getent passwd appuser >/dev/null && \
     mkdir -p /data && \
     chown -R appuser:appuser /app /data
 USER appuser
@@ -73,11 +76,19 @@ FROM runtime AS non-bypass-acceptance
 USER root
 COPY --from=iii-engine /app/iii /opt/iii/iii
 COPY tests/acceptance/fixtures/opencli-proof /opt/non-bypass/opencli-proof
-COPY tests/acceptance/non_bypass_vertical.py ./tests/acceptance/non_bypass_vertical.py
-
 COPY tests/acceptance/fixtures/opencli-proof.sha256 /opt/non-bypass/opencli-proof.sha256
-RUN chmod 0555 /opt/iii/iii /opt/non-bypass/opencli-proof \
+COPY tests/acceptance/fixtures/opencli-failure-proof /opt/non-bypass/opencli-failure-proof
+COPY tests/acceptance/fixtures/opencli-failure-proof.sha256 /opt/non-bypass/opencli-failure-proof.sha256
+COPY tests/acceptance/non_bypass_vertical.py ./tests/acceptance/non_bypass_vertical.py
+COPY tests/acceptance/non_bypass_failure_matrix.py ./tests/acceptance/non_bypass_failure_matrix.py
+COPY tests/acceptance/non_bypass_failure_driver.py ./tests/acceptance/non_bypass_failure_driver.py
+COPY tests/acceptance/fault_tools/ ./tests/acceptance/fault_tools/
+COPY scripts/proof_bundle_governance.py ./scripts/proof_bundle_governance.py
+COPY scripts/proof_bundle_governance_http.py ./scripts/proof_bundle_governance_http.py
+COPY scripts/non_bypass_failure_proof_contract.py ./scripts/non_bypass_failure_proof_contract.py
+RUN chmod 0555 /opt/iii/iii /opt/non-bypass/opencli-proof /opt/non-bypass/opencli-failure-proof \
     && cd /opt/non-bypass && sha256sum -c opencli-proof.sha256 \
+    && sha256sum -c opencli-failure-proof.sha256 \
     && test "$(/opt/iii/iii --version)" = "0.19.4" \
     && chown -R appuser:appuser /opt/non-bypass
 ENV III_CLI_PATH=/opt/iii/iii \

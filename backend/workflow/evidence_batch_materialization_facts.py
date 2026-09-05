@@ -38,7 +38,9 @@ def report_keys(
     report: IIICollectionExpectedKeyReportV1, command: IIICollectionCommandV1
 ) -> tuple[list[OdpRecordKey], bool]:
     try:
-        expected = [OdpRecordKey(UUID(key["source_id"]), key["event_id"]) for key in report.expected_keys]
+        expected = [
+            OdpRecordKey(UUID(key["source_id"]), key["event_id"]) for key in report.expected_keys
+        ]
         command_source = UUID(command.odp_source_id)
     except (KeyError, TypeError, ValueError):
         return [], True
@@ -50,14 +52,18 @@ def report_keys(
 def receipt_outcomes(
     receipts: list[IIICollectionIngressReceiptV1], keys: list[OdpRecordKey]
 ) -> dict[OdpRecordKey, str] | None:
-    """Join complete receipts, treating accepted and duplicate as non-rejected."""
+    """Join complete signed receipts, preserving an observed duplicate outcome."""
     if not receipts:
         return None
     expected = {(str(key.source_id), key.event_id) for key in keys}
     result: dict[OdpRecordKey, str] = {}
     for receipt in receipts:
         outcomes = receipt.outcomes
-        observed = {(item.get("source_id"), item.get("event_id")) for item in outcomes if isinstance(item, dict)}
+        observed = {
+            (item.get("source_id"), item.get("event_id"))
+            for item in outcomes
+            if isinstance(item, dict)
+        }
         if len(outcomes) != len(expected) or observed != expected:
             return None
         for key in keys:
@@ -65,16 +71,25 @@ def receipt_outcomes(
                 (
                     item.get("outcome")
                     for item in outcomes
-                    if item.get("source_id") == str(key.source_id) and item.get("event_id") == key.event_id
+                    if (
+                        item.get("source_id") == str(key.source_id)
+                        and item.get("event_id") == key.event_id
+                    )
                 ),
                 None,
             )
             if outcome not in {"accepted", "duplicate", "rejected"}:
                 return None
-            classification = "rejected" if outcome == "rejected" else "non_rejected"
-            if key in result and result[key] != classification:
+            previous = result.get(key)
+            if previous is not None and ("rejected" in {previous, outcome} and previous != outcome):
                 return None
-            result[key] = classification
+            result[key] = (
+                "rejected"
+                if outcome == "rejected"
+                else "duplicate"
+                if "duplicate" in {previous, outcome}
+                else "accepted"
+            )
     return result if len(result) == len(expected) else None
 
 
@@ -91,6 +106,6 @@ def delegation(
         task_id=UUID(attempt.task_id),
         trace_id=UUID(attempt.trace_id),
         allowed_source_ids=(UUID(command.odp_source_id),),
-        allowed_modes=("exact", "attempt_page"),
+        allowed_modes=("exact", "attempt_page", "dlq"),
         expires_at=datetime.now(UTC) + _DELEGATION_TTL,
     )

@@ -8,6 +8,8 @@ import uuid
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
+from backend.main import app
+from backend.models.identity import User, Workspace, WorkspaceMembership, WorkspaceRole
 from backend.models.iii_collection import IIICollectionAttemptV1, IIICollectionCommandV1
 from backend.models.studio import (
     StudioProject,
@@ -21,6 +23,7 @@ from backend.schemas.iii_collection import (
     CollectorFinalExpectedKeyReportV1,
     ODPIngressOutcomeReceiptV1,
 )
+from backend.security.identity import RequestIdentity, get_request_identity
 from backend.workflow.iii_collection_store import (
     _attempt_and_outbound,
     _expected_key_set_hash,
@@ -70,8 +73,31 @@ async def create_scoped_run(db_session):
         request={},
         projection={},
     )
-    db_session.add_all([workspace, project, workflow, validation, version, run])
+    identity_workspace = Workspace(id=workspace.id, name="III", slug="iii")
+    operator = User(id="iii-test-operator", subject="iii-test-operator")
+    db_session.add_all(
+        [
+            workspace,
+            project,
+            workflow,
+            validation,
+            version,
+            run,
+            identity_workspace,
+            operator,
+            WorkspaceMembership(
+                workspace_id=identity_workspace.id,
+                user_id=operator.id,
+                role=WorkspaceRole.OPERATOR,
+            ),
+        ]
+    )
     await db_session.commit()
+
+    async def override_identity() -> RequestIdentity:
+        return RequestIdentity(subject=operator.subject)
+
+    app.dependency_overrides[get_request_identity] = override_identity
     return {
         "workspace": workspace,
         "project": project,
