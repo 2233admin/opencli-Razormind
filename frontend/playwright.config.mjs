@@ -10,7 +10,7 @@ const isolatedStudioUrl = process.env.STUDIO_TRACER_URL
 export default defineConfig({
   testDir: "./e2e",
   // These suites start isolated fixture servers through their own configs.
-  testIgnore: ['**/report-content.spec.mjs', '**/openalice-workspace.spec.mjs'],
+  testIgnore: ['**/report-content.spec.mjs', '**/openalice-workspace.spec.mjs', '**/feishu-connector-settings.spec.mjs'],
   use: {
     baseURL: `http://127.0.0.1:${port}`,
     browserName: "chromium",
