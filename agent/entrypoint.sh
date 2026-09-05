@@ -15,6 +15,8 @@ SCRIPT_HOST_VERSION="$(read_manifest_component_version opencli-script-host)"
 VIOLENTMONKEY_VERSION="$(read_manifest_component_version violentmonkey)"
 BUNDLE_EXTENSION_DIRS=()
 if [ -n "$BUNDLE_EXTENSION_OUTPUT" ]; then mapfile -t BUNDLE_EXTENSION_DIRS <<< "$BUNDLE_EXTENSION_OUTPUT"; fi
+BBX_EXTENSION_DIR="/opt/browser-bridge-extension"
+if [ -d "$BBX_EXTENSION_DIR" ]; then BUNDLE_EXTENSION_DIRS+=("$BBX_EXTENSION_DIR"); fi
 CHROME_EXTRA_FLAGS=(--disable-extensions)
 if [ "${#BUNDLE_EXTENSION_DIRS[@]}" -gt 0 ]; then
   EXTENSION_DIRS="$(IFS=,; echo "${BUNDLE_EXTENSION_DIRS[*]}")"

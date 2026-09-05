@@ -181,6 +181,8 @@ def test_vnc_agent_image_is_the_registered_browser_bridge_runtime():
     assert "COPY backend/agent_server.py ./backend/agent_server.py" in dockerfile
     assert "bbx install" in entrypoint
     assert "bbx-daemon" in entrypoint
+    assert 'BBX_EXTENSION_DIR="/opt/browser-bridge-extension"' in entrypoint
+    assert 'BUNDLE_EXTENSION_DIRS+=("$BBX_EXTENSION_DIR")' in entrypoint
     assert "env -u OPENCLI_DAEMON_PORT" in entrypoint
     assert "--profile-directory=Default" in entrypoint
     assert "--no-first-run" in entrypoint
@@ -197,7 +199,9 @@ def test_vnc_agent_image_is_the_registered_browser_bridge_runtime():
     assert "https://www.doubao.com/chat" in entrypoint
     assert "AGENT_MODE: ${AGENT_MODE:-bridge}" in compose
     assert "AGENT_REGISTER: ${AGENT_REGISTER:-ws}" in compose
+    assert "CENTRAL_API_URL: ${CENTRAL_API_URL:-http://api:8000}" in compose
     assert "AGENT_ADVERTISE_URL: ${AGENT_ADVERTISE_URL:-http://agent-1:19823}" in compose
+    assert "API_AUTH_TOKEN: ${API_AUTH_TOKEN:-}" in compose
     assert "agent_profile_1:/home/agent/.config/chromium" in compose
     assert "${AGENT_PORT:-19823}:19823" in compose
     assert "agent-1:\n    <<: *agent-build" in build

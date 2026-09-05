@@ -413,7 +413,9 @@ services:
       CLOAKBROWSER_LICENSE_KEY: ${CLOAKBROWSER_LICENSE_KEY:-}
       AGENT_MODE: ${AGENT_MODE:-bridge}
       AGENT_REGISTER: ${AGENT_REGISTER:-ws}
+      CENTRAL_API_URL: ${CENTRAL_API_URL:-http://api:8000}
       AGENT_ADVERTISE_URL: ${AGENT_ADVERTISE_URL:-http://agent-1:19823}
+      API_AUTH_TOKEN: ${API_AUTH_TOKEN:-}
       BROWSER_RUNTIME_BUNDLE_ROOT: /opt/browser-runtime-bundles
       BROWSER_RUNTIME_BUNDLE_MANIFEST: /opt/browser-runtime-bundles/opencli-default/2/manifest.json
     volumes:
