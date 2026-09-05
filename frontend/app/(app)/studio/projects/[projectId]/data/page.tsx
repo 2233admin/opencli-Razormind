@@ -11,6 +11,7 @@ import {
   ExternalLink,
   FileStack,
   FileSpreadsheet,
+  FileText,
   Filter,
   ChevronDown,
   ChevronUp,
@@ -33,6 +34,7 @@ import { EmptyState, ErrorState, LoadingState } from '@/components/shell/data-st
 import { PageContainer } from '@/components/shell/page-container'
 import { ProjectNavigation } from '@/components/studio/project-navigation'
 import { RunContextBanner } from '@/components/studio/run-context-banner'
+import { ProjectArtifactsPanel } from '@/components/artifacts/project-artifacts-panel'
 import { parseRunNavigation } from '@/lib/studio/run-navigation'
 import { Badge } from '@/components/ui/badge'
 import { Button, buttonVariants } from '@/components/ui/button'
@@ -45,7 +47,6 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { listRecords } from '@/lib/api/endpoints'
 import { useProjectWorkflows, useRecords, useWorkspaceProjects } from '@/lib/api/hooks'
 import type { CollectedRecord } from '@/lib/api/types'
-import { serializeCsvCell } from '@/lib/csv'
 import { formatDateTime, formatFreshness, formatRelative, formatSourceDateTime } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
@@ -61,7 +62,7 @@ const RECORD_STATUS_LABEL: Record<string, string> = {
   notified: '已交付',
   error: '处理失败',
 }
-type WorkbenchView = 'dataset' | 'profile' | 'quality' | 'files'
+type WorkbenchView = 'dataset' | 'profile' | 'quality' | 'files' | 'artifacts'
 type ExportFormat = 'xlsx' | 'csv' | 'json'
 type ExportScope = 'filtered' | 'selected'
 type DataLayer = 'merged' | 'normalized' | 'raw' | 'enrichment'
@@ -555,6 +556,7 @@ export default function ProjectDataWorkbenchPage({ params }: { params: Promise<{
               <ViewButton active={view === 'profile'} icon={BarChart3} onClick={() => setView('profile')}>字段分析</ViewButton>
               <ViewButton active={view === 'quality'} icon={ShieldCheck} onClick={() => setView('quality')}>质量统计</ViewButton>
               <ViewButton active={view === 'files'} icon={FileStack} onClick={() => setView('files')}>项目文件</ViewButton>
+              <ViewButton active={view === 'artifacts'} icon={FileText} onClick={() => setView('artifacts')}>项目产物</ViewButton>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <DropdownMenu>
@@ -584,7 +586,7 @@ export default function ProjectDataWorkbenchPage({ params }: { params: Promise<{
               {orchestrationHref ? <Link href={orchestrationHref} className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'min-h-10')}><Workflow className="size-4" />打开业务编排</Link> : null}
             </div>
           </div>
-          {view !== 'files' ? (
+          {view !== 'files' && view !== 'artifacts' ? (
             <div className="grid gap-3 p-3 lg:grid-cols-[minmax(0,1fr)_13rem_13rem_13rem_auto] lg:items-center">
               <div className="relative">
                 <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -630,6 +632,13 @@ export default function ProjectDataWorkbenchPage({ params }: { params: Promise<{
           <QualityView stats={qualityStats} dataLayer={dataLayer} />
         ) : view === 'files' ? (
           <ProjectInputsView groups={sourceGroups} />
+        ) : view === 'artifacts' ? (
+          <ProjectArtifactsPanel
+            workspaceId={workspaceId}
+            projectId={projectId}
+            workflowId={navigationContext.workflow}
+            runId={navigationContext.run}
+          />
         ) : records.length === 0 ? (
           <EmptyState title="项目还没有可显示的数据" description="运行并完成业务工作流后，记录会按 workflow_id 自动归入当前项目。" />
         ) : (

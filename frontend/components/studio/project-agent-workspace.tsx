@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { AgentWorkHealth } from '@/components/studio/agent-work-health'
 import { Input } from '@/components/ui/input'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useAgentConversations } from '@/lib/api/hooks'
@@ -94,6 +95,7 @@ export function ProjectAgentWorkspace({
   const activeCount = projectSessions.filter((session) => session.status === 'active').length
 
   return (
+    <div className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(20rem,0.9fr)]">
     <Card className="overflow-hidden border-primary/20 bg-gradient-to-br from-primary/[0.045] via-background to-background" aria-labelledby="project-agent-workspace-title">
       <CardHeader className="border-b bg-background/70 pb-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
@@ -166,5 +168,7 @@ export function ProjectAgentWorkspace({
         })}
       </CardContent>
     </Card>
+    <AgentWorkHealth workspaceId={workspaceId} projectId={projectId} />
+    </div>
   )
 }
