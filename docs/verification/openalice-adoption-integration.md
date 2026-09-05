@@ -1,6 +1,6 @@
 # OpenAlice 基础模块整合验收
 
-日期：2026-09-06。任务事实源为 [父任务 #116](https://github.com/2233admin/opencli-Razormind/issues/116)。本记录覆盖报告阅读器 #122 与工作状态 #123 的模块验收，不代表五项扩展任务或产品接线全部完成。
+日期：2026-09-06。任务事实源为 [父任务 #116](https://github.com/2233admin/opencli-Razormind/issues/116)。最新状态：#121 读取模块、#122 阅读器、#123 工作状态与 #124 项目/Inbox 接线已通过各自验收；#121 生产来源的研究续跑分支仍在补齐，#125 开始基础实施。整批任务和主分支合并尚未完成。
 
 ## 整合范围
 
@@ -49,3 +49,22 @@ Chromium 会为被 CSP 阻止的 CSS `@import` 和背景图发出 `request` 事�
 提前父目标复核确认并览界面与首页恢复已具备，发现生产来源尚未贯通：当前 Agent 只创建/修改草稿，用户后续手动运行时没有传递该会话；native writer 也未保存可信 conversation。预览示例和消费端测试不能证明该生产链路。已按 #121 新派发合同交 Sol 在独立 provenance worktree 实施，要求真实身份/范围复验、服务端运行来源、防输入伪造、幂等与恢复约束。#124 的真实 HTTP/隔离库 E2E 由 Luna 并行补齐，测试不使用用户预览数据库。
 
 #125 的 Proposed ADR 0046 已整合为 `5615922a`，尚未开放实施。官方 SDK 高层入口的提前 ACK/去重时序不满足持久接收要求，草案改用需要独立审查的同步验证入口与数据库收件边界。该设计交付不代表外部回复或领取功能已经实现。
+
+## 项目旅程验收与来源退回
+
+Luna 的端到端提交 `041ee94f` 已整合为 `3f915c57`，Sol 的生产来源提交 `bf6dee84` 已整合为 `a7d5f70b`。协调者在整合树独立复跑：
+
+- `pytest tests/integration/test_workflow_conversation_origin.py tests/unit/test_native_artifact_conversation_origin.py tests/integration/test_studio_lifecycle_api.py tests/integration/test_project_artifacts.py --no-cov -q`：36 项通过。
+- `pytest tests/integration/test_openalice_workspace_journey.py tests/unit/test_native_intelligence_contracts.py tests/unit/test_intelligence_store_dialects.py tests/integration/test_workflow_native_intelligence_lifecycle.py --no-cov -q`：69 项通过。
+- `OPENALICE_PYTHON=<本机隔离 Python> OPENCLI_NEXT_DIST_DIR=.next-openalice-e2e-8049 node node_modules/@playwright/test/cli.js test --config playwright.openalice-workspace.config.mjs`：1 条完整浏览器旅程通过，使用临时测试库与 8048/8049，结束后两端口已释放，8046/8047 预览继续运行。
+- `tsc --noEmit --incremental false`、来源/工作标签/Playwright 配置的 9 项 Node 检查通过；修改范围 ESLint 无错误，默认配置保留一个已有 unused-variable 警告。协调者另在 `4e9465e2` 隔离默认浏览器套件，移除验收 runner 的机器专属 Python 路径，并忽略其临时库。
+
+上述 105 项后端测试是定向验证，不是全仓覆盖率认证。第一次调用遗漏 `--no-cov`，13 项断言通过但命中全仓 80% 覆盖率门槛，命令失败；随后按定向模式完整复跑并通过，没有改低仓库覆盖率要求。
+
+浏览器旅程使用真实前端、HTTP API 和 SQLite，只有现有 `chat.run_chat_request` 边界被替换为确定性响应：两项目/三运行产物与 Records 隔离、报告正文、原会话追问实际写回、关闭/缺失会话状态、Inbox 提案并览、当前运行 CSV 导出均通过。它的产物来源是 fixture 中显式保存的关联，因此不作为 native 生产来源证据。结合此前正常登录、刷新/首页恢复、375px 与安全阅读器验证，#124 接受其完整合同范围。
+
+独立审查在生产来源实现中发现一项阻断：`research_continuation._load_run` 丢弃服务端来源，子 run 的 native writer 因而失去 conversation。该问题已按 [#121 退回合同](https://github.com/2233admin/opencli-Razormind/issues/121#issuecomment-5555099605) 交 Luna 在原 provenance 工作树修正，原 reviewer 随后复审。身份/owner/RBAC/精确范围、普通输入防伪、HDA continue/replay 与 writer 注入的其余重点已被审查接受。生产来源整体仍未验收，不开放 connector artifact grant。
+
+#125 ADR 0046 的官方同步 dispatcher 与持久 ACK 边界已通过独立审查，状态改为 Accepted。[第一波实施合同](https://github.com/2233admin/opencli-Razormind/issues/125#issuecomment-5555078767) 已发布并远端回读：Sol 仅负责安装、绑定、严格 SDK 入站和持久收件基础；原 Agent 回复、出站、产物领取和共享注册仍属于后续接线。SDK 的真实 wheel/线程/超时后迟到提交测试是验收门槛，尚未完成这项实现。
+
+本轮路由：Luna 交付项目 E2E 并接手明确的研究续跑修复；Sol 交付来源链并转入连接器安全边界；协调者完成集成和上述复跑；独立 reviewer 找到未覆盖的研究续跑路径后退回。业务数据、实际外部消息和主目录未改动，父目标最终独立验收仍待全部任务完成。
