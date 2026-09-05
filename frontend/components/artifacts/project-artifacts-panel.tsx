@@ -127,14 +127,15 @@ export function ProjectArtifactsPanel({
   })
   const current = detail.data ?? null
   const preview = current ? reportPreview(current) : null
+  const artifactListSettled = query.isSuccess && !query.isFetching
 
   useEffect(() => {
-    if (selectedId && !selected) {
+    if (artifactListSettled && selectedId && !selected) {
       const params = new URLSearchParams(searchParams.toString())
       params.delete('artifact')
       router.replace(`${pathname}${params.toString() ? `?${params.toString()}` : ''}`, { scroll: false })
     }
-  }, [pathname, router, searchParams, selected, selectedId])
+  }, [artifactListSettled, pathname, router, searchParams, selected, selectedId])
 
   function selectArtifact(id: string | null) {
     const params = new URLSearchParams(searchParams.toString())
@@ -222,7 +223,7 @@ export function ProjectArtifactsPanel({
       </CardContent>
 
       <Sheet open={Boolean(selectedId && selected)} onOpenChange={(open) => !open && selectArtifact(null)}>
-        <SheetContent className="w-full overflow-y-auto sm:max-w-2xl" data-testid="project-artifact-detail">
+        <SheetContent className="w-full overflow-y-auto sm:max-w-2xl data-[side=right]:w-full data-[side=right]:sm:max-w-2xl" data-testid="project-artifact-detail">
           <SheetHeader>
             <SheetTitle>{selected?.title ?? '项目产物'}</SheetTitle>
             <SheetDescription>{selected ? `${artifactKindLabel(selected.kind)} · ${selected.media_type} · run ${selected.run_id}` : '读取持久化产物详情'}</SheetDescription>

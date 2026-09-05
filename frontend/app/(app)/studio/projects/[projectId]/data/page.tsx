@@ -25,7 +25,7 @@ import {
   Workflow,
 } from 'lucide-react'
 import Link from 'next/link'
-import { useSearchParams } from 'next/navigation'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { use, useCallback, useEffect, useMemo, useState } from 'react'
 import * as XLSX from 'xlsx'
 import { toast } from 'sonner'
@@ -109,6 +109,15 @@ const DATA_LAYER_OPTIONS: Array<{ value: DataLayer; label: string }> = [
 function splitSortOption(option: SortOption) {
   const [sort_by, sort_order] = option.split(':') as [SortField, SortOrder]
   return { sort_by, sort_order }
+}
+
+function isWorkbenchView(value: string | null): value is WorkbenchView {
+  return value === 'dataset' || value === 'profile' || value === 'quality' || value === 'files' || value === 'artifacts'
+}
+
+function resolveWorkbenchView(value: string | null, hasArtifact: boolean): WorkbenchView {
+  if (hasArtifact) return 'artifacts'
+  return isWorkbenchView(value) ? value : 'dataset'
 }
 
 function dataLayerLabel(layer: DataLayer) {
@@ -290,11 +299,14 @@ function parseSavedView(value: unknown): SavedView | null {
 
 export default function ProjectDataWorkbenchPage({ params }: { params: Promise<{ projectId: string }> }) {
   const { projectId } = use(params)
+  const pathname = usePathname()
+  const router = useRouter()
   const searchParams = useSearchParams()
+  const searchParamsString = searchParams.toString()
   const workspaceId = searchParams.get('workspace')
   const navigationContext = parseRunNavigation(searchParams)
   const preferredWorkflowId = navigationContext.workflow
-  const [view, setView] = useState<WorkbenchView>('dataset')
+  const [view, setView] = useState<WorkbenchView>(() => resolveWorkbenchView(searchParams.get('view'), searchParams.has('artifact')))
   const [search, setSearch] = useState(searchParams.get('search') ?? '')
   const [status, setStatus] = useState('all')
   const [sortOption, setSortOption] = useState<SortOption>('created_at:desc')
@@ -312,6 +324,21 @@ export default function ProjectDataWorkbenchPage({ params }: { params: Promise<{
   const [saveViewOpen, setSaveViewOpen] = useState(false)
   const [newViewName, setNewViewName] = useState('')
   const [exporting, setExporting] = useState<ExportFormat | null>(null)
+
+  const changeView = useCallback((next: WorkbenchView) => {
+    setView(next)
+    const params = new URLSearchParams(searchParamsString)
+    params.set('view', next)
+    if (next !== 'artifacts') params.delete('artifact')
+    const query = params.toString()
+    router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false })
+  }, [pathname, router, searchParamsString])
+
+  useEffect(() => {
+    const params = new URLSearchParams(searchParamsString)
+    const nextView = resolveWorkbenchView(params.get('view'), params.has('artifact'))
+    setView((current) => current === nextView ? current : nextView)
+  }, [searchParamsString])
 
   const projectsQuery = useWorkspaceProjects(workspaceId)
   const workflowsQuery = useProjectWorkflows(workspaceId, projectId)
@@ -380,7 +407,7 @@ export default function ProjectDataWorkbenchPage({ params }: { params: Promise<{
     setPage(1)
     setSelectedRecord(null)
     setSelectedRecordIds([])
-  }, [dataLayer, search, sortOption, status])
+  }, [dataLayer, navigationContext.run, navigationContext.workflow, search, sortOption, status])
 
   useEffect(() => {
     try {
@@ -487,7 +514,7 @@ export default function ProjectDataWorkbenchPage({ params }: { params: Promise<{
   }, [dataLayer, newViewName, persistSavedViews, savedViews, search, selectedColumns, sortOption, status, view])
 
   const applySavedView = useCallback((savedView: SavedView) => {
-    setView(savedView.view)
+    changeView(savedView.view)
     setSearch(savedView.search)
     setStatus(savedView.status)
     setSortOption(savedView.sortOption)
@@ -496,7 +523,7 @@ export default function ProjectDataWorkbenchPage({ params }: { params: Promise<{
     setPage(1)
     setSelectedRecordIds([])
     toast.success(`已切换视图：${savedView.name}`)
-  }, [])
+  }, [changeView])
 
   const exportData = useCallback(async (format: ExportFormat, scope: ExportScope = 'filtered') => {
     setExporting(format)
@@ -568,11 +595,11 @@ export default function ProjectDataWorkbenchPage({ params }: { params: Promise<{
         <header className="border-b">
           <div className="flex flex-wrap items-center justify-between gap-3 px-3 pt-3">
             <div className="flex rounded-lg border bg-muted/30 p-1" aria-label="数据工作台视图">
-              <ViewButton active={view === 'dataset'} icon={Database} onClick={() => setView('dataset')}>数据集</ViewButton>
-              <ViewButton active={view === 'profile'} icon={BarChart3} onClick={() => setView('profile')}>字段分析</ViewButton>
-              <ViewButton active={view === 'quality'} icon={ShieldCheck} onClick={() => setView('quality')}>质量统计</ViewButton>
-              <ViewButton active={view === 'files'} icon={FileStack} onClick={() => setView('files')}>项目来源</ViewButton>
-              <ViewButton active={view === 'artifacts'} icon={FileText} onClick={() => setView('artifacts')}>项目产物</ViewButton>
+              <ViewButton active={view === 'dataset'} icon={Database} onClick={() => changeView('dataset')}>数据集</ViewButton>
+              <ViewButton active={view === 'profile'} icon={BarChart3} onClick={() => changeView('profile')}>字段分析</ViewButton>
+              <ViewButton active={view === 'quality'} icon={ShieldCheck} onClick={() => changeView('quality')}>质量统计</ViewButton>
+              <ViewButton active={view === 'files'} icon={FileStack} onClick={() => changeView('files')}>项目来源</ViewButton>
+              <ViewButton active={view === 'artifacts'} icon={FileText} onClick={() => changeView('artifacts')}>项目产物</ViewButton>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <DropdownMenu>
