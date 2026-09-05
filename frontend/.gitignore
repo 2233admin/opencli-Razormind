@@ -16,6 +16,7 @@ node_modules
 tsconfig.tsbuildinfo
 test-results/
 playwright-report/
+e2e/openalice-workspace-support/.runtime/
 *.log
 .tmp-*.log
 .mcp.json

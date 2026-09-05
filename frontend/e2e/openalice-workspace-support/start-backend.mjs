@@ -13,8 +13,8 @@ rmSync(dbPath, { force: true })
 
 const pythonCandidates = [
   process.env.OPENALICE_PYTHON,
-  'D:\\projects\\opencli-integration-venv-20260905\\Scripts\\python.exe',
   path.join(repositoryRoot, '.venv', 'Scripts', 'python.exe'),
+  path.join(repositoryRoot, '.venv', 'bin', 'python'),
   'python',
 ].filter(Boolean)
 const python = pythonCandidates.find((candidate) => candidate === 'python' || existsSync(candidate)) ?? 'python'

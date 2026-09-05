@@ -1,6 +1,6 @@
 # ADR 0046：以显式授权接入飞书 Agent 回复与产物领取
 
-- 状态：Proposed
+- 状态：Accepted（分波次实施，尚未完成渠道功能）
 - 日期：2026-09-06
 - 关联：GitHub Issue #125，ADR 0045
 
@@ -21,12 +21,21 @@ Workspace/Project 授权读取产物的能力，但这些能力不能直接组�
 - Fleet Auth 会拦截普通 `/api` 请求，而飞书事件服务器不能持有平台的 fleet
   token。
 
-当前普通 workflow 产物也没有可信的原会话来源。`WorkflowRunStartRequest` 没有
+方案制定时，普通 workflow 产物也没有可信的原会话来源。`WorkflowRunStartRequest` 没有
 conversation 字段；native executor 的 `run_context` 只有 run/workflow/trace/node；
 `ArtifactProvenance` 禁止额外字段且只有 source/evidence/time，现有 producers 因而
 不能写入 conversation。只有 Agent `send_message` 创建的 `ProposalProvenance` 已经
 携带可信 conversation，但它没有贯通 workflow 启动链。隔离预览 seed 中展示的
 conversation 关联只是演示数据，不能作为生产授权依据。
+
+2026-09-06 独立审查接受本 ADR 的实施边界，并核对固定 v1.4.0 官方源码：同步
+`EventDispatcherHandler.do(RawRequest)` 的 callback 异常返回 500，高层 Channel
+handler 则不等待业务持久化。实施必须通过真实固定 wheel 的导入/签名分派测试、
+thread/loop 时序测试和 timeout → late commit → retry 幂等测试。
+
+#121 的服务端来源实现已进入整合分支 `a7d5f70b`，生产来源仍须完成独立验收后才可
+开放 artifact grant。#125 第一波只实现安装、绑定、严格 SDK 入站和持久收件，未
+实现的原 Agent 回复、出站和领取必须保持明确未就绪状态。
 
 飞书官方文档规定，消息事件需要在 3 秒内处理完成，否则会触发超时重推；接收
 消息可能重复，消息场景应按 `message_id` 去重，不能依赖 `event_id`。事件同时
