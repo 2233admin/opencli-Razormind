@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useMemo, useRef, type MouseEvent } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react"
 
 import {
   coerceReportText,
@@ -11,6 +11,7 @@ import {
   type ReportContentKind,
   type ReportContentState,
 } from "@/lib/artifacts/report-content"
+import styles from "./report-content.module.css"
 
 export type ReportContentViewProps = {
   content?: unknown
@@ -35,6 +36,9 @@ export function ReportContentView({
   errorMessage,
   className = "",
 }: ReportContentViewProps) {
+  const [browserReady, setBrowserReady] = useState(false)
+  useEffect(() => setBrowserReady(true), [])
+
   if (state !== "ready") {
     return (
       <div
@@ -72,28 +76,64 @@ export function ReportContentView({
     )
   }
 
-  return <ReadyReportContent content={content} kind={kind} className={className} />
+  return (
+    <ReadyReportContent
+      browserReady={browserReady}
+      content={content}
+      kind={kind}
+      className={className}
+    />
+  )
 }
 
 function ReadyReportContent({
   content,
   kind,
   className,
+  browserReady,
 }: {
   content: unknown
   kind: ReportContentKind
   className: string
+  browserReady: boolean
 }) {
-  if (kind === "html") return <HtmlReportPreview content={coerceReportText(content)} className={className} />
-  if (kind === "markdown") return <MarkdownReportPreview content={coerceReportText(content)} className={className} />
+  if (kind === "html") {
+    return (
+      <HtmlReportPreview
+        browserReady={browserReady}
+        content={coerceReportText(content)}
+        className={className}
+      />
+    )
+  }
+  if (kind === "markdown") {
+    return (
+      <MarkdownReportPreview
+        browserReady={browserReady}
+        content={coerceReportText(content)}
+        className={className}
+      />
+    )
+  }
   if (kind === "json") return <JsonReportPreview content={content} className={className} />
   if (kind === "table") return <TableReportPreview content={content} className={className} />
   return <PlainReportPreview content={coerceReportText(content)} code={kind === "code"} className={className} />
 }
 
-function MarkdownReportPreview({ content, className }: { content: string; className: string }) {
+function MarkdownReportPreview({
+  content,
+  className,
+  browserReady,
+}: {
+  content: string
+  className: string
+  browserReady: boolean
+}) {
   const contentRef = useRef<HTMLDivElement>(null)
-  const html = useMemo(() => renderMarkdownHtml(content), [content])
+  const html = useMemo(
+    () => (browserReady ? renderMarkdownHtml(content) : ""),
+    [browserReady, content],
+  )
 
   const copyCode = useCallback(async (event: MouseEvent<HTMLDivElement>) => {
     const target = event.target as HTMLElement
@@ -115,10 +155,14 @@ function MarkdownReportPreview({ content, className }: { content: string; classN
     }
   }, [])
 
+  if (!browserReady) {
+    return <PlainReportPreview content={content} code={false} className={className} />
+  }
+
   return (
     <div
       ref={contentRef}
-      className={`report-markdown min-w-0 overflow-hidden rounded-lg border border-border bg-card p-4 text-sm leading-7 ${className}`}
+      className={`${styles.markdown} report-markdown min-w-0 overflow-hidden rounded-lg border border-border bg-card p-4 text-sm leading-7 ${className}`}
       data-report-kind="markdown"
       onClick={copyCode}
       dangerouslySetInnerHTML={{ __html: html }}
@@ -126,8 +170,19 @@ function MarkdownReportPreview({ content, className }: { content: string; classN
   )
 }
 
-function HtmlReportPreview({ content, className }: { content: string; className: string }) {
-  const srcDoc = useMemo(() => createIsolatedHtmlDocument(content), [content])
+function HtmlReportPreview({
+  content,
+  className,
+  browserReady,
+}: {
+  content: string
+  className: string
+  browserReady: boolean
+}) {
+  const srcDoc = useMemo(
+    () => (browserReady ? createIsolatedHtmlDocument(content) : ""),
+    [browserReady, content],
+  )
   return (
     <div className={`min-w-0 overflow-hidden rounded-lg border border-border bg-white ${className}`} data-report-kind="html">
       <iframe
@@ -165,25 +220,33 @@ function PlainReportPreview({
 }
 
 function TableReportPreview({ content, className }: { content: unknown; className: string }) {
-  const rows = Array.isArray(content)
-    ? content.map((row) =>
-        row && typeof row === "object" && !Array.isArray(row)
-          ? Object.values(row as Record<string, unknown>).map(coerceReportText)
-          : [coerceReportText(row)],
+  const contentArray = Array.isArray(content) ? content : []
+  const objectRows = contentArray.filter(
+        (row): row is Record<string, unknown> =>
+          Boolean(row) && typeof row === "object" && !Array.isArray(row),
       )
-    : csvRows(coerceReportText(content))
-  const headers = Array.isArray(content) && content[0] && typeof content[0] === "object" && !Array.isArray(content[0])
-    ? Object.keys(content[0] as Record<string, unknown>)
+  const isObjectTable = objectRows.length === contentArray.length && objectRows.length > 0
+  const headers = isObjectTable
+    ? Array.from(new Set(objectRows.flatMap((row) => Object.keys(row))))
+    : []
+  const rows = isObjectTable
+    ? objectRows.map((row) => headers.map((header) => coerceReportText(row[header])))
+    : contentArray.length > 0 || Array.isArray(content)
+      ? contentArray.map((row) => (Array.isArray(row) ? row.map(coerceReportText) : [coerceReportText(row)]))
+      : csvRows(coerceReportText(content))
+  const columnHeaders = headers.length > 0
+    ? headers
     : rows[0]?.map((_value, index) => `Column ${index + 1}`) || []
+  const csvTable = !Array.isArray(content)
 
   return (
     <div className={`min-w-0 overflow-x-auto rounded-lg border border-border bg-card ${className}`} data-report-kind="table">
       <table className="min-w-full border-collapse text-left text-sm">
         <thead className="bg-muted/60">
-          <tr>{headers.map((header) => <th className="border-b px-3 py-2 font-medium" key={header}>{header}</th>)}</tr>
+          <tr>{columnHeaders.map((header) => <th className="border-b px-3 py-2 font-medium" key={header}>{header}</th>)}</tr>
         </thead>
         <tbody>
-          {rows.slice(Array.isArray(content) ? 0 : 1).map((row, rowIndex) => (
+          {rows.slice(csvTable ? 1 : 0).map((row, rowIndex) => (
             <tr className="align-top odd:bg-muted/20" key={`${rowIndex}-${row.join("|")}`}>
               {row.map((value, cellIndex) => <td className="border-b px-3 py-2 whitespace-pre-wrap" key={`${rowIndex}-${cellIndex}`}>{value}</td>)}
             </tr>

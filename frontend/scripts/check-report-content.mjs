@@ -19,6 +19,9 @@ test("report content exposes every supported preview state and kind", async () =
     assert.match(component, new RegExp(`data-report-state=\\\"${state}\\\"|${state}`))
   }
   assert.match(component, /export type ReportContentViewProps/)
+  assert.match(component, /useEffect\(\(\) => setBrowserReady\(true\), \[\]\)/)
+  assert.match(component, /browserReady \? renderMarkdownHtml\(content\) : \"\"/)
+  assert.match(component, /browserReady \? createIsolatedHtmlDocument\(content\) : \"\"/)
 })
 test("markdown preview sanitizes before adding copy controls", async () => {
   const contract = await source("lib/artifacts/report-content.ts")
@@ -27,6 +30,9 @@ test("markdown preview sanitizes before adding copy controls", async () => {
   assert.match(contract, /purifier\.sanitize\(parsed/)
   assert.match(contract, /restrictMarkdownLinks\(sanitized\)/)
   assert.match(contract, /data-copy-report-code/)
+  assert.match(contract, /FORBID_TAGS: \[\.\.\.MARKDOWN_FORBIDDEN_TAGS\]/)
+  assert.match(contract, /target\", \"_blank\"/)
+  assert.match(contract, /noopener noreferrer/)
   assert.match(component, /navigator\.clipboard\.writeText/)
 })
 
@@ -40,4 +46,14 @@ test("HTML preview is isolated and has no active resource policy", async () => {
   assert.match(contract, /connect-src 'none'/)
   assert.match(contract, /FORBID_TAGS: \[\.\.\.HTML_FORBIDDEN_TAGS\]/)
   assert.match(contract, /startsWith\(\"data:\"\)/)
+})
+
+test("table previews use the installed parser and align object columns by key", async () => {
+  const contract = await source("lib/artifacts/report-content.ts")
+  const component = await source("components/artifacts/report-content-view.tsx")
+
+  assert.match(contract, /XLSX\.read\(source/)
+  assert.match(contract, /sheet_to_json/)
+  assert.match(component, /new Set\(objectRows\.flatMap\(\(row\) => Object\.keys\(row\)\)\)/)
+  assert.match(component, /headers\.map\(\(header\) => coerceReportText\(row\[header\]\)\)/)
 })

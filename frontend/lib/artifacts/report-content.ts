@@ -2,6 +2,7 @@ import DOMPurify from "dompurify"
 import { Marked } from "marked"
 import { markedHighlight } from "marked-highlight"
 import hljs from "highlight.js/lib/common"
+import * as XLSX from "xlsx"
 
 export type ReportContentKind =
   | "markdown"
@@ -28,6 +29,21 @@ const markdown = new Marked(
   }),
   { breaks: true, gfm: true },
 )
+
+const MARKDOWN_FORBIDDEN_TAGS = [
+  "base",
+  "embed",
+  "form",
+  "iframe",
+  "input",
+  "link",
+  "meta",
+  "object",
+  "script",
+  "select",
+  "style",
+  "textarea",
+] as const
 
 const HTML_FORBIDDEN_TAGS = [
   "base",
@@ -109,7 +125,11 @@ function restrictMarkdownLinks(html: string): string {
   const document = parser.parseFromString(`<body>${html}</body>`, "text/html")
   for (const anchor of document.querySelectorAll("a")) {
     const href = (anchor.getAttribute("href") || "").trim()
-    if (!href.startsWith("#")) {
+    if (href.startsWith("#")) continue
+    if (/^https?:\/\//i.test(href)) {
+      anchor.setAttribute("target", "_blank")
+      anchor.setAttribute("rel", "noopener noreferrer")
+    } else {
       anchor.removeAttribute("href")
       anchor.setAttribute("aria-disabled", "true")
     }
@@ -135,6 +155,7 @@ export function inferReportContentKind(
   const normalized = (mediaType || "").toLowerCase().split(";", 1)[0]
   if (normalized === "text/markdown" || normalized === "text/x-markdown") return "markdown"
   if (normalized === "text/html" || normalized === "application/xhtml+xml") return "html"
+  if (normalized === "application/vnd.openalice.table+json") return "table"
   if (normalized === "application/json" || normalized.endsWith("+json")) return "json"
   if (normalized === "text/csv" || normalized === "text/tab-separated-values") return "table"
   if (normalized.startsWith("text/")) return "text"
@@ -156,6 +177,7 @@ export function renderMarkdownHtml(source: string): string {
   const purifier = browserPurifier()
   const parsed = markdown.parse(source) as string
   const sanitized = purifier.sanitize(parsed, {
+    FORBID_TAGS: [...MARKDOWN_FORBIDDEN_TAGS],
     FORBID_ATTR: ["style", "srcdoc"],
   })
   return addMarkdownTableShells(addMarkdownCodeActions(restrictMarkdownLinks(sanitized)))
@@ -198,9 +220,16 @@ export function createIsolatedHtmlDocument(source: string): string {
 }
 
 export function csvRows(source: string): string[][] {
-  return source
-    .split(/\r?\n/)
-    .filter((line) => line.trim().length > 0)
-    .map((line) => line.split("\t"))
-    .map((line) => (line.length > 1 ? line : line[0].split(",")))
+  const workbook = XLSX.read(source, {
+    type: "string",
+    raw: false,
+    FS: source.includes("\t") ? "\t" : ",",
+  })
+  const firstSheet = workbook.Sheets[workbook.SheetNames[0] || ""]
+  if (!firstSheet) return []
+  return (XLSX.utils.sheet_to_json(firstSheet, {
+    header: 1,
+    defval: "",
+    raw: false,
+  }) as unknown[][]).map((row) => row.map(coerceReportText))
 }

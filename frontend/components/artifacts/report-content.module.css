@@ -1,0 +1,97 @@
+.markdown {
+  color: var(--foreground);
+}
+
+.markdown :global(h1),
+.markdown :global(h2),
+.markdown :global(h3),
+.markdown :global(h4) {
+  margin: 1.25rem 0 0.6rem;
+  font-weight: 650;
+  line-height: 1.25;
+}
+
+.markdown :global(h1) { font-size: 1.5rem; }
+.markdown :global(h2) { font-size: 1.25rem; }
+.markdown :global(h3) { font-size: 1.1rem; }
+.markdown :global(p),
+.markdown :global(ul),
+.markdown :global(ol),
+.markdown :global(blockquote) { margin: 0.75rem 0; }
+.markdown :global(ul),
+.markdown :global(ol) { padding-left: 1.4rem; }
+.markdown :global(blockquote) {
+  border-left: 3px solid var(--border);
+  color: var(--muted-foreground);
+  padding-left: 0.9rem;
+}
+.markdown :global(a) {
+  color: var(--primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.markdown :global(a[aria-disabled="true"]) {
+  color: var(--muted-foreground);
+  cursor: not-allowed;
+  text-decoration-style: dotted;
+}
+.markdown :global(.report-table-shell) {
+  margin: 1rem 0;
+  max-width: 100%;
+  overflow-x: auto;
+}
+.markdown :global(table) {
+  min-width: 100%;
+  border-collapse: collapse;
+}
+.markdown :global(th),
+.markdown :global(td) {
+  border: 1px solid var(--border);
+  padding: 0.45rem 0.65rem;
+  text-align: left;
+  vertical-align: top;
+}
+.markdown :global(th) { background: color-mix(in srgb, var(--muted) 35%, transparent); }
+.markdown :global(.report-code-block) {
+  margin: 1rem 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: hsl(var(--muted) / 0.2);
+}
+.markdown :global(.report-code-header) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border-bottom: 1px solid var(--border);
+  padding: 0.4rem 0.65rem;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.markdown :global(.report-code-header button) {
+  border: 1px solid var(--border);
+  border-radius: 0.35rem;
+  background: var(--background);
+  padding: 0.2rem 0.5rem;
+  color: var(--foreground);
+  cursor: pointer;
+  font-size: 0.75rem;
+  text-transform: none;
+  letter-spacing: normal;
+}
+.markdown :global(.report-code-header button:hover) { background: var(--muted); }
+.markdown :global(pre) {
+  margin: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  padding: 0.8rem;
+}
+.markdown :global(code) { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.markdown :global(img) { max-width: 100%; height: auto; }
+
+@media (max-width: 640px) {
+  .markdown { padding: 0.8rem; }
+}
