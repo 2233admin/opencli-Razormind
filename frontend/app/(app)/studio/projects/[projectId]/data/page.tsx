@@ -69,16 +69,8 @@ type DataLayer = 'merged' | 'normalized' | 'raw' | 'enrichment'
 type SortField = 'created_at' | 'updated_at' | 'status' | 'source_id' | 'workflow_id' | 'workflow_run_id'
 type SortOrder = 'asc' | 'desc'
 type SortOption = `${SortField}:${SortOrder}`
-type RecordFilterInput = {
+type RecordFilterInput = NonNullable<Parameters<typeof listRecords>[0]> & {
   project_id: string
-  status?: string
-  search?: string
-  sort_by?: SortField
-  sort_order?: SortOrder
-  workflow_id?: string
-  workflow_run_id?: string
-  page?: number
-  limit?: number
 }
 type SavedView = {
   id: string
@@ -220,7 +212,7 @@ async function listAllRecords(filters: RecordFilterInput) {
       ...filters,
       page: currentPage,
       limit: EXPORT_PAGE_SIZE,
-    } as Parameters<typeof listRecords>[0])
+    })
     allRecords.push(...response.data)
     if (!response.meta || currentPage >= response.meta.pages || response.data.length === 0) break
     currentPage += 1
@@ -354,7 +346,7 @@ export default function ProjectDataWorkbenchPage({ params }: { params: Promise<{
     ...(navigationContext.workflow ? { workflow_id: navigationContext.workflow } : {}),
     ...(navigationContext.run ? { workflow_run_id: navigationContext.run } : {}),
   }
-  const recordsQuery = useRecords(recordFilters as Parameters<typeof useRecords>[0])
+  const recordsQuery = useRecords(recordFilters)
   const project = projectsQuery.data?.find((candidate) => candidate.id === projectId)
   const workflows = workflowsQuery.data ?? []
   const records = useMemo(() => recordsQuery.data?.data ?? [], [recordsQuery.data?.data])

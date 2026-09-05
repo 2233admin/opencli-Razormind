@@ -672,6 +672,8 @@ export const listRecords = (params?: {
   source_id?: string;
   task_id?: string;
   project_id?: string;
+  workflow_id?: string;
+  workflow_run_id?: string;
   status?: string;
   search?: string;
   page?: number;
