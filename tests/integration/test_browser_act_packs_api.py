@@ -7,7 +7,16 @@ test order/host, same as PackCatalog's own unit tests.
 import pytest
 
 SEEDED_WITH_MANIFEST = {
+    "ecommerce/ecommerce-listing",
+    "ecommerce/ecommerce-product-detail",
+    "ecommerce/ecommerce-reviews",
+    "ecommerce/ecommerce-seller-info",
+    "ecommerce/goofish-item-detail",
+    "ecommerce/goofish-search-list",
     "ecommerce/taobao-keyword-search",
+    "ecommerce/taobao-product-detail",
+    "ecommerce/taobao-product-reviews",
+    "ecommerce/taobao-shop-catalog",
     "search-research/google-search-serp",
 }
 

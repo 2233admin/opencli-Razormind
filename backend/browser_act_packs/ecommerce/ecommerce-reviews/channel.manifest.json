@@ -1,0 +1,15 @@
+{
+  "domain": "ecommerce",
+  "capability": "ecommerce-reviews",
+  "param_schema": [
+    {"name": "url", "required": true},
+    {"name": "max_reviews", "required": false, "default": "20"}
+  ],
+  "steps": [
+    {"op": "navigate", "url_template": "{url}"},
+    {"op": "wait", "wait_mode": "stable"},
+    {"op": "eval_script", "script": "scripts/extract-reviews.py", "args": ["--max-reviews", "{max_reviews}"]}
+  ],
+  "pagination": {"mode": "none"},
+  "success": {"min_count": 1, "required_field": "body"}
+}

@@ -1,0 +1,14 @@
+{
+  "domain": "ecommerce",
+  "capability": "taobao-product-reviews",
+  "param_schema": [
+    {"name": "item_id", "required": true}
+  ],
+  "steps": [
+    {"op": "navigate", "url_template": "https://item.taobao.com/item.htm?id={item_id}"},
+    {"op": "wait", "wait_mode": "stable"},
+    {"op": "eval_script", "script": "scripts/extract-reviews.py", "args": ["{item_id}"]}
+  ],
+  "pagination": {"mode": "none"},
+  "success": {"min_count": 1, "required_field": "username"}
+}
