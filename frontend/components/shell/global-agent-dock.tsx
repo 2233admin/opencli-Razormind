@@ -27,6 +27,7 @@ import {
   type AgentConversationProposal,
 } from '@/lib/api/agent-conversations'
 import { apiClient } from '@/lib/api/client'
+import { proposalQueryKeys, recentAgentMessages } from '@/lib/agent-dock-state'
 import { ROUTE_LABELS } from '@/lib/navigation'
 
 type AgentMessage = {
@@ -283,6 +284,7 @@ export function GlobalAgentDock({
     if (!proposal || confirming) return
     setError(null)
     setConfirming(true)
+    const proposalToConfirm = proposal
     try {
       await apiClient.post('/chat/confirm', { proposal })
       setMessages((current) => [
@@ -290,7 +292,9 @@ export function GlobalAgentDock({
         { role: 'assistant', content: `已执行：${proposal.summary}` },
       ])
       setProposal(null)
-      await queryClient.invalidateQueries()
+      await Promise.all(proposalQueryKeys(proposalToConfirm).map((queryKey) =>
+        queryClient.invalidateQueries({ queryKey }),
+      ))
     } catch (reason) {
       const status = reason instanceof Error && 'status' in reason ? reason.status : undefined
       const message = reason instanceof Error ? reason.message : '操作执行失败'
@@ -310,6 +314,7 @@ export function GlobalAgentDock({
     void sendMessage()
   }
 
+  const visibleMessages = recentAgentMessages(messages)
   const selectedSession = sessions.find((session) => session.id === sessionId)
   const canClose = Boolean(selectedSession?.status === 'active' && !sending && !confirming && !closing)
 
@@ -392,7 +397,7 @@ export function GlobalAgentDock({
                 </p>
               </div>
             ) : null}
-            {messages.map((message, index) => (
+            {visibleMessages.map((message, index) => (
               <div
                 key={`${message.role}-${index}`}
                 className={message.role === 'user'

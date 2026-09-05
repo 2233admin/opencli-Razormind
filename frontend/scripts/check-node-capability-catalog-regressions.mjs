@@ -409,7 +409,7 @@ test('node picker and inspector share the workflow language setting', async () =
   assert.match(inspector, /language=\{language\}/)
   assert.match(inspector, /shouldPreserveNodeAuthoredText/)
   assert.match(inspector, /businessLevel && !prefersCustomLabel/)
-  assert.match(node, /businessNodeName\([\s\S]{0,320}language,\s*\}\)/)
+  assert.match(node, /businessNodeName\([\s\S]{0,320}language,?\s*\}\)/)
 })
 
 test('tool picker exposes access and readiness as separate filter groups', async () => {

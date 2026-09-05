@@ -113,3 +113,18 @@ async def test_plugin_validators_and_contributors_survive_run_continuation(db_se
     await continue_workflow_run_with_source_outputs(result.runId, WorkflowRunSourceOutputsRequest(sourceOutputs={"fixture-source": [{"content": "Updated"}]}), session=db_session, plugins=registry)
     assert len(probe.contributions) > counts[0]
     assert len(probe.validations) > counts[1]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("roles", ["platform-admin", {"platform-admin": False}, None, 123])
+async def test_direct_browser_invoke_rejects_malformed_admin_claim(monkeypatch, roles):
+    from backend.api.v1 import browsers
+    from backend.schemas.browser import CapabilityInvokeRequest
+    monkeypatch.setattr(browsers, "_browser_instance_or_404", AsyncMock(return_value=SimpleNamespace(id="browser")))
+    invoke = AsyncMock(side_effect=HTTPException(403, "Capability gate required"))
+    monkeypatch.setattr(browsers.browser_capability_service, "invoke_capability", invoke)
+    with pytest.raises(HTTPException) as error:
+        await browsers.invoke_runtime_capability("browser", "mutate", CapabilityInvokeRequest(args={}),
+            identity=RequestIdentity(subject="caller", claims={"roles": roles}), db=AsyncMock())
+    assert error.value.status_code == 403
+    assert invoke.await_args.kwargs["gate_authorized"] is False

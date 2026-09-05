@@ -40,7 +40,7 @@ test('dashboard answers attention, live state, and next action before analytics'
   const dashboard = await read('app/(app)/dashboard/page.tsx')
   const attention = dashboard.indexOf('需要你处理')
   const liveState = dashboard.indexOf('现在正在发生')
-  const nextAction = dashboard.indexOf('下一步')
+  const nextAction = dashboard.indexOf('>下一步</p>')
   const overview = dashboard.indexOf('系统概览')
 
   assert.ok(attention >= 0, 'attention summary should be present')

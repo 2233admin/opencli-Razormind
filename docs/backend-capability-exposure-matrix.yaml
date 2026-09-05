@@ -1,6 +1,6 @@
 version: 1
 source: backend.main.app.openapi
-openapi_operation_count: 342
+openapi_operation_count: 343
 allowed_dispositions:
 - operator_ui
 - studio_binding
@@ -3342,6 +3342,16 @@ operations:
   target_epic: Workflow Studio
   decision: Expose scoped analysis and research evidence through the Studio run inspector.
   capability_id: studio.workflow
+- method: GET
+  path: /api/v1/workspaces/{workspace_id}/browser-spaces/instances
+  operation_id: list_available_browser_instances_api_v1_workspaces__workspace_id__browser_spaces_instances_get
+  frontend_route: /browsers
+  wrapper: null
+  disposition: operator_ui
+  target_epic: Browser Spaces
+  decision: List authorized available browser instances for the workspace space picker.
+  capability_id: operator.workspace-governance
+
 unreferenced_wrappers:
 - wrapper: invokeBrowserCapability
   operation_id: invoke_runtime_capability_api_v1_browser_sessions__instance_id__capabilities__capability__invoke_post

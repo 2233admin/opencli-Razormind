@@ -452,3 +452,21 @@ async def test_resolve_agent_event_callback_exception_fails_pending_task():
 
     with pytest.raises(ValueError, match="boom"):
         await fut
+
+
+@pytest.mark.asyncio
+async def test_agent_event_rejects_foreign_socket_before_persist_or_ack(monkeypatch):
+    from unittest.mock import AsyncMock
+    callback = AsyncMock()
+    owner = AsyncMock()
+    foreign = AsyncMock()
+    monkeypatch.setitem(mgr._connections, "owner-agent", owner)
+    monkeypatch.setitem(mgr._agent_task_callbacks, "owned-request", (callback, "owner-agent"))
+    frame = {"event": {"type": "evidence"}, "ack_required": True, "event_id": "event-1"}
+    await mgr.resolve_agent_event("owned-request", frame, source_ws=foreign)
+    callback.assert_not_awaited()
+    foreign.send_json.assert_not_awaited()
+    owner.send_json.assert_not_awaited()
+    await mgr.resolve_agent_event("owned-request", frame, source_ws=owner)
+    callback.assert_awaited_once_with(frame["event"])
+    owner.send_json.assert_awaited_once()

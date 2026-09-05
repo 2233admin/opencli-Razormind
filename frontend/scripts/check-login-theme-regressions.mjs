@@ -45,8 +45,8 @@ test('OIDC keeps PKCE in the browser while proxying CORS-blocked token and JWKS 
     read('next.config.mjs'),
   ])
 
-  assert.match(provider, /acceptIdentityToken\(user\.id_token\)/)
-  assert.match(provider, /acceptIdentityToken\(oidcUser\.id_token\)/)
+  assert.match(provider, /recoverIdentityToken\(user\.id_token, 'oidc', epoch\)/)
+  assert.match(provider, /recoverIdentityToken\(oidcUser\.id_token!, 'oidc', epoch\)/)
   assert.doesNotMatch(provider, /acceptIdentityToken\(user\.access_token\)/)
   assert.doesNotMatch(provider, /acceptIdentityToken\(oidcUser\.access_token\)/)
   assert.match(oidc, /NEXT_PUBLIC_OIDC_AUTHORIZATION_ENDPOINT/)

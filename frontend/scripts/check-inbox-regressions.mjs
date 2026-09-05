@@ -10,10 +10,10 @@ test('inbox combines existing operational signals with server-backed human appro
   const hooks = await read('lib/api/hooks.ts')
   const endpoints = await read('lib/api/endpoints.ts')
 
-  assert.match(page, /useInfiniteTasks\(\{ status: 'failed', limit: 100 \}\)/)
-  assert.match(page, /useInfiniteTasks\(\{ status: 'pending', limit: 100 \}\)/)
-  assert.match(page, /useInfiniteNotificationLogs\(\{ limit: 100 \}\)/)
-  assert.match(page, /useInfiniteControlActions\(\{ outcome: 'pending', limit: 100 \}\)/)
+  assert.match(page, /useInfiniteTasks\(\{ status: 'failed', limit: 100 \}, \{ enabled: pendingActive \}\)/)
+  assert.match(page, /useInfiniteTasks\(\{ status: 'pending', limit: 100 \}, \{ enabled: pendingActive \}\)/)
+  assert.match(page, /useInfiniteNotificationLogs\(\{ limit: 100 \}, \{ enabled: pendingActive \}\)/)
+  assert.match(page, /useInfiniteControlActions\(\s*\{ outcome: 'pending', limit: 100 \},\s*\{ enabled: pendingActive \},?\s*\)/)
   assert.match(hooks, /export function useInfiniteTasks/)
   assert.match(hooks, /export function useInfiniteNotificationLogs/)
   assert.match(hooks, /export function useInfiniteControlActions/)
@@ -21,7 +21,8 @@ test('inbox combines existing operational signals with server-backed human appro
     endpoints,
     /listNotificationLogs = \(params\?: \{\s*rule_id\?: string;\s*page\?: number;\s*limit\?: number;\s*\}\) =>/,
   )
-  assert.doesNotMatch(page, /useMyWorkspaces|useOperationsInbox|\/workspaces|operations-inbox/)
+  assert.match(page, /useOperationsInbox\(workspaceId, 'open'/)
+  assert.match(approvalDetail, /ApprovalQueueDetail/)
 })
 
 test('inbox uses a Linear-style queue while preserving destinations for underlying records', async () => {
@@ -46,8 +47,8 @@ test('inbox uses a Linear-style queue while preserving destinations for underlyi
   assert.match(page, /scrollIntoView\(\{ block: 'nearest' \}\)/)
   assert.match(page, /\[content-visibility:auto\]/)
   assert.match(page, /href: `\/tasks\/\$\{task\.id\}`/)
-  assert.match(page, /href: '\/notifications'/)
-  assert.match(page, /href: '\/control\/actions'/)
+  assert.match(page, /href: '\/inbox\?tab=notifications'/)
+  assert.match(page, /href: '\/inbox\?tab=controls'/)
   assert.match(detail, /href=\{`\/sources\/\$\{item\.sourceId\}`\}/)
 })
 

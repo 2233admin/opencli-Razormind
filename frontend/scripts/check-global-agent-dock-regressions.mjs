@@ -13,7 +13,7 @@ const {
   recentAgentMessages,
 } = await import('../lib/agent-dock-state.ts')
 
-test('Agent Dock requests and renders only the explicit recent conversation window', async () => {
+test('Agent Dock restores durable conversations and renders the explicit recent window', async () => {
   const history = Array.from({ length: 15 }, (_, index) => [
     { role: 'user', content: `user-${index + 1}` },
     { role: 'assistant', content: `assistant-${index + 1}` },
@@ -43,8 +43,9 @@ test('Agent Dock requests and renders only the explicit recent conversation wind
   assert.equal(malformedRecovery[0].content, 'recovered-7')
 
   const dock = await dockSource()
-  assert.match(dock, /const nextMessages = recentAgentMessages\(\[\.\.\.messages,/)
-  assert.match(dock, /messages: nextMessages/)
+  assert.match(dock, /getAgentConversation\(sessionId\)/)
+  assert.match(dock, /sendAgentConversationMessage\(activeSessionId,/)
+  assert.doesNotMatch(dock, /messages: nextMessages/)
   assert.match(dock, /const visibleMessages = recentAgentMessages\(messages\)/)
   assert.match(dock, /\{visibleMessages\.map\(/)
 })

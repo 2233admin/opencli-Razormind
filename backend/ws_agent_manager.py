@@ -269,6 +269,9 @@ async def resolve_agent_event(
         logger.warning("WS: unexpected agent_event for request_id=%s (no waiting task)", request_id)
         return
     on_event, owner = entry
+    if source_ws is not None and _connections.get(owner) is not source_ws:
+        logger.warning("WS: agent_event sender does not own request_id=%s", request_id)
+        return
     event = msg.get("event", {})
     try:
         await _invoke_on_event(on_event, event)

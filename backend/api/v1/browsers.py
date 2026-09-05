@@ -251,8 +251,7 @@ async def invoke_runtime_capability(
 ) -> ApiResponse:
     instance = await _browser_instance_or_404(db, instance_id)
     try:
-        claimed_roles = identity.claims.get("roles", []) if identity.claims else []
-        gate_authorized = identity.is_platform_admin or "platform-admin" in claimed_roles
+        gate_authorized = is_platform_admin(identity)
         invocation = await browser_capability_service.invoke_capability(
             db,
             instance,
