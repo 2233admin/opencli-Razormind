@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
+from pathlib import Path
 from types import MappingProxyType
 from typing import Any
+from urllib.parse import urlsplit
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,7 +23,9 @@ from backend.channels.doubao_research_channel import (
     _citations,
     _structured_response,
 )
+from backend.config import get_settings
 from backend.models.edge_node import EdgeNode
+from backend.workflow.gaojixing_archive import write_precleanup_capture_receipt
 
 GAOJIXING_CAPABILITY_ID = "chat-ai.capture"
 GAOJIXING_CHANNEL_TYPE = "doubao_research"
@@ -249,7 +254,15 @@ async def _capture_live_doubao_via_agent(
     }
     if isinstance(chrome, bool):
         config["chrome"] = chrome
-    for key in ("settle_seconds",):
+    for key in (
+        "settle_seconds",
+        "response_timeout_seconds",
+        "suggested_wait_seconds",
+        "stable_observations",
+        "delete_menu_timeout_seconds",
+        "delete_verify_timeout_seconds",
+        "delete_stable_observations",
+    ):
         if key in adapter_config:
             config[key] = adapter_config[key]
 
@@ -263,21 +276,29 @@ async def _capture_live_doubao_via_agent(
         "If a CAPTCHA or human verification appears, do not bypass it: return the "
         "blocked JSON below immediately. Do not invent URLs or data. Return ONLY one "
         "JSON object, with no Markdown fence or commentary, using this shape: "
-        '{"status":"completed","answer":"...","data":[],"links":[],'
+        '{"status":"completed","answer":"...","answer_complete":true,'
+        '"conversation_deleted":true,"data":[],"links":[],"search_keywords":[],'
+        '"search_keyword_count":0,"reference_count":0,"video_contents":[],'
         '"conversation_url":"https://www.doubao.com/chat/<id>",'
         '"session_share_data":[],"suggested_keywords":[]}. '
         'For a verification wall use {"status":"blocked","error_type":"captcha_challenge",'
-        '"message":"human verification is required","answer":"","data":[],"links":[],'
+        '"message":"human verification is required","answer":"",'
+        '"answer_complete":false,"conversation_deleted":false,"data":[],"links":[],'
+        '"search_keywords":[],"search_keyword_count":0,"reference_count":0,'
+        '"video_contents":[],'
         '"conversation_url":"","session_share_data":[],"suggested_keywords":[]}. '
         "The conversation_url must be the actual current Doubao chat URL, if visible. "
         "links must contain only observed source URLs. suggested_keywords must contain "
-        "the follow-up questions/keywords actually shown by Doubao."
+        "the follow-up questions actually shown by Doubao. search_keywords and the two "
+        "counts must contain only the visible search summary. video_contents must contain "
+        "only visible video-card titles or descriptions."
     )
     task = {
         "runtime": runtime,
         "workflow": "workflow.gaojixing.doubao.browser",
         "instructions": instructions,
         "input": {
+            "question": package.question,
             "message": (
                 f"Research this exact question and capture the complete visible result:\n"
                 f"{package.question}"
@@ -291,7 +312,7 @@ async def _capture_live_doubao_via_agent(
         "permissions": {
             "mode": "full_auto",
             "tool_scope": ["bbx.browser" if runtime == "bbx" else "opencli.browser"],
-            "action_scope": ["doubao.ask", "doubao.read"],
+            "action_scope": ["doubao.ask", "doubao.read", "doubao.delete"],
             "workflow_id": workflow_id,
             "run_id": run_id,
         },
@@ -301,13 +322,38 @@ async def _capture_live_doubao_via_agent(
             "links",
             "conversation_url",
             "suggested_keywords",
+            "answer_complete",
+            "conversation_deleted",
         ],
     }
 
     events: list[dict[str, Any]] = []
+    durable_capture_receipt: dict[str, Any] | None = None
 
     async def on_event(event: dict[str, Any]) -> None:
-        events.append(event)
+        nonlocal durable_capture_receipt
+        captured_event = deepcopy(event)
+        evidence = captured_event.get("evidence")
+        if (
+            captured_event.get("type") == "evidence"
+            and isinstance(evidence, dict)
+            and evidence.get("kind") == "doubao.capture.pre_cleanup"
+        ):
+            if not run_id:
+                raise RuntimeError(
+                    "A workflow run id is required before Doubao conversation cleanup"
+                )
+            durable_capture_receipt = await asyncio.to_thread(
+                write_precleanup_capture_receipt,
+                Path(get_settings().gaojixing_run_storage_path),
+                run_id=run_id,
+                workflow_id=workflow_id,
+                question=package.question,
+                package_digest=package.digest,
+                evidence=evidence,
+            )
+            evidence["durable_receipt"] = durable_capture_receipt
+        events.append(captured_event)
 
     try:
         from backend.ws_agent_manager import send_agent_task
@@ -376,12 +422,38 @@ async def _capture_live_doubao_via_agent(
             agent_url=agent_url,
             agent_runtime=runtime,
         )
+    if response_data.get("answer_complete") is not True:
+        return _agent_failure(
+            "Local Agent did not confirm that the Doubao answer was complete",
+            "doubao_response_incomplete",
+            agent_url=agent_url,
+            agent_runtime=runtime,
+        )
+    if (
+        not isinstance(durable_capture_receipt, dict)
+        or durable_capture_receipt.get("persisted") is not True
+    ):
+        return _agent_failure(
+            "Doubao evidence was not durably persisted before conversation cleanup",
+            "doubao_capture_persistence_missing",
+            agent_url=agent_url,
+            agent_runtime=runtime,
+        )
+    if response_data.get("conversation_deleted") is not True:
+        return _agent_failure(
+            "Doubao conversation deletion was not confirmed; collection stopped",
+            "doubao_conversation_cleanup_failed",
+            agent_url=agent_url,
+            agent_runtime=runtime,
+        )
 
     conversation_url = _conversation_url_from_response(response_data)
     share_data = structured.get("session_share_data")
     if not share_data and conversation_url:
         share_data = {"url": conversation_url, "type": "conversation"}
-    citations = _citations(text)
+    citations = [
+        item for item in _citations(answer) if _is_external_evidence_url(item.get("url"))
+    ]
     links = _normalize_links(structured.get("links"))
     if links:
         citations = _merge_links(citations, links)
@@ -393,18 +465,25 @@ async def _capture_live_doubao_via_agent(
         "question": package.question,
         "conversation_url": conversation_url,
         "answer": answer,
+        "answer_complete": True,
+        "conversation_deleted": True,
         "data": structured.get("data", []),
         "links": normalized_links,
         "response_data": response_data,
         "raw_answer": text,
         "session_share_data": share_data or [],
         "suggested_keywords": structured.get("suggested_keywords", []),
+        "search_keywords": structured.get("search_keywords", []),
+        "video_contents": structured.get("video_contents", []),
+        "search_keyword_count": response_data.get("search_keyword_count"),
+        "reference_count": response_data.get("reference_count"),
         "citations": citations,
         "citation_count": len(citations),
         "citation_capture": "agent_browser_observation",
         "provenance": f"agent:{runtime}:browser:{'bbx' if runtime == 'bbx' else 'opencli'}",
         "agent_runtime": runtime,
         "agent_url": agent_url,
+        "capture_receipt": durable_capture_receipt,
     }
     return ChannelResult.ok(
         [item],
@@ -515,9 +594,13 @@ def _normalize_links(value: Any) -> list[dict[str, Any]]:
     for item in value:
         if isinstance(item, dict):
             url = _string(item.get("url") or item.get("href"))
-            if url:
+            if url and _is_external_evidence_url(url):
                 links.append({**item, "url": url})
-        elif isinstance(item, str) and item.strip().startswith(("http://", "https://")):
+        elif (
+            isinstance(item, str)
+            and item.strip().startswith(("http://", "https://"))
+            and _is_external_evidence_url(item.strip())
+        ):
             links.append({"url": item.strip()})
     return _merge_links([], links)
 
@@ -527,11 +610,22 @@ def _merge_links(first: list[dict[str, Any]], second: list[dict[str, Any]]) -> l
     seen: set[str] = set()
     for item in [*first, *second]:
         url = _string(item.get("url"))
-        if not url or url in seen:
+        if not url or not _is_external_evidence_url(url) or url in seen:
             continue
         seen.add(url)
         merged.append(item)
     return merged
+
+
+def _is_external_evidence_url(value: Any) -> bool:
+    url = _string(value)
+    if not url or not url.startswith(("http://", "https://")):
+        return False
+    try:
+        hostname = (urlsplit(url).hostname or "").casefold().rstrip(".")
+    except ValueError:
+        return False
+    return bool(hostname) and hostname not in {"doubao.com", "www.doubao.com"}
 
 
 def _urls_in_value(value: Any) -> list[str]:
@@ -623,6 +717,7 @@ def map_capture_item(
         mapped["dedupe"] = {
             "type": "source-identity",
             "field": "conversation_url",
+            "identity": conversation_url,
             "value": conversation_url,
             "status": "unique",
         }

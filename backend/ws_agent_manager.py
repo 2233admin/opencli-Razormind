@@ -27,8 +27,13 @@ Wire protocol — every reverse-channel message type, one-line field shapes:
                                 "runtime": str, "workflow": str, "input": dict,
                                 "config": dict, "session_id": str|None}
   agent_event   agent→center  {"type": "agent_event", "request_id": uuid,
-                                "event": dict}
+                                "event": dict, "event_id"?: uuid,
+                                "ack_required"?: bool}
                                 # one RuntimeEvent; 0..N per task
+  agent_event_ack center→agent {"type": "agent_event_ack", "request_id": uuid,
+                                "event_id": uuid, "status": "persisted"}
+                                # sent only after an ack-required event's callback
+                                # has durably consumed the event
   agent_result  agent→center  {"type": "agent_result", "request_id": uuid,
                                 "result": dict}
                                 # terminal done/error RuntimeEvent; exactly 1
@@ -226,6 +231,11 @@ async def send_agent_task(
     except asyncio.CancelledError:
         await _cancel_agent_task(ws, request_id)
         raise
+    except Exception:
+        # A streaming callback can fail after the edge has emitted evidence.
+        # Stop the remote task so it cannot continue into a destructive step.
+        await _cancel_agent_task(ws, request_id)
+        raise
     finally:
         _pending_agent_tasks.pop(request_id, None)
         _agent_task_callbacks.pop(request_id, None)
@@ -248,16 +258,37 @@ async def _invoke_on_event(
         await result
 
 
-async def resolve_agent_event(request_id: str, msg: dict[str, Any]) -> None:
+async def resolve_agent_event(
+    request_id: str,
+    msg: dict[str, Any],
+    source_ws: WebSocket | None = None,
+) -> None:
     """Called from the WS receive loop when an agent sends an 'agent_event' frame."""
     entry = _agent_task_callbacks.get(request_id)
     if entry is None:
         logger.warning("WS: unexpected agent_event for request_id=%s (no waiting task)", request_id)
         return
-    on_event, _owner = entry
+    on_event, owner = entry
     event = msg.get("event", {})
     try:
         await _invoke_on_event(on_event, event)
+        if msg.get("ack_required") is True:
+            event_id = msg.get("event_id")
+            if not isinstance(event_id, str) or not event_id:
+                raise RuntimeError("ack-required agent_event is missing event_id")
+            ws = source_ws or _connections.get(owner)
+            if ws is None:
+                raise RuntimeError(
+                    f"WS agent {owner!r} disconnected before evidence acknowledgement"
+                )
+            await ws.send_json(
+                {
+                    "type": "agent_event_ack",
+                    "request_id": request_id,
+                    "event_id": event_id,
+                    "status": "persisted",
+                }
+            )
     except Exception as exc:
         logger.exception("WS: on_event callback raised for request_id=%s", request_id)
         fut = _pending_agent_tasks.get(request_id)

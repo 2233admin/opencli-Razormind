@@ -129,14 +129,31 @@ def _feishu_overrides(values: dict[str, Any]) -> dict[str, Any]:
         "appToken": "app_token",
         "tableId": "table_id",
         "keywordField": "keyword_field",
+        "numberField": "number_field",
         "statusField": "status_field",
         "eligibleStatus": "eligible_status",
         "maxRows": "max_rows",
+        "pageSize": "page_size",
+        "viewId": "view_id",
+        "fieldNames": "field_names",
+        "sourceGroup": "source_group",
     }
     return {
         mapping.get(key, key): value
         for key, value in values.items()
-        if key in mapping or key in {"page_size", "view_id", "field_names", "source_group"}
+        if key in mapping
+        or key
+        in {
+            "eligible_status",
+            "keyword_field",
+            "number_field",
+            "max_rows",
+            "page_size",
+            "status_field",
+            "view_id",
+            "field_names",
+            "source_group",
+        }
     }
 
 

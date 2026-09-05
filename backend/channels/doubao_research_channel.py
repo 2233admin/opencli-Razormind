@@ -66,81 +66,6 @@ def _answer(rows: list[dict[str, Any]]) -> str:
     ).strip()
 
 
-def _structured_response(text: str) -> dict[str, Any]:
-    """Decode Doubao JSON while retaining the complete provider response."""
-    raw = text.strip()
-    candidates = [raw]
-    fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw, re.DOTALL | re.IGNORECASE)
-    if fenced:
-        candidates.insert(0, fenced.group(1))
-    start, end = raw.find("{"), raw.rfind("}")
-    if start >= 0 and end > start:
-        candidates.append(raw[start : end + 1])
-    for candidate in candidates:
-        try:
-            parsed = json.loads(candidate)
-        except (TypeError, ValueError, json.JSONDecodeError):
-            continue
-        if not isinstance(parsed, dict):
-            continue
-        answer = parsed.get("answer") or parsed.get("content") or raw
-        data = (
-            parsed.get("data")
-            or parsed.get("details")
-            or parsed.get("answer_data")
-            or parsed.get("result")
-            or parsed.get("key_points")
-            or []
-        )
-        links = (
-            parsed.get("links")
-            or parsed.get("references")
-            or parsed.get("sources")
-            or parsed.get("urls")
-            or []
-        )
-        share_data = (
-            parsed.get("session_share_data")
-            or parsed.get("conversation_share_data")
-            or parsed.get("share_data")
-            or parsed.get("share_urls")
-            or []
-        )
-        suggested = (
-            parsed.get("suggested_keywords")
-            or parsed.get("suggested_keys")
-            or parsed.get("recommend_keywords")
-            or parsed.get("recommended_keywords")
-            or []
-        )
-        if not isinstance(data, (list, dict, str)):
-            data = []
-        if not isinstance(links, (list, dict, str)):
-            links = []
-        if not isinstance(share_data, (list, dict, str)):
-            share_data = []
-        if not isinstance(suggested, list):
-            suggested = [suggested] if suggested else []
-        return {
-            "answer": str(answer).strip(),
-            "data": data,
-            "links": links,
-            "response_data": parsed,
-            "session_share_data": share_data,
-            "suggested_keywords": [str(item).strip() for item in suggested if str(item).strip()],
-            "raw_answer": raw,
-        }
-    return {
-        "answer": raw,
-        "data": [],
-        "links": [],
-        "response_data": {},
-        "session_share_data": [],
-        "suggested_keywords": [],
-        "raw_answer": raw,
-    }
-
-
 def _conversation_url(stdout: str) -> str:
     """Extract the active Doubao chat URL from status output."""
     try:
@@ -216,6 +141,10 @@ def _structured_response(text: str) -> dict[str, Any]:
                 or parsed.get("recommended_keywords")
                 or []
             )
+            search_keywords = (
+                parsed.get("search_keywords") or parsed.get("searched_keywords") or []
+            )
+            video_contents = parsed.get("video_contents") or parsed.get("videos") or []
             if not isinstance(share_data, (list, dict, str)):
                 share_data = []
             if not isinstance(response_data, (list, dict, str)):
@@ -224,6 +153,10 @@ def _structured_response(text: str) -> dict[str, Any]:
                 links = []
             if not isinstance(suggested, list):
                 suggested = [suggested] if suggested else []
+            if not isinstance(search_keywords, list):
+                search_keywords = [search_keywords] if search_keywords else []
+            if not isinstance(video_contents, list):
+                video_contents = [video_contents] if video_contents else []
             return {
                 "answer": str(answer).strip(),
                 "data": response_data,
@@ -232,6 +165,12 @@ def _structured_response(text: str) -> dict[str, Any]:
                 "session_share_data": share_data,
                 "suggested_keywords": [
                     str(item).strip() for item in suggested if str(item).strip()
+                ],
+                "search_keywords": [
+                    str(item).strip() for item in search_keywords if str(item).strip()
+                ],
+                "video_contents": [
+                    str(item).strip() for item in video_contents if str(item).strip()
                 ],
                 "raw_answer": raw,
             }
@@ -242,6 +181,8 @@ def _structured_response(text: str) -> dict[str, Any]:
         "response_data": {},
         "session_share_data": [],
         "suggested_keywords": [],
+        "search_keywords": [],
+        "video_contents": [],
         "raw_answer": raw,
     }
 
@@ -376,7 +317,11 @@ class DoubaoResearchChannel(AbstractChannel):
             if returncode:
                 return ChannelResult.fail(
                     f"opencli doubao read exited with code {returncode}: {stderr[:500]}",
-                    error_type="ConnectionError" if _is_transient_cdp_fault(stderr, stdout) else None,
+                    error_type=(
+                        "ConnectionError"
+                        if _is_transient_cdp_fault(stderr, stdout)
+                        else None
+                    ),
                 )
         try:
             response_rows = _parse_opencli_rows(stdout)
@@ -402,7 +347,11 @@ class DoubaoResearchChannel(AbstractChannel):
             "answer": content,
             "links": citations,
         }
-        conversation_url = ""
+        conversation_url = (
+            _conversation_url(stdout)
+            if config.get("capture_conversation_url", True)
+            else ""
+        )
         if config.get("capture_conversation_url", True):
             status_command = [
                 _opencli_binary(),
@@ -416,9 +365,9 @@ class DoubaoResearchChannel(AbstractChannel):
             try:
                 returncode, status_stdout, _ = await _run_doubao_command(status_command)
                 if returncode == 0:
-                    conversation_url = _conversation_url(status_stdout)
+                    conversation_url = _conversation_url(status_stdout) or conversation_url
             except Exception:
-                conversation_url = ""
+                pass
         return ChannelResult.ok(
             [
                 {
@@ -434,6 +383,8 @@ class DoubaoResearchChannel(AbstractChannel):
                     "raw_answer": structured["raw_answer"],
                     "session_share_data": structured["session_share_data"],
                     "suggested_keywords": structured["suggested_keywords"],
+                    "search_keywords": structured["search_keywords"],
+                    "video_contents": structured["video_contents"],
                     "citations": citations,
                     "citation_count": len(citations),
                     "citation_capture": (

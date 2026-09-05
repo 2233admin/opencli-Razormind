@@ -1,7 +1,7 @@
 import httpx
 import pytest
 
-from backend.channels.base import AuthContext, FetchContext
+from backend.channels.base import AuthContext, FetchContext, FetchResult
 from backend.channels.feishu_table_channel import FeishuTableChannel, _cli_rows
 from backend.schemas.source import DataSourceCreate
 
@@ -194,3 +194,70 @@ async def test_cli_bridge_applies_max_rows_across_a_page(monkeypatch):
     assert not result.has_more
     assert bridge.calls[0][1]["json"]["limit"] == 1
     assert bridge.calls[0][1]["json"]["offset"] == 0
+
+
+@pytest.mark.asyncio
+async def test_cli_rows_preserve_business_number_for_downstream_resume():
+    result = await FeishuTableChannel()._rows_to_result(
+        FetchContext(
+            config=_config(number_field="序号"),
+            params={},
+            source_id="source-1",
+        ),
+        [
+            {
+                "record_id": "rec-23",
+                "fields": {"序号": "23", "关键词": "宝宝DHA", "状态": "待采集"},
+            }
+        ],
+    )
+
+    assert result[0]["source_row_id"] == "rec-23"
+    assert result[0]["source_number"] == "23"
+    assert result[0]["feishu"]["number"] == "23"
+
+
+@pytest.mark.asyncio
+async def test_health_check_cli_transport_uses_local_session_without_source_token(monkeypatch):
+    channel = FeishuTableChannel()
+    observed = {}
+
+    async def fetch(ctx):
+        observed["ctx"] = ctx
+        return FetchResult(items=[], has_more=False)
+
+    monkeypatch.setattr(channel, "fetch", fetch)
+
+    assert await channel.health_check(_config(transport="cli")) is True
+    assert observed["ctx"].config["transport"] == "cli"
+    assert observed["ctx"].config["page_size"] == 1
+    assert observed["ctx"].config["max_rows"] == 1
+
+
+@pytest.mark.asyncio
+async def test_health_check_defaults_to_cli_transport(monkeypatch):
+    channel = FeishuTableChannel()
+    observed = {}
+    config = _config()
+    config.pop("transport")
+
+    async def fetch(ctx):
+        observed["ctx"] = ctx
+        return FetchResult(items=[], has_more=False)
+
+    monkeypatch.setattr(channel, "fetch", fetch)
+
+    assert await channel.health_check(config) is True
+    assert observed["ctx"].config["page_size"] == 1
+
+
+@pytest.mark.asyncio
+async def test_health_check_cli_transport_reports_failed_local_probe(monkeypatch):
+    channel = FeishuTableChannel()
+
+    async def fetch(_ctx):
+        raise RuntimeError("bridge unavailable")
+
+    monkeypatch.setattr(channel, "fetch", fetch)
+
+    assert await channel.health_check(_config(transport="cli")) is False

@@ -118,6 +118,7 @@ _AGENT_DEPLOY_TYPE = os.environ.get("AGENT_DEPLOY_TYPE", "docker")
 # True when the image was built with INSTALL_CHROME=true (Chrome bundled inside container).
 # False → Chrome runs on the host; localhost must be remapped to host.docker.internal.
 _AGENT_HAS_CHROME = os.environ.get("AGENT_HAS_CHROME", "false").lower() == "true"
+_AGENT_EVENT_ACK_TIMEOUT_SECONDS = 30.0
 _RUNTIME_BUNDLE_MANIFEST = os.environ.get(
     "BROWSER_RUNTIME_BUNDLE_MANIFEST",
     "/opt/browser-runtime-bundles/opencli-default/1/manifest.json",
@@ -383,6 +384,76 @@ async def _handle_ws_collect(ws, msg: dict) -> None:
         logger.error("WS: failed to send result for request_id=%s: %s", request_id, exc)
 
 
+_PENDING_AGENT_EVENT_ACKS: dict[tuple[str, str], asyncio.Future[dict[str, Any]]] = {}
+
+
+def _requires_durable_event_ack(event: dict[str, Any]) -> bool:
+    evidence = event.get("evidence")
+    return (
+        event.get("type") == "evidence"
+        and isinstance(evidence, dict)
+        and evidence.get("kind") == "doubao.capture.pre_cleanup"
+    )
+
+
+def _resolve_ws_agent_event_ack(msg: dict[str, Any]) -> None:
+    request_id = msg.get("request_id")
+    event_id = msg.get("event_id")
+    if not isinstance(request_id, str) or not isinstance(event_id, str):
+        logger.warning("WS: malformed agent_event_ack frame")
+        return
+    future = _PENDING_AGENT_EVENT_ACKS.get((request_id, event_id))
+    if future is None or future.done():
+        logger.warning(
+            "WS: unexpected agent_event_ack request_id=%s event_id=%s",
+            request_id,
+            event_id,
+        )
+        return
+    future.set_result(msg)
+
+
+async def _send_ws_agent_event(
+    ws,
+    *,
+    request_id: str,
+    event: dict[str, Any],
+) -> None:
+    frame: dict[str, Any] = {
+        "type": "agent_event",
+        "request_id": request_id,
+        "event": event,
+    }
+    if not _requires_durable_event_ack(event):
+        await ws.send(json.dumps(frame))
+        return
+
+    event_id = str(uuid.uuid4())
+    frame.update({"event_id": event_id, "ack_required": True})
+    key = (request_id, event_id)
+    acknowledgement = asyncio.get_running_loop().create_future()
+    _PENDING_AGENT_EVENT_ACKS[key] = acknowledgement
+    try:
+        await ws.send(json.dumps(frame))
+        try:
+            receipt = await asyncio.wait_for(
+                acknowledgement,
+                timeout=_AGENT_EVENT_ACK_TIMEOUT_SECONDS,
+            )
+        except TimeoutError as exc:
+            raise RuntimeInvocationError(
+                "control plane did not acknowledge durable capture before cleanup",
+                error_type="AgentEventAcknowledgementTimeout",
+            ) from exc
+        if receipt.get("status") != "persisted":
+            raise RuntimeInvocationError(
+                "control plane rejected durable capture before cleanup",
+                error_type="AgentEventAcknowledgementRejected",
+            )
+    finally:
+        _PENDING_AGENT_EVENT_ACKS.pop(key, None)
+
+
 async def _handle_ws_agent_task(ws, msg: dict) -> None:
     """Execute an agent_task received over the WS channel: run the requested
     runtime adapter, streaming each RuntimeEvent back as an 'agent_event'
@@ -461,21 +532,23 @@ async def _handle_ws_agent_task(ws, msg: dict) -> None:
         async for event in adapter.invoke(task):
             terminal_event = event
             try:
-                await ws.send(
-                    json.dumps(
-                        {
-                            "type": "agent_event",
-                            "request_id": request_id,
-                            "event": event,
-                        }
-                    )
+                await _send_ws_agent_event(
+                    ws,
+                    request_id=request_id,
+                    event=event,
                 )
+            except RuntimeInvocationError:
+                raise
             except Exception as exc:
                 logger.error(
                     "WS: failed to send agent_event for request_id=%s: %s",
                     request_id,
                     exc,
                 )
+                raise RuntimeInvocationError(
+                    "failed to deliver agent event to the control plane",
+                    error_type="AgentEventDeliveryError",
+                ) from exc
         if terminal_event is None:
             # Contract violation (adapter yielded nothing) — still must resolve
             # the center's pending future rather than hang it until timeout.
@@ -606,6 +679,8 @@ async def _register_via_ws(advertise_url: str) -> None:
                         asyncio.create_task(_handle_ws_collect(ws, msg))
                     elif msg_type == "agent_task":
                         _start_ws_agent_task(ws, msg)
+                    elif msg_type == "agent_event_ack":
+                        _resolve_ws_agent_event_ack(msg)
                     elif msg_type == "cancel":
                         request_id = msg.get("request_id", "")
                         proc = _ACTIVE_COLLECTS.get(request_id)
