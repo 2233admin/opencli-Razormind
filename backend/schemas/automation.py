@@ -47,7 +47,9 @@ class AutomationCreate(BaseModel):
     def enabled_automation_has_pinned_agent(self):
         paired = self.operations_agent_id is not None and self.operations_agent_version is not None
         if (self.operations_agent_id is None) != (self.operations_agent_version is None):
-            raise ValueError("operations_agent_id and operations_agent_version must be set together")
+            raise ValueError(
+                "operations_agent_id and operations_agent_version must be set together"
+            )
         if self.enabled and not paired:
             raise ValueError("enabled Automation requires a pinned published Operations Agent")
         return self
@@ -85,11 +87,15 @@ class AutomationUpdate(BaseModel):
         fields = self.model_fields_set
         binding_fields = {"operations_agent_id", "operations_agent_version"}
         if fields & binding_fields and not binding_fields <= fields:
-            raise ValueError("operations_agent_id and operations_agent_version must be updated together")
+            raise ValueError(
+                "operations_agent_id and operations_agent_version must be updated together"
+            )
         if binding_fields <= fields and (
             (self.operations_agent_id is None) != (self.operations_agent_version is None)
         ):
-            raise ValueError("operations_agent_id and operations_agent_version must both be set or null")
+            raise ValueError(
+                "operations_agent_id and operations_agent_version must both be set or null"
+            )
         return self
 
 
@@ -153,3 +159,101 @@ class StarterInstallationResult(StarterInstallationPreview):
     skipped_count: int
 
     model_config = {"from_attributes": True}
+
+
+AgentWorkKind = Literal["conversation", "run", "automation"]
+AgentWorkState = Literal[
+    "not_started",
+    "ready",
+    "queued",
+    "running",
+    "paused",
+    "completed",
+    "failed",
+    "blocked",
+    "inactive",
+    "cancelled",
+]
+AgentWorkActionKind = Literal[
+    "open_conversation",
+    "pause_run",
+    "run_automation",
+    "retry_automation",
+    "configure",
+]
+
+
+class AgentWorkActionRead(BaseModel):
+    kind: AgentWorkActionKind
+    label: str
+    conversation_id: str | None = None
+    operations_agent_id: str | None = None
+    run_id: str | None = None
+    automation_id: str | None = None
+
+    @model_validator(mode="after")
+    def action_has_required_target(self):
+        required = {
+            "open_conversation": self.conversation_id,
+            "pause_run": self.run_id and self.operations_agent_id,
+            "run_automation": self.automation_id,
+            "retry_automation": self.automation_id,
+            "configure": self.operations_agent_id or self.automation_id,
+        }
+        if not required[self.kind]:
+            raise ValueError(f"{self.kind} action requires its target identifier")
+        return self
+
+
+class AgentWorkBindingRead(BaseModel):
+    operations_agent_id: str
+    published_version: int
+    profile_version: int
+    automation_revision: int | None = None
+    runtime: str | None = None
+    agent_url: str | None = None
+
+
+class AgentWorkLatestRunRead(UTCModel):
+    id: str
+    status: str
+    trigger_type: str
+    trigger_reference: str | None
+    scheduled_for: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class AgentWorkHealthItemRead(UTCModel):
+    id: str
+    kind: AgentWorkKind
+    title: str
+    state: AgentWorkState
+    message: str
+    reason_code: str | None = None
+    recoverable: bool
+    resume_supported: bool
+    project_id: str | None = None
+    conversation_id: str | None = None
+    operations_agent_id: str | None = None
+    run_id: str | None = None
+    automation_id: str | None = None
+    binding: AgentWorkBindingRead | None = None
+    latest_run: AgentWorkLatestRunRead | None = None
+    next_due_at: datetime | None = None
+    actions: list[AgentWorkActionRead] = Field(default_factory=list)
+    updated_at: datetime
+
+
+class AgentWorkHealthPermissionsRead(BaseModel):
+    can_run: bool
+    can_manage: bool
+
+
+class AgentWorkHealthRead(BaseModel):
+    workspace_id: str
+    project_id: str | None = None
+    generated_at: datetime
+    permissions: AgentWorkHealthPermissionsRead
+    counts: dict[str, int]
+    items: list[AgentWorkHealthItemRead]

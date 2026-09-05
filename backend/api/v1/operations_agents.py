@@ -1,6 +1,6 @@
 from functools import partial
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import ValidationError
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,6 +15,7 @@ from backend.models.operations_agent import (
     OperationsAgentRun,
     PublishedOperationsAgentVersion,
 )
+from backend.schemas.automation import AgentWorkHealthRead
 from backend.schemas.common import ApiResponse
 from backend.schemas.operations_agent import (
     AgentProfileCreate,
@@ -44,6 +45,7 @@ from backend.services.agent_runtime_selection import (
     RuntimeSelectionError,
     select_agent_runtime,
 )
+from backend.services.agent_work_health import get_agent_work_health
 from backend.services.operations_agent_runtime_service import (
     cancel_operations_agent_run,
     schedule_operations_agent_run,
@@ -75,6 +77,25 @@ async def list_operations_agent_activity(
         .all()
     )
     return ApiResponse.ok([OperationsAgentRunRead.model_validate(run) for run in runs])
+
+
+@router.get("/work-health", response_model=ApiResponse[AgentWorkHealthRead])
+async def read_agent_work_health(
+    workspace_id: str,
+    project_id: str | None = Query(default=None, min_length=1, max_length=36),
+    identity: RequestIdentity = Depends(get_request_identity),
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse:
+    access = await get_workspace_access(db, workspace_id, identity)
+    require_permission(access, WorkspacePermission.READ)
+    health = await get_agent_work_health(
+        db,
+        workspace_id=workspace_id,
+        project_id=project_id,
+        can_run=access.allows(WorkspacePermission.RUN_OPERATIONS_AGENTS),
+        can_manage=access.allows(WorkspacePermission.MANAGE_AGENT_IDENTITIES),
+    )
+    return ApiResponse.ok(health)
 
 
 async def _get_agent(
@@ -605,4 +626,3 @@ async def assign_agent_profile(
     agent.current_profile_version = profile.version
     await db.flush()
     return ApiResponse.ok(AgentProfileRead.model_validate(profile))
-
