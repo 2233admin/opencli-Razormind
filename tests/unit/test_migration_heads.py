@@ -71,6 +71,7 @@ def test_upgrade_head_creates_identity_and_operations_tables(monkeypatch):
         "iii_collection_outbox",
         "iii_collection_lifecycle_observations",
         "analysis_snapshot_receipts",
+        "analysis_findings",
     } <= tables
 
 
@@ -184,6 +185,73 @@ def test_workflow_run_version_foreign_key_is_restrict(monkeypatch):
         and row[6] == "RESTRICT"
         for row in foreign_keys
     )
+
+
+def test_analysis_finding_migration_adds_durable_scalar_citations(monkeypatch):
+    with TemporaryDirectory() as directory:
+        database = Path(directory) / "migration.db"
+        monkeypatch.setenv("DATABASE_URL", f"sqlite+aiosqlite:///{database.as_posix()}")
+        get_settings.cache_clear()
+        config = Config()
+        config.set_main_option("script_location", "backend/migrations")
+
+        try:
+            command.upgrade(config, "head")
+        finally:
+            get_settings.cache_clear()
+
+        connection = sqlite3.connect(database)
+        try:
+            columns = {
+                row[1]
+                for row in connection.execute("PRAGMA table_info(analysis_findings)")
+            }
+            indexes = {
+                row[1]
+                for row in connection.execute("PRAGMA index_list(analysis_findings)")
+            }
+            foreign_keys = list(
+                connection.execute("PRAGMA foreign_key_list(analysis_findings)")
+            )
+            table_sql = connection.execute(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' "
+                "AND name = 'analysis_findings'"
+            ).fetchone()[0]
+        finally:
+            connection.close()
+
+    assert {
+        "workspace_id",
+        "project_id",
+        "workflow_id",
+        "studio_workflow_version_id",
+        "run_id",
+        "snapshot_receipt_id",
+        "author_user_id",
+        "observation",
+        "interpretation",
+        "recommendation",
+        "selector_kind",
+        "selector_key",
+        "evidence_metric",
+        "evidence_value",
+        "evidence_unit",
+        "source_start_at",
+        "source_end_at",
+    } <= columns
+    assert {
+        "ix_analysis_findings_scope_created",
+        "ix_analysis_findings_snapshot_receipt",
+    } <= indexes
+    assert any(
+        row[2] == "analysis_snapshot_receipts"
+        and row[3] == "snapshot_receipt_id"
+        and row[4] == "id"
+        and row[6] == "RESTRICT"
+        for row in foreign_keys
+    )
+    assert "ck_analysis_findings_selector_key" in table_sql
+    assert "ck_analysis_findings_evidence_mapping" in table_sql
 
 
 def test_c2_downgrade_removes_only_operations_agent_tables(monkeypatch):

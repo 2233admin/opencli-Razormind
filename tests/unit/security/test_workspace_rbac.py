@@ -18,9 +18,11 @@ from backend.security.workspace_rbac import (
         (WorkspaceRole.MAINTAINER, WorkspacePermission.MANAGE_AGENT_IDENTITIES, True),
         (WorkspaceRole.OPERATOR, WorkspacePermission.RUN_OPERATIONS_AGENTS, True),
         (WorkspaceRole.OPERATOR, WorkspacePermission.EXPORT_ANALYSIS, True),
+        (WorkspaceRole.OPERATOR, WorkspacePermission.CREATE_ANALYSIS_FINDINGS, True),
         (WorkspaceRole.OPERATOR, WorkspacePermission.ASSIGN_AGENT_PROFILES, False),
         (WorkspaceRole.VIEWER, WorkspacePermission.READ, True),
         (WorkspaceRole.VIEWER, WorkspacePermission.EXPORT_ANALYSIS, False),
+        (WorkspaceRole.VIEWER, WorkspacePermission.CREATE_ANALYSIS_FINDINGS, False),
         (WorkspaceRole.VIEWER, WorkspacePermission.WORK_INBOX, False),
     ],
 )

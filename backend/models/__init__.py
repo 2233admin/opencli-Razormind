@@ -1,6 +1,12 @@
 from backend.models.acquisition import AcquisitionExecution, AcquisitionExecutionStatus
 from backend.models.agent import AIAgent
 from backend.models.agent_conversation import AgentConversation, AgentConversationTurn
+from backend.models.analysis_finding import (
+    AnalysisFinding,
+    AnalysisFindingEvidenceMetric,
+    AnalysisFindingEvidenceUnit,
+    AnalysisFindingSelectorKind,
+)
 from backend.models.analysis_snapshot import (
     AnalysisSnapshotFailureCode,
     AnalysisSnapshotReceipt,
@@ -151,6 +157,10 @@ __all__ = [
     "AcquisitionExecutionStatus",
     "AgentConversation",
     "AgentConversationTurn",
+    "AnalysisFinding",
+    "AnalysisFindingEvidenceMetric",
+    "AnalysisFindingEvidenceUnit",
+    "AnalysisFindingSelectorKind",
     "AnalysisSnapshotFailureCode",
     "AnalysisSnapshotReceipt",
     "AnalysisSnapshotStatus",
