@@ -61,7 +61,7 @@ test('sidebar keeps automation separate from Agent surfaces', async () => {
   assert.match(navigation, /'\/operations-agents': '自动化与智能体'/)
   assert.match(navigation, /match: \['\/nodes', '\/workers', '\/browsers'\]/)
   assert.match(navigation, /match: \['\/providers'\]/)
-  assert.match(navigation, /href: '\/control\/actions'[\s\S]{0,120}match: \['\/control'\]/)
+  assert.match(navigation, /href: '\/control\/kill-switch'[\s\S]{0,120}match: \['\/control'\]/)
   for (const group of ['工作台', '构建', '运行与数据', '管理']) {
     assert.match(navigation, new RegExp(`label: '${group}'`))
   }
