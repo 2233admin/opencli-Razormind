@@ -1,5 +1,6 @@
 from __future__ import annotations
-from typing import Literal, Optional
+
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -33,6 +34,14 @@ async def list_records(
     source_id: str | None = None,
     task_id: str | None = None,
     project_id: str | None = None,
+    workflow_id: str | None = None,
+    workflow_run_id: str | None = Query(default=None, alias="workflowRunId"),
+    workflow_run_id_snake: str | None = Query(
+        default=None,
+        alias="workflow_run_id",
+        include_in_schema=False,
+    ),
+    run_id: str | None = Query(default=None, alias="run_id"),
     status: str | None = None,
     search: str | None = Query(None),
     page: int = Query(1, ge=1),
@@ -46,6 +55,9 @@ async def list_records(
         source_id=source_id,
         task_id=task_id,
         project_id=project_id,
+        workflow_id=workflow_id,
+        workflow_run_id=workflow_run_id or workflow_run_id_snake,
+        run_id=run_id,
         status=status,
         search=search,
         page=page,

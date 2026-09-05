@@ -10,6 +10,9 @@ async def list_records(
     source_id: str | None = None,
     task_id: str | None = None,
     project_id: str | None = None,
+    workflow_id: str | None = None,
+    workflow_run_id: str | None = None,
+    run_id: str | None = None,
     status: str | None = None,
     search: str | None = None,
     page: int = 1,
@@ -41,6 +44,26 @@ async def list_records(
             StudioWorkflow.archived.is_(False),
         )
         filters.append(CollectedRecord.workflow_id.in_(project_workflows))
+    if workflow_id:
+        workflow_filter = (
+            (StudioWorkflow.id == workflow_id)
+            & StudioWorkflow.archived.is_(False)
+        )
+        if project_id:
+            # Keep a workflow filter inside the project scope.  A caller must
+            # never combine a project id with a same-named workflow from a
+            # different project and receive its records.
+            workflow_filter = (
+                (StudioWorkflow.id == workflow_id)
+                & (StudioWorkflow.project_id == project_id)
+                & StudioWorkflow.archived.is_(False)
+            )
+        filters.append(
+            CollectedRecord.workflow_id.in_(select(StudioWorkflow.id).where(workflow_filter))
+        )
+    effective_run_id = run_id or workflow_run_id
+    if effective_run_id:
+        filters.append(CollectedRecord.workflow_run_id == effective_run_id)
     if status:
         filters.append(CollectedRecord.status == status)
     if search:
