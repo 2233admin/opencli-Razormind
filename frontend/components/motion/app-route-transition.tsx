@@ -12,16 +12,12 @@ const APP_ROUTES = [
   '/sources',
   '/sources/*',
   '/records',
-  '/tasks',
-  '/schedules',
-  '/notifications',
   '/agents',
   '/operations-agents',
   '/skills',
   '/providers',
   '/nodes',
   '/workers',
-  '/control/actions',
   '/control/kill-switch',
   '/control/advisory-report',
   '/control/odp-state',
@@ -37,15 +33,21 @@ const MOTION_CONFIG: SsgoiConfig = {
 }
 
 const STATIC_CONFIG: SsgoiConfig = { transitions: [] }
-
 /** Keeps persistent application chrome outside the routed animation boundary. */
 export function AppRouteTransition({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const prefersReducedMotion = useReducedMotion()
+  // All Action Center sibling tabs share /inbox, so this boundary never remounts
+  // or runs a pathname-level transition while their query state changes.
+  const transitionKey = pathname === '/inbox' ? '/inbox' : pathname
 
   return (
     <Ssgoi config={prefersReducedMotion ? STATIC_CONFIG : MOTION_CONFIG}>
-      <div key={pathname} data-ssgoi-transition={pathname} className="h-full min-h-full bg-background">
+      <div
+        key={transitionKey}
+        data-ssgoi-transition={transitionKey}
+        className="h-full min-h-full bg-background"
+      >
         {children}
       </div>
     </Ssgoi>

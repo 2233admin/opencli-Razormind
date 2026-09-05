@@ -11,14 +11,17 @@ import {
 import ELK from "elkjs/lib/elk.bundled.js"
 import { Position } from "@xyflow/react"
 import type { WorkflowNode, WorkflowEdge } from "./types"
-
+import { workflowNodeSize, workflowNodeSizeForData } from "./node-geometry"
 export type LayoutDirection = "TB" | "LR"
 export type LayoutEngine = "dagre" | "d3-hierarchy" | "elk" | "d3-force"
 
 function nodeSize(node: WorkflowNode) {
+  const fallback = node.type === "workflow"
+    ? workflowNodeSizeForData(node.data)
+    : workflowNodeSize()
   return {
-    width: node.measured?.width ?? (node.width as number) ?? 220,
-    height: node.measured?.height ?? (node.height as number) ?? 90,
+    width: node.measured?.width ?? (node.width as number) ?? fallback.width,
+    height: node.measured?.height ?? (node.height as number) ?? fallback.height,
   }
 }
 

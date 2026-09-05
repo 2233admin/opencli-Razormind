@@ -1,3 +1,4 @@
+import { workflowNodeSize, workflowNodeSizeForData } from "./node-geometry"
 import type { WorkflowNode } from "./types"
 
 /**
@@ -17,14 +18,15 @@ export interface Rect {
 export const COLLISION_GAP = 24
 
 const DEFAULT_SIZE: Record<string, { width: number; height: number }> = {
-  workflow: { width: 240, height: 96 },
   note: { width: 180, height: 100 },
   shape: { width: 140, height: 100 },
   group: { width: 320, height: 220 },
 }
 
 export function nodeRect(node: WorkflowNode): Rect {
-  const fallback = DEFAULT_SIZE[node.type ?? "workflow"] ?? DEFAULT_SIZE.workflow
+  const fallback = node.type === "workflow"
+    ? workflowNodeSizeForData(node.data)
+    : DEFAULT_SIZE[node.type ?? "workflow"] ?? workflowNodeSize()
   return {
     x: node.position.x,
     y: node.position.y,

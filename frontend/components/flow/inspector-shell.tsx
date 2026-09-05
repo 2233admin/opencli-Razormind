@@ -36,7 +36,7 @@ function splitTypeLine(typeLine: string) {
 
 export function SectionCaption({ children }: { children: ReactNode }) {
   return (
-    <p className="font-mono text-3xs uppercase tracking-[0.2em] text-zinc-500">
+    <p className="font-mono text-3xs uppercase tracking-[0.2em] text-muted-foreground">
       {children}
     </p>
   )
@@ -45,8 +45,8 @@ export function SectionCaption({ children }: { children: ReactNode }) {
 export function MonoRow({ k, v }: { k: string; v: string | number }) {
   return (
     <div className="flex items-center justify-between gap-2 font-mono text-2xs">
-      <span className="text-zinc-500">{k}</span>
-      <span className="truncate text-zinc-100">{v}</span>
+      <span className="text-muted-foreground">{k}</span>
+      <span className="truncate text-foreground">{v}</span>
     </div>
   )
 }

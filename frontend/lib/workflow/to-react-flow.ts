@@ -84,6 +84,7 @@ export function workflowNodeToReactFlow(node: WorkflowProjectNode, index: number
   const ui = node.ui ?? {}
   const position = readPosition(ui) ?? { x: 520, y: 80 + index * 220 }
   const runtimeRunState = readRuntimeRunState(ui)
+  const catalogId = readString(ui, "catalogId")
   const data: WorkflowNodeData = {
     label: readString(ui, "label") ?? node.id,
     description: readString(ui, "description") ?? `${node.kind}:${node.capability}`,
@@ -98,7 +99,7 @@ export function workflowNodeToReactFlow(node: WorkflowProjectNode, index: number
       capability: node.capability,
       adapter: node.adapter,
       params: node.params,
-      catalogId: readString(ui, "catalogId"),
+      catalogId,
     },
     sourceAnchor: node.sourceAnchor,
     runArtifact: node.runArtifact,
@@ -113,6 +114,8 @@ export function workflowNodeToReactFlow(node: WorkflowProjectNode, index: number
     parameterInterface: node.parameterInterface,
     externalWorkflow: readExternalWorkflow(ui),
   }
+  if (catalogId === "media.image-generation") data.interfaceRowCount = 4
+  else if (catalogId === "media.image-asset") data.interfaceRowCount = 1
 
   return {
     id: node.id,

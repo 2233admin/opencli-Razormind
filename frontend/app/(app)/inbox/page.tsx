@@ -5,6 +5,7 @@ import {
   Suspense,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -25,6 +26,9 @@ import {
   X,
 } from 'lucide-react'
 
+import { TasksPane } from '@/components/action-center/tasks-pane'
+import { NotificationsPane } from '@/components/action-center/notifications-pane'
+import { ControlActionsLedger } from '@/components/control/control-actions-ledger'
 import { ApprovalQueueDetail, QueueDetail } from '@/components/inbox/queue-detail'
 import { BACKEND_HINT, ErrorState, LoadingState } from '@/components/shell/data-states'
 import { ACTION_CENTER_TABS, RouteTabs } from '@/components/shell/route-tabs'
@@ -51,6 +55,11 @@ import { cn } from '@/lib/utils'
 
 type QueueSection = 'blocked' | 'waiting' | 'review'
 type QueueFilter = 'all' | QueueSection
+type ActionCenterTab = 'pending' | 'tasks' | 'notifications' | 'controls'
+
+function isActionCenterTab(value: string | null): value is ActionCenterTab {
+  return value === 'pending' || value === 'tasks' || value === 'notifications' || value === 'controls'
+}
 
 interface QueueItem {
   id: string
@@ -171,7 +180,7 @@ function notificationToQueueItem(log: NotificationLog): QueueItem {
     summary,
     status: failed ? 'failed' : log.ack_status,
     createdAt: log.created_at,
-    href: '/notifications',
+    href: '/inbox?tab=notifications',
     hrefLabel: '打开通知规则',
     occurrenceCount: 1,
     detailLabel: '规则',
@@ -189,7 +198,7 @@ function controlToQueueItem(action: ControlActionRecord): QueueItem {
     summary: compact(action.reason, '控制动作尚未形成恢复结果，需要继续观察并复核。'),
     status: action.state,
     createdAt: action.created_at,
-    href: '/control/actions',
+    href: '/inbox?tab=controls',
     hrefLabel: '打开控制证据',
     sourceId: action.source_id,
     occurrenceCount: 1,
@@ -334,13 +343,20 @@ function InboxContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const searchParamsKey = searchParams.toString()
+  const requestedTab = searchParams.get('tab')
+  const activeTab = isActionCenterTab(requestedTab) ? requestedTab : 'pending'
+  const pendingActive = activeTab === 'pending'
   const searchRef = useRef<HTMLInputElement>(null)
   const initialView = searchParams.get('view')
   const [filter, setFilter] = useState<QueueFilter>(isQueueFilter(initialView) ? initialView : 'all')
   const [search, setSearch] = useState(searchParams.get('q') ?? '')
   const [selectedId, setSelectedId] = useState<string | null>(null)
-
-  const workspaces = useGovernedWorkspaces()
+  const pendingScrollTopRef = useRef(0)
+  const tasksScrollTopRef = useRef(0)
+  const notificationsScrollTopRef = useRef(0)
+  const controlsScrollTopRef = useRef(0)
+  const controlsRegionRef = useRef<HTMLElement>(null)
+  const workspaces = useGovernedWorkspaces({ enabled: pendingActive })
   const requestedWorkspaceId = searchParams.get('workspace')
   const workspaceId =
     workspaces.data?.find((workspace) => workspace.id === requestedWorkspaceId)?.id ??
@@ -348,7 +364,7 @@ function InboxContent() {
     null
   const workspaceName =
     workspaces.data?.find((workspace) => workspace.id === workspaceId)?.name ?? 'Workspace'
-  const operationsInbox = useOperationsInbox(workspaceId, 'open')
+  const operationsInbox = useOperationsInbox(workspaceId, 'open', { enabled: pendingActive })
   const approvalAvailability = resolveApprovalAvailability({
     workspaceLoading: workspaces.isLoading,
     workspaceError: workspaces.isError,
@@ -358,10 +374,13 @@ function InboxContent() {
     inboxError: operationsInbox.isError,
   })
 
-  const failedTasks = useInfiniteTasks({ status: 'failed', limit: 100 })
-  const pendingTasks = useInfiniteTasks({ status: 'pending', limit: 100 })
-  const notificationLogs = useInfiniteNotificationLogs({ limit: 100 })
-  const pendingControlActions = useInfiniteControlActions({ outcome: 'pending', limit: 100 })
+  const failedTasks = useInfiniteTasks({ status: 'failed', limit: 100 }, { enabled: pendingActive })
+  const pendingTasks = useInfiniteTasks({ status: 'pending', limit: 100 }, { enabled: pendingActive })
+  const notificationLogs = useInfiniteNotificationLogs({ limit: 100 }, { enabled: pendingActive })
+  const pendingControlActions = useInfiniteControlActions(
+    { outcome: 'pending', limit: 100 },
+    { enabled: pendingActive },
+  )
 
   const failed = useMemo(
     () => failedTasks.data?.pages.flatMap((page) => page.data) ?? [],
@@ -446,44 +465,73 @@ function InboxContent() {
   )
 
   useEffect(() => {
+    if (!pendingActive) return
     const params = new URLSearchParams(searchParamsKey)
     const view = params.get('view')
     const nextFilter = isQueueFilter(view) ? view : 'all'
     const nextSearch = params.get('q') ?? ''
     setFilter((current) => (current === nextFilter ? current : nextFilter))
     setSearch((current) => (current === nextSearch ? current : nextSearch))
-  }, [searchParamsKey])
+  }, [pendingActive, searchParamsKey])
 
   useEffect(() => {
+    if (isActionCenterTab(requestedTab)) return
+    const params = new URLSearchParams(searchParamsKey)
+    params.set('tab', 'pending')
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false })
+  }, [pathname, requestedTab, router, searchParamsKey])
+
+  useEffect(() => {
+    if (!pendingActive) return
     const timeout = window.setTimeout(() => replaceQueueQuery(filter, search), 180)
     return () => window.clearTimeout(timeout)
-  }, [filter, replaceQueueQuery, search])
+  }, [filter, pendingActive, replaceQueueQuery, search])
 
   useEffect(() => {
+    if (!pendingActive) return
     if (selectedItem && selectedItem.id !== selectedId) setSelectedId(selectedItem.id)
     if (!selectedItem && selectedId) setSelectedId(null)
-  }, [selectedId, selectedItem])
+  }, [pendingActive, selectedId, selectedItem])
 
   useEffect(() => {
-    if (!selectedItem) return
+    if (!pendingActive || !selectedItem) return
     document
       .getElementById(`inbox-row-${selectedItem.id}`)
       ?.scrollIntoView({ block: 'nearest' })
-  }, [selectedItem])
+  }, [pendingActive, selectedItem])
+
+  useLayoutEffect(() => {
+    if (!pendingActive) return
+    const viewport = document.querySelector<HTMLElement>(
+      '[data-testid="inbox-queue-scroll"] [data-slot="scroll-area-viewport"]',
+    )
+    if (viewport) viewport.scrollTop = pendingScrollTopRef.current
+  }, [pendingActive])
+
+  useLayoutEffect(() => {
+    if (activeTab !== 'controls') return
+    controlsRegionRef.current?.scrollTo({ top: controlsScrollTopRef.current })
+  }, [activeTab])
 
   useEffect(() => {
+    if (!pendingActive) return
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target instanceof Element ? event.target : null
       const targetElement = target instanceof HTMLElement ? target : null
-      const isInteractive = shouldIgnoreInboxShortcut({
-        tagName: target?.tagName,
-        isContentEditable: targetElement?.isContentEditable,
-        withinInteractive: Boolean(
-          target?.closest(
-            'a,button,input,select,textarea,summary,[contenteditable="true"],[role="button"],[role="link"],[role="menuitem"],[role="option"],[role="tab"],[tabindex]:not([tabindex="-1"])',
+      const withinQueueOption = Boolean(
+        target?.closest('[role="listbox"][aria-label="待处理信号"] [role="option"]'),
+      )
+      const isInteractive =
+        !withinQueueOption &&
+        shouldIgnoreInboxShortcut({
+          tagName: target?.tagName,
+          isContentEditable: targetElement?.isContentEditable,
+          withinInteractive: Boolean(
+            target?.closest(
+              'a,button,input,select,textarea,summary,[contenteditable="true"],[role="button"],[role="link"],[role="menuitem"],[role="option"],[role="tab"],[tabindex]:not([tabindex="-1"])',
+            ),
           ),
-        ),
-      })
+        })
 
       if (isInteractive) {
         if (event.key === 'Escape' && target === searchRef.current) {
@@ -521,7 +569,7 @@ function InboxContent() {
 
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [filteredItems, router, selectedItem])
+  }, [filteredItems, pendingActive, router, selectedItem])
 
   const queries = [failedTasks, pendingTasks, notificationLogs, pendingControlActions]
   const isInitialLoading =
@@ -566,24 +614,30 @@ function InboxContent() {
     { key: 'waiting', label: '等待' },
     { key: 'review', label: '复核' },
   ]
-  const approvalNotice =
-    approvalAvailability === 'loading'
+  const approvalNotice = pendingActive
+    ? approvalAvailability === 'loading'
       ? '正在读取 Workspace 人工审批…'
       : approvalAvailability === 'no_workspace'
         ? '尚未加入 Workspace，人工审批目前不可用。'
         : null
+    : null
 
   return (
     <div
       data-testid="inbox-workbench"
       className="flex min-h-[calc(100dvh-3.5rem)] w-full flex-col bg-background lg:h-[calc(100dvh-3.5rem)] lg:overflow-hidden"
     >
-      <header className="flex shrink-0 flex-col gap-2 border-b px-3 py-2 md:min-h-14 md:flex-row md:items-center md:gap-3 md:px-4 md:py-0">
+      <header
+        data-testid="action-center-header"
+        className="flex shrink-0 flex-col gap-2 border-b px-3 py-2 md:min-h-14 md:flex-row md:items-center md:gap-3 md:px-4 md:py-0"
+      >
         <div className="flex min-w-0 items-baseline gap-2">
           <h1 className="truncate text-base font-semibold">任务与通知</h1>
-          <span className="shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground">
-            {rawCounts.all}
-          </span>
+          {pendingActive ? (
+            <span className="shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground">
+              {rawCounts.all}
+            </span>
+          ) : null}
         </div>
 
         <RouteTabs
@@ -591,81 +645,98 @@ function InboxContent() {
           className="order-3 rounded-md bg-transparent p-0 md:order-none md:ml-1 [&_a]:rounded-md [&_a]:px-3 [&_a]:py-1.5 [&_a]:text-xs"
         />
 
-        <div className="ml-auto flex w-full items-center gap-1.5 md:w-auto">
-          {workspaceId ? (
-            <select
-              value={workspaceId}
-              onChange={(event) => selectWorkspace(event.target.value)}
-              aria-label="选择人工审批 Workspace"
-              className="h-9 max-w-40 shrink-0 rounded-md border bg-background px-2 text-xs md:h-8"
-            >
-              {workspaces.data?.map((workspace) => (
-                <option key={workspace.id} value={workspace.id}>
-                  {workspace.name}
-                </option>
-              ))}
-            </select>
-          ) : null}
-          <div className="relative min-w-0 flex-1 md:w-64 md:flex-none">
-            <Search
-              aria-hidden="true"
-              className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground"
-            />
-            <Input
-              ref={searchRef}
-              name="inbox-search"
-              autoComplete="off"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="搜索队列…"
-              aria-label="搜索当前队列"
-              className="h-9 rounded-md border-transparent bg-muted/55 pr-8 pl-8 text-xs focus-visible:border-ring md:h-8"
-            />
-            {search ? (
-              <button
-                type="button"
-                aria-label="清除搜索"
-                onClick={() => {
-                  setSearch('')
-                  searchRef.current?.focus()
-                }}
-                className="absolute top-1/2 right-1.5 grid size-7 -translate-y-1/2 place-items-center rounded hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:size-6"
+        {activeTab === 'pending' ? (
+          <div className="ml-auto flex w-full items-center gap-1.5 md:w-auto">
+            {workspaceId ? (
+              <select
+                value={workspaceId}
+                onChange={(event) => selectWorkspace(event.target.value)}
+                aria-label="选择人工审批 Workspace"
+                className="h-9 max-w-40 shrink-0 rounded-md border bg-background px-2 text-xs md:h-8"
               >
-                <X aria-hidden="true" className="size-3" />
-              </button>
-            ) : (
-              <Kbd className="absolute top-1/2 right-1.5 hidden h-4 min-w-4 -translate-y-1/2 px-1 text-[9px] lg:inline-flex">
-                Ctrl F
-              </Kbd>
-            )}
-          </div>
+                {workspaces.data?.map((workspace) => (
+                  <option key={workspace.id} value={workspace.id}>
+                    {workspace.name}
+                  </option>
+                ))}
+              </select>
+            ) : null}
+            <div className="relative min-w-0 flex-1 md:w-64 md:flex-none">
+              <Search
+                aria-hidden="true"
+                className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground"
+              />
+              <Input
+                ref={searchRef}
+                name="inbox-search"
+                autoComplete="off"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="搜索队列…"
+                aria-label="搜索当前队列"
+                className="h-9 rounded-md border-transparent bg-muted/55 pr-8 pl-8 text-xs focus-visible:border-ring md:h-8"
+              />
+              {search ? (
+                <button
+                  type="button"
+                  aria-label="清除搜索"
+                  onClick={() => {
+                    setSearch('')
+                    searchRef.current?.focus()
+                  }}
+                  className="absolute top-1/2 right-1.5 grid size-7 -translate-y-1/2 place-items-center rounded hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:size-6"
+                >
+                  <X aria-hidden="true" className="size-3" />
+                </button>
+              ) : (
+                <Kbd className="absolute top-1/2 right-1.5 hidden h-4 min-w-4 -translate-y-1/2 px-1 text-[9px] lg:inline-flex">
+                  Ctrl F
+                </Kbd>
+              )}
+            </div>
 
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label="同步任务与通知"
-            onClick={refetchAll}
-            className="shrink-0"
-          >
-            <RefreshCw aria-hidden="true" className="size-3.5" />
-          </Button>
-        </div>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label="同步任务与通知"
+              onClick={refetchAll}
+              className="shrink-0"
+            >
+              <RefreshCw aria-hidden="true" className="size-3.5" />
+            </Button>
+          </div>
+        ) : null}
       </header>
 
-      {partialFailures.length > 0 ? (
+      {pendingActive && partialFailures.length > 0 ? (
         <div className="flex shrink-0 items-center gap-2 border-b bg-destructive/5 px-4 py-2 text-xs text-destructive">
           <AlertCircle aria-hidden="true" className="size-3.5 shrink-0" />
           {partialFailures.join('、')}暂时无法读取，其余信号仍可处理。
         </div>
       ) : null}
 
-      {approvalNotice ? (
+      {pendingActive && approvalNotice ? (
         <div role="status" className="shrink-0 border-b bg-muted/25 px-4 py-2 text-xs text-muted-foreground">
           {approvalNotice}
         </div>
       ) : null}
 
-      {isInitialLoading ? (
+      {activeTab === 'tasks' ? (
+        <TasksPane scrollTopRef={tasksScrollTopRef} />
+      ) : activeTab === 'notifications' ? (
+        <NotificationsPane scrollTopRef={notificationsScrollTopRef} />
+      ) : activeTab === 'controls' ? (
+        <section
+          ref={controlsRegionRef}
+          aria-label="控制记录"
+          className="min-h-0 flex-1 overflow-auto p-4"
+          onScroll={(event) => {
+            controlsScrollTopRef.current = event.currentTarget.scrollTop
+          }}
+        >
+          <ControlActionsLedger />
+        </section>
+      ) : isInitialLoading ? (
         <div className="min-h-0 flex-1 p-4">
           <LoadingState rows={5} />
         </div>
@@ -730,6 +801,9 @@ function InboxContent() {
             <ScrollArea
               data-testid="inbox-queue-scroll"
               className="min-h-0 flex-1 overscroll-contain"
+              onScrollCapture={(event) => {
+                pendingScrollTopRef.current = (event.target as HTMLElement).scrollTop
+              }}
             >
               {filteredItems.length === 0 ? (
                 <div className="grid min-h-80 place-items-center px-6 text-center">

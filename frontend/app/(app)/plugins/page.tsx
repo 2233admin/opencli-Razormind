@@ -553,12 +553,8 @@ function ProviderDetails({
         )}
 
         {!provider.marketplace && installation?.runtimeStatus !== 'BLOCKED' && hasRunnableNode ? (
-          <Button
-            className="w-full"
-            nativeButton={false}
-            render={<Link href={workspaceId ? `/studio?workspace=${encodeURIComponent(workspaceId)}` : '/studio'} />}
-          >
-            在工作流中使用
+          <Button className="w-full" nativeButton={false} render={<Link href={`/studio?${new URLSearchParams({ ...(workspaceId ? { workspace: workspaceId } : {}), provider: provider.id, capability: nodes.find((node) => node.readiness === 'runnable')?.id ?? nodes[0]?.id ?? 'catalog' }).toString()}`} />}>
+            带着能力进入 Studio
           </Button>
         ) : installation?.runtimeStatus === 'BLOCKED' ? (
           <Button className="w-full" disabled title="需要兼容的 OpenCLI 运行适配器">

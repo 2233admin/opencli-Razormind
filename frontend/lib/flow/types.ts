@@ -103,6 +103,8 @@ export interface WorkflowNodeData extends Record<string, unknown> {
   category: NodeCategory
   icon: string
   status?: "idle" | "running" | "waiting" | "success" | "partial_success" | "error"
+  /** materialized interface geometry before React Flow reports measured dimensions */
+  interfaceRowCount?: number
   fields?: FieldConfig[]
   /** for condition nodes */
   condition?: string

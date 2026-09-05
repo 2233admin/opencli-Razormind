@@ -1,7 +1,7 @@
 """add durable analysis findings
 
 Revision ID: s6t7u8v9w0x1
-Revises: r5s6t7u8v9w0
+Revises: analysis20260905
 Create Date: 2026-09-02
 """
 
@@ -9,7 +9,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "s6t7u8v9w0x1"
-down_revision = "r5s6t7u8v9w0"
+down_revision = "analysis20260905"
 branch_labels = None
 depends_on = None
 

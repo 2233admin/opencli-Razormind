@@ -10,6 +10,8 @@
     "check:login-themes": "node --test scripts/check-login-theme-regressions.mjs",
     "check:workflow-regressions": "node --test scripts/check-workflow-regressions.mjs scripts/check-inspector-workflow-regressions.mjs scripts/check-workflow-draft-persistence-regressions.mjs scripts/check-gaojixing-doubao-workflow.mjs scripts/check-feishu-bitable-regressions.mjs",
     "check:image-studio": "node --test scripts/check-image-studio-contract.mjs",
+    "check:workflow": "npm run check:workflow-regressions",
+    "check:workflow-image": "npm run check:image-studio",
     "check:navigation-transitions": "node --test scripts/check-navigation-transition-regressions.mjs",
     "check:control-plane": "node --test scripts/check-control-plane-regressions.mjs scripts/check-operator-wiring-regressions.mjs scripts/check-dashboard-regressions.mjs scripts/check-inbox-regressions.mjs scripts/check-visualization-regressions.mjs",
     "check:task-triage": "node --experimental-strip-types --test scripts/task-list-query.test.mjs scripts/task-grouping.test.mjs scripts/check-dashboard-regressions.mjs",

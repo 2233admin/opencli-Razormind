@@ -13,10 +13,10 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   const { status, recoveryError, recoveryMode, recoveryPending, retrySession } = useAuth()
   const pathname = usePathname()
   const router = useRouter()
-
   useEffect(() => {
     if (status === 'anonymous') {
-      router.replace(`/login?returnTo=${encodeURIComponent(pathname)}`)
+      const returnTo = window.location.search ? `${pathname}${window.location.search}` : pathname
+      router.replace(`/login?returnTo=${encodeURIComponent(returnTo)}`)
     }
   }, [pathname, router, status])
 

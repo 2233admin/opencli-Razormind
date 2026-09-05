@@ -168,3 +168,19 @@ test('generic JSON fields render only inside the existing Advanced disclosure', 
   assert.match(inspector, /data-testid="advanced-parameter-fields"/)
   assert.match(inspector, /advancedParameterFields\.map\(\(field\) => renderParameterField\(field\)\)/)
 })
+
+test('inspector owns image actions and map or runtime detail outside the canvas node', async () => {
+  const [inspector, node] = await Promise.all([
+    readSource('components/flow/inspector.tsx'),
+    readSource('components/flow/nodes/workflow-node.tsx'),
+  ])
+
+  assert.match(inspector, /IMAGE_GENERATION_CATALOG_ID/)
+  assert.match(inspector, /IMAGE_ASSET_CATALOG_ID/)
+  assert.match(inspector, /imageStudioHref/)
+  assert.match(inspector, /Create Image Canvas/)
+  assert.match(inspector, /Select Workspace Assets/)
+  assert.match(inspector, /RUN & RELATION DETAILS/)
+  assert.match(inspector, /data\.runtimeEvidenceBatches/)
+  assert.doesNotMatch(node, /imageStudioHref|imageAssetHref|miniNetwork/)
+})

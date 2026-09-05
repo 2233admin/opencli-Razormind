@@ -1213,33 +1213,48 @@ test('workflow separates lightweight canvas actions from the guided node picker'
   assert.doesNotMatch(effects, /addEventListener\(["']keydown["'], close\)/)
 })
 
-test('workflow node ports show contract names without anonymous duplicates', async () => {
-  const [node, capabilities, canvasCss] = await Promise.all([
+test('workflow nodes share resolved geometry, canvas density, and port primitives', async () => {
+  const [node, primitives, canvas, canvasCss, geometry, icons] = await Promise.all([
     readSource('components/flow/nodes/workflow-node.tsx'),
-    readSource('lib/workflow/capabilities.ts'),
+    readSource('components/flow/nodes/workflow-node-primitives.tsx'),
+    readSource('components/flow/workflow-canvas-surface.tsx'),
     readSource('app/flow-canvas.css'),
+    importTypeScript('lib/flow/node-geometry.ts'),
+    importTypeScript('lib/flow/icons.tsx'),
   ])
+
+  assert.deepEqual(geometry.WORKFLOW_NODE_GEOMETRY, {
+    width: 240,
+    minHeight: 96,
+    headerHeight: 72,
+    interfaceRowHeight: 24,
+  })
+  assert.equal(geometry.workflowNodeDensity(0.4), 'low')
+  assert.equal(geometry.workflowNodeDensity(0.75), 'mid')
+  assert.equal(geometry.workflowNodeDensity(1), 'high')
+  assert.equal(geometry.workflowNodeDensity(0.4, false), 'high')
+  assert.deepEqual(geometry.workflowNodeSize(2), { width: 240, height: 120 })
+  assert.equal(geometry.workflowNodePortRowCount({ primitivePorts: [{ direction: 'input' }, { direction: 'output' }] }), 2)
+  assert.deepEqual(geometry.workflowNodeSizeForData({ canonical: { kind: 'sink' } }), { width: 240, height: 120 })
 
   for (const label of ['触发信号', '条目', '候选记录', '记录', '投递结果', '已存储条目']) {
     assert.match(node, new RegExp(label))
   }
-  assert.match(node, /primitiveOutputs\.length > 0 \? primitiveOutputs : semanticPorts\.outputs/)
-  assert.match(node, /primitiveInputs\.length > 0 \? primitiveInputs : semanticPorts\.inputs/)
-  assert.match(node, /if \(id === undefined && declared\.length > 0\) continue/)
-  assert.match(node, /direction: ["']IN["'] as const/)
-  assert.match(node, /direction: ["']OUT["'] as const/)
-  assert.match(node, /\{direction\} · \{port\.id \?\? ["']default["']\}/)
-  assert.match(node, /\[\{port\.type\}\]/)
-  assert.match(node, /"data-port-direction": handleType === ["']source["'] \? ["']output["'] : ["']input["']/)
-  assert.match(node, /"data-port-id": port\.id \?\? ["']default["']/)
-  assert.match(node, /"data-port-type": port\.type \?\? ["']unknown["']/)
-  assert.match(node, /position=\{Position\.Top\}/)
-  assert.match(node, /position=\{Position\.Bottom\}/)
-  assert.match(node, /aria-label.*\$\{port\.id \?\? ["']default["']\}.*\$\{port\.type \?\? ["']unknown["']\}/)
-  assert.doesNotMatch(node, /outputs: \[\{ id: undefined, label: ["']out["'] \}, \{ id: ["']out["'], label: ["']out["'] \}\]/)
-  assert.match(canvasCss, /\.workflow-port-name \{[\s\S]*opacity: 0/)
-  assert.match(canvasCss, /\.workflow-port-anchor:hover \.workflow-port-name,[\s\S]*opacity: 1/)
-  assert.match(capabilities, /missingLabels: Array\.from\(new Set\(missing\.map\(displayMissingLabel\)\)\)/)
+  assert.doesNotMatch(node, /useStore\(\(state\) => state\.transform/)
+  assert.match(node, /WorkflowNodePortHandle/)
+  assert.match(node, /WorkflowNodeSummary/)
+  assert.match(canvas, /data-zoom-bucket=\{workflowNodeDensity\(props\.zoom, props\.settings\.contextualZoom\)\}/)
+  assert.match(canvas, /data-wiring-state=\{props\.wiringState\}/)
+  assert.match(primitives, /export function WorkflowNodePortHandle/)
+  assert.match(primitives, /aria-keyshortcuts/)
+  assert.match(primitives, /\$\{nodeTitle\} · \$\{directionLabel\} · \$\{id\}/)
+  assert.match(canvasCss, /\[data-zoom-bucket="low"\] \.workflow-node-root/)
+  assert.match(canvasCss, /\.workflow-node-interface-direction \{\n  color: var\(--foreground\)/)
+  assert.match(canvasCss, /prefers-reduced-motion: reduce/)
+  assert.doesNotMatch(canvasCss, /var\(--motion-fast\)|var\(--motion-base\)|var\(--motion-ease-out\)/)
+  assert.notEqual(icons.getIcon('CircleAlert'), icons.getIcon())
+  assert.notEqual(icons.getIcon('Boxes'), icons.getIcon())
+  assert.notEqual(icons.getIcon('Image'), icons.getIcon())
 })
 
 test('the default canvas is an operator network with recursive four-layer lookup', async () => {
@@ -1382,13 +1397,14 @@ test('the inspector host constrains long node configuration so the dock owns ver
 })
 
 test('Houdini-style wiring uses native lifecycle hooks without validation toast side effects', async () => {
-  const [interactions, surface, editor, palette, commandStrip, workflowNode] = await Promise.all([
+  const [interactions, surface, editor, palette, commandStrip, workflowNode, primitives] = await Promise.all([
     readSource('components/flow/workflow-canvas-interactions.ts'),
     readSource('components/flow/workflow-canvas-surface.tsx'),
     readSource('components/flow/workflow-editor.tsx'),
     readSource('components/flow/command-palette.tsx'),
     readSource('components/flow/command-strip.tsx'),
     readSource('components/flow/nodes/workflow-node.tsx'),
+    readSource('components/flow/nodes/workflow-node-primitives.tsx'),
   ])
   const guards = sourceSection(interactions, 'export function useConnectionGuards', 'export function useCanvasViewportCompaction')
 
@@ -1409,10 +1425,11 @@ test('Houdini-style wiring uses native lifecycle hooks without validation toast 
   assert.match(palette, /originType === ["']unknown["'] \|\| port\.type\.trim\(\)\.toLowerCase\(\) !== ["']unknown["']/)
   assert.match(palette, /const auxiliaryOperators = \(compatiblePort \? \[\] : NODE_PALETTE\)/)
   assert.match(commandStrip, /autoLayout\(["']TB["'], ["']elk["'], true\)/)
-  assert.match(workflowNode, /tabIndex: 0/)
-  assert.match(workflowNode, /onContextMenu: \(event: MouseEvent\) =>/)
-  assert.match(workflowNode, /event\.key === ["']ContextMenu["'] \|\| \(event\.shiftKey && event\.key === ["']F10["']\)/)
-  assert.match(workflowNode, /if \(!event\.altKey\) return/)
+  assert.match(workflowNode, /WorkflowNodePortHandle/)
+  assert.match(primitives, /tabIndex=\{0\}/)
+  assert.match(primitives, /onContextMenu=\{\(event\) => onOpenMenu/)
+  assert.match(primitives, /event\.key === ["']ContextMenu["'] \|\| \(event\.shiftKey && event\.key === ["']F10["']\)/)
+  assert.match(primitives, /if \(!event\.altKey\) return/)
   assert.match(workflowNode, /new CustomEvent\(["']opencli:workflow-port-menu["']/)
 })
 

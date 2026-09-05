@@ -24,6 +24,7 @@ import {
 
 import type { CanvasSettings } from "@/lib/flow/settings-store"
 import type { FlowState } from "@/lib/flow/store"
+import { workflowNodeDensity } from "@/lib/flow/node-geometry"
 import type { ToolMode, WorkflowEdge, WorkflowNode } from "@/lib/flow/types"
 import type { WorkflowCapabilitiesResponse } from "@/lib/workflow/capabilities"
 import type { WorkflowNodeCatalogItem } from "@/lib/workflow/node-catalog"
@@ -151,11 +152,6 @@ function minimapNodeColor(node: { selected?: boolean }) {
   return node.selected ? "#e8e8e6" : "#3a3d42"
 }
 
-function zoomBucket(zoom: number) {
-  if (zoom < 0.5) return "low"
-  if (zoom > 1.4) return "high"
-  return "mid"
-}
 
 function panOnDragValue(settings: CanvasSettings, interactionLocked: boolean) {
   return settings.panOnDrag && !interactionLocked ? [1, 2] : false
@@ -281,7 +277,7 @@ export function WorkflowCanvasSurface(props: WorkflowCanvasSurfaceProps) {
         onMouseMoveCapture={props.onCanvasMouseMoveCapture}
         onMouseUpCapture={props.onCanvasMouseUpCapture}
         onMouseMove={props.onMouseMove}
-        data-zoom-bucket={zoomBucket(props.zoom)}
+        data-zoom-bucket={workflowNodeDensity(props.zoom, props.settings.contextualZoom)}
         data-wiring-state={props.wiringState}
       >
       <ReactFlow<WorkflowNode, WorkflowEdge>

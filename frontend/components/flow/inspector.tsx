@@ -33,6 +33,7 @@ import type { SourceBinding, SourceBindingRevision } from "@/lib/api/types"
 import type {
   FieldConfig,
   GeneratedWorkflowEdgeMapping,
+  SemanticLinkMeta,
   WorkflowEdge,
   WorkflowNode,
   WorkflowNodeData,
@@ -79,6 +80,8 @@ import {
   collectorKindForCatalogId,
   createCollectorSource,
   isCollectorNodeParams,
+  IMAGE_ASSET_CATALOG_ID,
+  IMAGE_GENERATION_CATALOG_ID,
   isOpenCLISourceSlotArray,
   type CollectorNodeParams,
   type CollectorSourceDefinition,
@@ -881,6 +884,7 @@ export function Inspector({ compact = false, onClose }: { compact?: boolean; onC
   const setLanguage = useSettingsStore((state) => state.set)
   const copy = INSPECTOR_COPY[language]
   const { getInternalNode, setCenter } = useReactFlow<WorkflowNode, WorkflowEdge>()
+  const searchParams = useSearchParams()
 
   const canvasSelected = nodes.filter((n) => n.selected)
   const pinnedNode = pinnedNodeId ? nodes.find((node) => node.id === pinnedNodeId) : undefined
@@ -1105,6 +1109,36 @@ export function Inspector({ compact = false, onClose }: { compact?: boolean; onC
   const node = selected[0]
   const data = node.data as WorkflowNodeData
   const canonical = data.canonical as { kind?: string; capability?: string; adapter?: string; params?: Record<string, unknown> } | undefined
+  const displayId = getNodeDisplayId(data)
+  const imageStudioParams = canonical?.params
+  const canvasDocumentId = typeof imageStudioParams?.canvasDocumentId === "string"
+    ? imageStudioParams.canvasDocumentId
+    : ""
+  const imageStudioQuery = new URLSearchParams({
+    workspace: searchParams.get("workspace") ?? "",
+    project: searchParams.get("project") ?? "",
+    workflow: searchParams.get("workflow") ?? workflowProject.id,
+    node: node.id,
+    document: canvasDocumentId,
+  })
+  const imageStudioHref = `/studio/workflow/image?${imageStudioQuery.toString()}`
+  const imageAssetHref = `${imageStudioHref}&mode=gallery`
+  const configuredSnapshotId = typeof imageStudioParams?.snapshotId === "string"
+    ? imageStudioParams.snapshotId
+    : undefined
+  const imageSnapshotId = data.imageStudioSummary?.snapshotId ?? configuredSnapshotId ?? "draft"
+  const semantic = data.semantic && typeof data.semantic === "object"
+    ? data.semantic as SemanticLinkMeta
+    : undefined
+  const weight = typeof data.weight === "number" ? data.weight : undefined
+  const evidenceBatches = data.runtimeEvidenceBatches ?? []
+  const evidenceItemCount = evidenceBatches.reduce((total, batch) => total + batch.itemCount, 0)
+  const evidenceRecordCount = evidenceBatches.reduce((total, batch) => total + batch.recordCount, 0)
+  const evidenceState = evidenceBatches.some((batch) => batch.status === "blocked" || batch.status === "failed")
+    ? "blocked"
+    : evidenceBatches.length > 0
+      ? "ready"
+      : undefined
   const projectNode = hydrateProjectNodeIdentity(
     findWorkflowProjectNodeByCanvasId(workflowProject, node.id),
     data,
@@ -1694,7 +1728,7 @@ export function Inspector({ compact = false, onClose }: { compact?: boolean; onC
             onChange={(patch) => updateWorkflowNodeParams(configurationNodeId, patch)}
           />
         ) : null}
-        <section className="space-y-3 rounded-[3px] border border-[#20242a] bg-[#101216]/84 p-3">
+        <section className="space-y-3 rounded-md border bg-card p-3">
           <div>
             <SectionCaption>{copy.businessConfig}</SectionCaption>
             <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
@@ -1732,6 +1766,83 @@ export function Inspector({ compact = false, onClose }: { compact?: boolean; onC
             />
           </div>
         </section>
+        {displayId === IMAGE_GENERATION_CATALOG_ID || displayId === IMAGE_ASSET_CATALOG_ID ? (
+          <section className="space-y-3 rounded-md border bg-card p-3">
+            <div>
+              <SectionCaption>{language === "zh-CN" ? "图片工作区 / IMAGE WORKSPACE" : "IMAGE WORKSPACE"}</SectionCaption>
+              <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+                {language === "zh-CN"
+                  ? "创作、选择资产和运行指标只在工作区中管理；节点画布保持为摘要。"
+                  : "Authoring, asset selection, and run metrics are managed in the workspace while the canvas stays a summary."}
+              </p>
+            </div>
+            {displayId === IMAGE_GENERATION_CATALOG_ID ? (
+              <>
+                <div className="grid grid-cols-2 gap-2">
+                <MonoRow k="snapshot" v={imageSnapshotId} />
+                  <MonoRow k="assets" v={data.imageStudioSummary?.recentAssetIds.length ?? 0} />
+                  <MonoRow k="model" v={data.imageStudioSummary?.modelFingerprint ?? "unset"} />
+                  <MonoRow k="document" v={canvasDocumentId || "new"} />
+                </div>
+                <Link href={imageStudioHref} className="inline-flex h-8 w-full items-center justify-center rounded-sm border border-border bg-background font-mono text-[10px] uppercase tracking-wide text-foreground transition-colors hover:bg-accent">
+                  {canvasDocumentId ? "Open Image Studio" : "Create Image Canvas"}
+                </Link>
+              </>
+            ) : (
+              <>
+                <MonoRow k="pinned-assets" v={Array.isArray(imageStudioParams?.assetIds) ? imageStudioParams.assetIds.length : 0} />
+                <Link href={imageAssetHref} className="inline-flex h-8 w-full items-center justify-center rounded-sm border border-border bg-background font-mono text-[10px] uppercase tracking-wide text-foreground transition-colors hover:bg-accent">
+                  Select Workspace Assets
+                </Link>
+              </>
+            )}
+          </section>
+        ) : null}
+
+        {data.sourceAnchor || data.runArtifact || data.topicCollapse || data.miniNetwork || evidenceBatches.length || semantic || weight !== undefined ? (
+          <details className={houdiniDetailsClass}>
+            <summary className={houdiniSummaryClass}>
+              <span>{language === "zh-CN" ? "运行与关系详情" : "RUN & RELATION DETAILS"}</span>
+              <span className="text-[10px] normal-case tracking-normal">{evidenceBatches.length} batches</span>
+            </summary>
+            <div className="grid grid-cols-2 gap-2 border-t p-3">
+              {data.sourceAnchor ? (
+                <>
+                  <MonoRow k="source-anchor" v={`${data.sourceAnchor.kind} · ${data.sourceAnchor.label}`} />
+                  {data.sourceAnchor.runId ? <MonoRow k="source-run" v={data.sourceAnchor.runId} /> : null}
+                  {data.sourceAnchor.artifactPath ? <MonoRow k="source-artifact" v={data.sourceAnchor.artifactPath} /> : null}
+                  {data.sourceAnchor.href ? <MonoRow k="source-url" v={data.sourceAnchor.href} /> : null}
+                  {data.sourceAnchor.selector ? <MonoRow k="source-selector" v={data.sourceAnchor.selector} /> : null}
+                </>
+              ) : null}
+              {data.runArtifact ? (
+                <>
+                  <MonoRow k="runtime-run" v={data.runArtifact.runId} />
+                  <MonoRow k="runtime-artifact" v={data.runArtifact.artifactPath} />
+                  {data.runArtifact.apiPath ? <MonoRow k="runtime-api" v={data.runArtifact.apiPath} /> : null}
+                </>
+              ) : null}
+              {data.topicCollapse ? (
+                <>
+                  <MonoRow k="topic-package" v={data.topicCollapse.mode} />
+                  <MonoRow k="topic-nodes" v={data.topicCollapse.nodeCount} />
+                </>
+              ) : null}
+              {data.miniNetwork ? <MonoRow k="network" v={`${data.miniNetwork.nodes} nodes · ${data.miniNetwork.edges} edges · ${data.miniNetwork.mode}`} /> : null}
+              {evidenceBatches.length ? (
+                <>
+                  <MonoRow k="evidence-batches" v={evidenceBatches.length} />
+                  <MonoRow k="evidence-items" v={evidenceItemCount} />
+                  <MonoRow k="evidence-records" v={evidenceRecordCount} />
+                  <MonoRow k="evidence-state" v={evidenceState ?? "unknown"} />
+                </>
+              ) : null}
+              {semantic?.relationship ? <MonoRow k="relationship" v={semantic.relationship} /> : null}
+              {typeof semantic?.confidence === "number" ? <MonoRow k="confidence" v={`${Math.round(Math.max(0, Math.min(1, semantic.confidence)) * 100)}%`} /> : null}
+              {weight !== undefined ? <MonoRow k="weight" v={`${Math.round(Math.max(0, Math.min(1, weight)) * 100)}%`} /> : null}
+            </div>
+          </details>
+        ) : null}
 
         {promptCapable ? (
           <details className={houdiniDetailsClass}>

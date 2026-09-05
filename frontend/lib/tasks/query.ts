@@ -39,6 +39,9 @@ export function normalizeTaskReturnPath(value: string | null): string {
   if (!value?.startsWith('/')) return '/tasks'
   const base = new URL('https://opencli.local/tasks')
   const target = new URL(value, base)
-  if (target.origin !== base.origin || target.pathname !== '/tasks') return '/tasks'
+  if (target.origin !== base.origin) return '/tasks'
+  const isTaskInbox = target.pathname === '/inbox' &&
+    target.searchParams.getAll('tab').length === 1 && target.searchParams.get('tab') === 'tasks'
+  if (target.pathname !== '/tasks' && !isTaskInbox) return '/tasks'
   return `${target.pathname}${target.search}`
 }

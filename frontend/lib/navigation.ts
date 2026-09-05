@@ -34,7 +34,7 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { href: '/dashboard', label: '概览', icon: LayoutDashboard },
       {
-        href: '/inbox',
+        href: '/inbox?tab=pending',
         label: '任务与通知',
         icon: Activity,
         match: ['/inbox', '/tasks', '/notifications'],
@@ -76,7 +76,7 @@ export const NAV_GROUPS: NavGroup[] = [
         match: ['/providers'],
       },
       {
-        href: '/control/actions',
+        href: '/control/kill-switch',
         label: '控制与安全',
         icon: ShieldAlert,
         match: ['/control'],

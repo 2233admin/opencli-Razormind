@@ -1,6 +1,6 @@
 """add analysis snapshot receipts and acquisition run correlation
 
-Revision ID: r5s6t7u8v9w0
+Revision ID: analysis20260905
 Revises: q4r5s6t7u8v9
 Create Date: 2026-09-02
 """
@@ -8,7 +8,7 @@ Create Date: 2026-09-02
 import sqlalchemy as sa
 from alembic import op
 
-revision = "r5s6t7u8v9w0"
+revision = "analysis20260905"
 down_revision = "q4r5s6t7u8v9"
 branch_labels = None
 depends_on = None

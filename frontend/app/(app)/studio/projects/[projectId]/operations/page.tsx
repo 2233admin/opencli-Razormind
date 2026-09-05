@@ -22,6 +22,7 @@ import type { ProjectRuntimeLog } from '@/lib/api/types'
 import { formatDateTime, formatRelative } from '@/lib/format'
 import { buildOperationsNodeTasks } from '@/lib/studio/operations-task-model'
 import { cn } from '@/lib/utils'
+import { buildRunUrl } from '@/lib/studio/run-navigation'
 
 const PAGE_SIZE = 20
 const TRACE_PAGE_SIZE = 50
@@ -82,6 +83,10 @@ export default function ProjectOperationsPage({
   const traceNodeTasks = buildOperationsNodeTasks(
     traceQuery.data?.trace.projection.nodeStates ?? [],
   )
+  const traceContext = selectedLog ? { workspace: workspaceId ?? undefined, project: projectId, workflow: selectedLog.workflow_id, run: selectedLog.run_id, trace: selectedLog.trace_id } : null
+  const evidenceHref = traceContext ? buildRunUrl('evidence', traceContext)! : null
+  const dataHref = traceContext ? buildRunUrl('data', traceContext)! : null
+  const workflowHref = traceContext ? buildRunUrl('workflow', traceContext)! : null
 
   useEffect(() => {
     setPage(1)
@@ -89,9 +94,9 @@ export default function ProjectOperationsPage({
 
   return (
     <PageContainer
-      eyebrow="Project observability"
       title={project ? `${project.name} · 日志监测` : '项目日志监测'}
-      description="查看项目内每次 Workflow Run 的发布版本、状态、耗时、输入与节点事件，并沿 trace_id 定位失败原因。"
+      eyebrow="Project observability"
+      description="执行状态：查看项目内每次 Workflow Run 的发布版本、状态、耗时、输入与节点事件，并沿 trace_id 定位执行完成、部分完成或失败原因。"
       className="max-w-none"
       actions={<div className="flex gap-2">{apiHref ? <Link href={apiHref} className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'min-h-11')}><Braces className="size-4" />访问 API</Link> : null}<Link href={overviewHref} className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'min-h-11')}><ArrowLeft className="size-4" />返回项目</Link></div>}
     >
@@ -107,7 +112,7 @@ export default function ProjectOperationsPage({
         <>
           <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5" aria-label="运行健康摘要">
             <Metric label="全部运行" value={summary?.total_runs ?? 0} icon={Activity} />
-            <Metric label="成功" value={summary?.successful_runs ?? 0} icon={CheckCircle2} tone="success" />
+            <Metric label="完成或部分完成" value={summary?.successful_runs ?? 0} icon={CheckCircle2} />
             <Metric label="失败" value={summary?.failed_runs ?? 0} icon={XCircle} tone="danger" />
             <Metric label="阻塞" value={summary?.blocked_runs ?? 0} icon={AlertTriangle} tone="warning" />
             <Metric label="运行中" value={summary?.running_runs ?? 0} icon={LoaderCircle} />
@@ -120,15 +125,10 @@ export default function ProjectOperationsPage({
                 <Input aria-label="搜索运行日志" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索 run_id、trace_id 或 workflow_id…" className="pl-9" />
               </div>
               <Select value={status} onValueChange={(value) => setStatus(value ?? 'all')}>
-                <SelectTrigger><Filter className="size-4" /><SelectValue>{status === 'all' ? '全部状态' : status}</SelectValue></SelectTrigger>
+                <SelectTrigger><Filter className="size-4" /><SelectValue>{status === 'all' ? '全部状态' : statusLabel(status)}</SelectValue></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">全部状态</SelectItem>
-                  <SelectItem value="completed">Completed</SelectItem>
-                  <SelectItem value="partial_success">Partial success</SelectItem>
-                  <SelectItem value="running">Running</SelectItem>
-                  <SelectItem value="waiting">Waiting</SelectItem>
-                  <SelectItem value="blocked">Blocked</SelectItem>
-                  <SelectItem value="failed">Failed</SelectItem>
+                  {['completed', 'partial', 'partial_success', 'running', 'waiting', 'blocked', 'failed'].map((value) => <SelectItem key={value} value={value}>{statusLabel(value)}</SelectItem>)}
                 </SelectContent>
               </Select>
               <div className="text-xs text-muted-foreground">每 10 秒刷新 · {meta?.total ?? 0} 条</div>
@@ -187,8 +187,17 @@ export default function ProjectOperationsPage({
           {selectedLog ? (
             <>
               <SheetHeader className="border-b">
-                <SheetTitle className="pr-10">{selectedLog.workflow_name} · Run Trace</SheetTitle>
+                <SheetTitle className="pr-10">{selectedLog.workflow_name} · 执行状态 Trace</SheetTitle>
                 <SheetDescription className="break-all font-mono">{selectedLog.run_id} · {selectedLog.trace_id}</SheetDescription>
+                <div className="flex flex-wrap gap-2 text-xs">
+                  {workspaceId && selectedLog.workflow_id && selectedLog.run_id ? (
+                    <>
+                      <Link className={cn(buttonVariants({ variant: 'outline', size: 'sm' }))} href={evidenceHref!}>查看项目证据关系</Link>
+                      <Link className={cn(buttonVariants({ variant: 'outline', size: 'sm' }))} href={dataHref!}>查看项目数据</Link>
+                      <Link className={cn(buttonVariants({ variant: 'outline', size: 'sm' }))} href={workflowHref!}>查看工作流</Link>
+                    </>
+                  ) : null}
+                </div>
               </SheetHeader>
               <div className="space-y-5 px-4 pb-6">
                 <div className="grid gap-2 sm:grid-cols-4">
@@ -295,15 +304,22 @@ function TraceMetric({ label, value, children }: { label: string; value?: string
 }
 
 function StatusBadge({ status }: { status: string }) {
-  const tone = status === 'completed' || status === 'partial_success'
+  const tone = status === 'completed'
     ? 'border-success/30 bg-success/10 text-success'
-    : status === 'failed'
-      ? 'border-destructive/30 bg-destructive/10 text-destructive'
-      : status === 'blocked'
-        ? 'border-warning/30 bg-warning/10 text-warning'
-        : 'border-primary/30 bg-primary/10 text-primary'
-  return <Badge variant="outline" className={cn('font-mono text-[10px]', tone)}>{status}</Badge>
+    : status === 'partial' || status === 'partial_success'
+      ? 'border-warning/30 bg-warning/10 text-warning'
+      : status === 'failed'
+        ? 'border-destructive/30 bg-destructive/10 text-destructive'
+        : status === 'blocked'
+          ? 'border-warning/30 bg-warning/10 text-warning'
+          : 'border-primary/30 bg-primary/10 text-primary'
+  return <Badge variant="outline" className={cn('font-mono text-[10px]', tone)}>{statusLabel(status)}</Badge>
 }
+
+function statusLabel(status: string) {
+  return { completed: '执行完成', partial: '部分完成', partial_success: '部分完成', failed: '失败', blocked: '阻塞', running: '执行中', waiting: '等待中', queued: '排队中' }[status] ?? status
+}
+
 
 function formatDuration(durationMs: number) {
   if (durationMs < 1_000) return `${durationMs} ms`

@@ -2,17 +2,17 @@
 
 import { Building2, ChevronDown, FileText, FileUp, FolderKanban, MessageCircle, Plus, Search, Sparkles, Trash2, Workflow } from 'lucide-react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 
 import { PageContainer } from '@/components/shell/page-container'
 import { ErrorState } from '@/components/shell/data-states'
 import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { Button, buttonVariants } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useBootstrapWorkspaceProject, useCreateProjectWorkflow, useDeleteWorkspaceProject, useGovernedWorkspaces, useMyWorkspaces, useWorkspaceProjects } from '@/lib/api/hooks'
 import { formatRelative } from '@/lib/format'
@@ -21,6 +21,8 @@ import type { ProjectSummary } from '@/lib/api/types'
 import { translateWorkflowDslManaged, type WorkflowImportResult } from '@/lib/workflow/codec'
 import { businessProjectName } from '@/lib/workflow/business-node-experience'
 import { studioAppTypeForTemplate, studioGraphForTemplate, studioSlug, type StudioTemplateId } from '@/lib/workflow/studio-templates'
+import { cn } from '@/lib/utils'
+const CAPABILITY_CONTEXT_KEYS = ['provider', 'capability', 'adapter', 'command'] as const
 
 const PROJECT_TYPE_FILTERS = [
   { value: 'all', label: '全部', icon: FolderKanban },
@@ -31,9 +33,26 @@ const PROJECT_TYPE_FILTERS = [
 
 export default function StudioPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const workspaces = useMyWorkspaces()
   const governedWorkspaces = useGovernedWorkspaces()
   const [workspaceId, setWorkspaceId] = useState<string | null>(null)
+  const searchQuery = searchParams.toString()
+  const capabilityContext = useMemo(() => {
+    const query = new URLSearchParams(searchQuery)
+    const valid = (key: string) => {
+      const value = query.get(key)?.trim()
+      return value && value.length <= 128 && /^[A-Za-z0-9._:/-]+$/.test(value) ? value : undefined
+    }
+    const context = { provider: valid('provider'), capability: valid('capability'), adapter: valid('adapter'), command: valid('command') }
+    return Object.values(context).some(Boolean) ? context : null
+  }, [searchQuery])
+  const capabilityQuery = capabilityContext
+    ? new URLSearchParams(Object.entries(capabilityContext).filter((entry): entry is [string, string] => Boolean(entry[1]))).toString()
+    : ''
+  const capabilityClearParams = new URLSearchParams(searchQuery)
+  CAPABILITY_CONTEXT_KEYS.forEach((key) => capabilityClearParams.delete(key))
+  const capabilityClearHref = `/studio${capabilityClearParams.toString() ? `?${capabilityClearParams.toString()}` : ''}`
   const [search, setSearch] = useState('')
   const [type, setType] = useState<ProjectAppTypeFilter>('all')
   const [sort, setSort] = useState('updated-desc')
@@ -110,7 +129,7 @@ export default function StudioPage() {
       })
       setCreateTemplate(null)
       toast.success('项目与工作流已创建')
-      router.push(`/studio/workflow?workspace=${workspaceId}&project=${result.project.id}&workflow=${result.primary_workflow.id}`)
+      router.push(`/studio/workflow?workspace=${workspaceId}&project=${result.project.id}&workflow=${result.primary_workflow.id}${capabilityQuery ? `&${capabilityQuery}` : ''}`)
     } catch (reason) {
       toast.error(reason instanceof Error ? reason.message : '创建失败')
     }
@@ -156,15 +175,15 @@ export default function StudioPage() {
         workflowId = result.primary_workflow.id
       } else {
         const workflow = await createWorkflow.mutateAsync({
-          workspaceId,
           projectId,
+          workspaceId,
           data: { name, description: `${pendingImport.format} 兼容工作流`, graph: pendingImport.project },
         })
         workflowId = workflow.id
       }
       toast.success(`已创建 ${pendingImport.format} WorkflowDraft`)
       setPendingImport(null)
-      router.push(`/studio/workflow?workspace=${workspaceId}&project=${projectId}&workflow=${workflowId}`)
+      router.push(`/studio/workflow?workspace=${workspaceId}&project=${projectId}&workflow=${workflowId}${capabilityQuery ? `&${capabilityQuery}` : ''}`)
     } catch (reason) {
       toast.error(reason instanceof Error ? reason.message : 'DSL 导入失败')
     }
@@ -192,7 +211,7 @@ export default function StudioPage() {
           <DropdownMenuTrigger render={<Button className="min-h-11" disabled={!workspaceId} />}><Plus className="size-4" />创建<ChevronDown className="size-3.5" /></DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-48">
             <DropdownMenuItem onClick={() => { setCreateTemplate('blank'); setProjectName('未命名项目') }}><Plus className="size-4" />创建空白工作流</DropdownMenuItem>
-            <DropdownMenuItem onClick={() => router.push(`/plugins?type=template&workspace=${workspaceId}`)}>从模板创建</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => router.push(`/plugins?type=template&workspace=${workspaceId}${capabilityQuery ? `&${capabilityQuery}` : ''}`)}>从模板创建</DropdownMenuItem>
             <DropdownMenuItem onClick={() => importInputRef.current?.click()}><FileUp className="size-4" />导入 DSL</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -233,7 +252,12 @@ export default function StudioPage() {
           </Select>
         </div>
       </div>
-
+      {capabilityContext ? (
+        <section className="flex items-center justify-between gap-3 rounded-xl border border-primary/20 bg-primary/5 p-3 text-sm" aria-label="能力上下文">
+          <div><div className="font-medium">能力上下文</div><div className="mt-1 text-xs text-muted-foreground">{[capabilityContext.provider, capabilityContext.capability, capabilityContext.adapter, capabilityContext.command].filter(Boolean).join(' · ')}。目录 readiness 不等于 run-scoped admission。</div></div>
+          <Link href={capabilityClearHref} prefetch={false} className={cn(buttonVariants({ variant: 'ghost', size: 'sm' }))} aria-label="移除能力上下文">移除</Link>
+        </section>
+      ) : null}
       {workspaces.isError || projects.isError ? (
         <div className="space-y-3">
           <ErrorState

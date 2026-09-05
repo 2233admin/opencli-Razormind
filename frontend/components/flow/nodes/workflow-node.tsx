@@ -1,10 +1,9 @@
 "use client"
 
-import { memo, useEffect, type KeyboardEvent, type MouseEvent } from "react"
-import { useRouter, useSearchParams } from "next/navigation"
-import { Handle, Position, useStore, useUpdateNodeInternals, type NodeProps } from "@xyflow/react"
-import { Wand2 } from "lucide-react"
+import { memo, type CSSProperties, type KeyboardEvent, type MouseEvent } from "react"
 import type { WorkflowNode as WorkflowNodeType } from "@/lib/flow/types"
+import { workflowNodeSize } from "@/lib/flow/node-geometry"
+import { getIcon } from "@/lib/flow/icons"
 import { useFlowStore } from "@/lib/flow/store"
 import { useSettingsStore } from "@/lib/flow/settings-store"
 import {
@@ -17,34 +16,20 @@ import { getNodeVisualSignature } from "@/lib/workflow/node-visuals"
 import { runtimeStatusLabel, runtimeStatusTone } from "@/lib/workflow/capabilities"
 import { buildCanonicalNodeViewContract } from "@/lib/workflow/canonical-node-contract"
 import { findWorkflowProjectNodeByCanvasId } from "@/lib/workflow/node-path"
-import { IMAGE_ASSET_CATALOG_ID, IMAGE_GENERATION_CATALOG_ID } from "@/lib/workflow/node-catalog"
 import { businessNodeName } from "@/lib/workflow/business-node-experience"
-import type {
-  WorkflowCapability,
-  WorkflowNodeKind,
-  WorkflowProjectNode,
-} from "@/lib/workflow/schema"
+import type { WorkflowCapability, WorkflowNodeKind } from "@/lib/workflow/schema"
 import { cn } from "@/lib/utils"
-
-const statusLabels: Record<string, string> = {
-  idle: "Idle",
-  running: "Running",
-  waiting: "Waiting",
-  success: "Done",
-  partial_success: "Partial success",
-  error: "Error",
-}
-
-const statusDotStyles: Record<string, string> = {
-  idle: "border-muted-foreground/50 bg-transparent",
-  running: "border-[#ff7a17] bg-[#ff7a17]",
-  waiting: "border-[#a78bfa] bg-[#a78bfa]",
-  success: "border-[#4ade80] bg-[#4ade80]",
-  partial_success: "border-warning bg-warning",
-  error: "border-destructive bg-destructive",
-}
-
-const ROW_H = 18
+import {
+  WorkflowNodeHeader,
+  WorkflowNodeInterface,
+  WorkflowNodeInterfaceRow,
+  WorkflowNodePortHandle,
+  WorkflowNodeRoot,
+  WorkflowNodeSummary,
+  WorkflowNodeSurface,
+  type WorkflowNodePort,
+  type WorkflowNodeStatus,
+} from "./workflow-node-primitives"
 
 const PORT_TYPE_LABELS: Record<string, Record<WorkflowLanguage, string>> = {
   trigger: { "zh-CN": "触发信号", "en-US": "Trigger" },
@@ -70,666 +55,38 @@ const PORT_ID_LABELS: Record<string, Record<WorkflowLanguage, string>> = {
   in2: { "zh-CN": "输入 2", "en-US": "Input 2" },
 }
 
-function portDisplayLabel(
-  port: { id?: string; direction: string; type: string },
-  language: WorkflowLanguage,
-) {
+type VisibleNodePort = WorkflowNodePort
+
+function portDisplayLabel(port: { id?: string; direction: string; type: string }, language: WorkflowLanguage) {
   const explicit = port.id ? PORT_ID_LABELS[port.id]?.[language] : undefined
   if (explicit) return explicit
   const typeLabel = PORT_TYPE_LABELS[port.type]?.[language]
   if (typeLabel) return typeLabel
   if (port.id && port.id !== "in" && port.id !== "out") return port.id
-  return port.direction === "input"
-    ? language === "zh-CN" ? "输入" : "Input"
-    : language === "zh-CN" ? "输出" : "Output"
+  return port.direction === "input" ? language === "zh-CN" ? "输入" : "Input" : language === "zh-CN" ? "输出" : "Output"
+}
+
+function paramSummary(data: WorkflowNodeType["data"]): string | undefined {
+  if (data.condition) return data.condition.slice(0, 96)
+  if (data.fields?.length) {
+    return data.fields
+      .slice(0, 2)
+      .map((field) => `${field.label}=${field.value.slice(0, 32)}`)
+      .join(" · ")
+  }
+  return undefined
 }
 
 function typeCaption(category: string, nodeType: string) {
   return `${category}::${nodeType}`.toUpperCase()
 }
 
-function paramSummary(data: WorkflowNodeType["data"]): string | null {
-  if (data.nodeType === "condition" && data.condition) return data.condition
-  if (data.fields && data.fields.length > 0) {
-    return data.fields
-      .slice(0, 2)
-      .map((f) => `${f.label}=${f.value}`)
-      .join("  ")
-  }
-  return null
-}
-
-const handleCls =
-  "workflow-port-handle !size-1.5 !rounded-[1px] !border !border-background !bg-[#3a3d42] transition-colors hover:!bg-foreground"
-
-type SemanticNodeShape = "card" | "pill" | "input" | "soft" | "decision" | "flag" | "tray"
-
-const shapeClips: Record<SemanticNodeShape, string | undefined> = {
-  card: undefined,
-  pill: "inset(0 round 999px)",
-  input: "polygon(8% 0, 100% 0, 92% 100%, 0 100%)",
-  soft: "inset(0 round 18px)",
-  decision: "polygon(12% 0, 88% 0, 100% 50%, 88% 100%, 12% 100%, 0 50%)",
-  flag: "polygon(0 0, 92% 0, 100% 50%, 92% 100%, 0 100%)",
-  tray: "polygon(0 14%, 36% 14%, 40% 0, 60% 0, 64% 14%, 100% 14%, 100% 100%, 0 100%)",
-}
-
-function isSemanticNodeShape(value: unknown): value is SemanticNodeShape {
-  return typeof value === "string" && value in shapeClips
-}
-
-function inferredSemanticShape(data: WorkflowNodeType["data"]): SemanticNodeShape {
-  const canonical = data.canonical as { kind?: string; capability?: string } | undefined
-  switch (canonical?.kind) {
-    case "schedule":
-      return "pill"
-    case "source":
-      return "input"
-    case "agent":
-      return "soft"
-    case "router":
-      return "decision"
-    case "notify":
-      return "flag"
-    case "inbox":
-      return "tray"
-    default:
-      return "card"
+function nodeStatus(status: string | undefined): WorkflowNodeStatus {
+  switch (status) {
+    case "running": case "waiting": case "success": case "partial_success": case "error": return status
+    default: return "idle"
   }
 }
-
-function nodeDisplayShape(data: WorkflowNodeType["data"]): SemanticNodeShape {
-  const explicitShape = data.operatorShape ?? data.canvasShape ?? data.nodeShape
-  if (isSemanticNodeShape(explicitShape)) return explicitShape
-  if (data.useSemanticShape === true) return inferredSemanticShape(data)
-  return "card"
-}
-
-function shapePadding(shape: SemanticNodeShape) {
-  switch (shape) {
-    case "pill":
-      return "px-4"
-    case "input":
-      return "pl-5 pr-6"
-    case "decision":
-      return "px-6"
-    case "flag":
-      return "pl-4 pr-7"
-    case "tray":
-      return "px-4 pt-2"
-    default:
-      return "px-3"
-  }
-}
-
-function NodeStatus({ status }: { status?: string }) {
-  if (!status) return null
-  const label = statusLabels[status] ?? status
-  const showText = status !== "idle"
-  return (
-    <span
-      className="inline-flex shrink-0 items-center gap-1.5 font-mono text-[9px] uppercase tracking-[0.12em] text-muted-foreground"
-      title={`Status: ${label}`}
-      aria-label={`Status: ${label}`}
-    >
-      <span className={cn("size-1.5 rounded-full border", statusDotStyles[status] ?? statusDotStyles.idle)} />
-      {showText ? <span>{label}</span> : null}
-    </span>
-  )
-}
-
-function RuntimeCapabilityBadge({
-  data,
-  title,
-}: {
-  data: WorkflowNodeType["data"]
-  title?: string
-}) {
-  const runtimeCapability = data.runtimeCapability
-  if (!runtimeCapability) return null
-  return (
-    <span
-      className={cn(
-        "inline-flex max-w-[5.25rem] shrink-0 rounded-[3px] border px-1 py-0.5 font-mono text-[8px] uppercase tracking-[0.08em]",
-        runtimeStatusTone(runtimeCapability.status),
-      )}
-      title={title ?? runtimeCapability.reason ?? runtimeCapability.label}
-    >
-      <span className="truncate">{runtimeStatusLabel(runtimeCapability.status)}</span>
-    </span>
-  )
-}
-
-function numberPercent(value: unknown) {
-  return typeof value === "number" ? `${Math.round(Math.max(0, Math.min(1, value)) * 100)}%` : null
-}
-
-function readMapBadges(data: WorkflowNodeType["data"]) {
-  const sourceAnchor = data.sourceAnchor
-  const runArtifact = data.runArtifact
-  const topicCollapse = data.topicCollapse
-  const semantic = data.semantic as { relationship?: unknown; confidence?: unknown } | undefined
-  const weight = numberPercent(data.weight)
-  const badges: Array<{ key: string; label: string; tone: string }> = []
-
-  if (sourceAnchor && typeof sourceAnchor === "object") badges.push({ key: "anchor", label: "ANCHOR", tone: "text-[#a8d8ff]" })
-  if (runArtifact && typeof runArtifact === "object") badges.push({ key: "artifact", label: "ARTIFACT", tone: "text-[#4ade80]" })
-  if (data.runtimeEvidenceBatches?.length) {
-    const batches = data.runtimeEvidenceBatches
-    const itemCount = batches.reduce((sum, batch) => sum + batch.itemCount, 0)
-    const blocked = batches.some((batch) => batch.status === "blocked" || batch.status === "failed")
-    badges.push({
-      key: "evidence-batch",
-      label: `BATCH ${batches.length} · ${itemCount}`,
-      tone: blocked ? "text-[#f87171]" : "text-[#4ade80]",
-    })
-  }
-  if (topicCollapse && typeof topicCollapse === "object") {
-    const state = topicCollapse as { mode?: unknown; nodeCount?: unknown }
-    badges.push({
-      key: "topic",
-      label: `PKG ${state.mode === "locked" ? "LOCK" : "DRAFT"}`,
-      tone: state.mode === "locked" ? "text-[#4ade80]" : "text-[#ffb86b]",
-    })
-  }
-  if (semantic && typeof semantic.relationship === "string") {
-    const confidence = numberPercent(semantic.confidence)
-    badges.push({ key: "semantic", label: confidence ? `SEM ${confidence}` : "SEM", tone: "text-[#d4b5ff]" })
-  }
-  if (weight) badges.push({ key: "weight", label: `WGT ${weight}`, tone: "text-[#ffb86b]" })
-
-  return badges
-}
-
-type CanonicalNodeData = {
-  catalogId?: string
-  kind?: string
-  capability?: string
-  params?: Record<string, unknown>
-}
-
-function readCanonical(data: WorkflowNodeType["data"]): CanonicalNodeData | undefined {
-  const canonical = data.canonical
-  return canonical && typeof canonical === "object" && !Array.isArray(canonical)
-    ? canonical as CanonicalNodeData
-    : undefined
-}
-
-function implementationParams(node: WorkflowProjectNode | undefined): Record<string, unknown> | undefined {
-  if (!node) return undefined
-  const operator = node.params.operator
-  if (!operator || typeof operator !== "object" || Array.isArray(operator)) return undefined
-  const implementationNodeId = (operator as Record<string, unknown>).implementationNodeId
-  if (typeof implementationNodeId !== "string") return undefined
-  const implementation = (node.internals?.nodes ?? []).find((candidate) => {
-    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return false
-    return (candidate as { id?: unknown }).id === implementationNodeId
-  }) as WorkflowProjectNode | undefined
-  return implementation?.params
-}
-
-function stringParam(params: Record<string, unknown> | undefined, key: string, fallback = "") {
-  const value = params?.[key]
-  return typeof value === "string" ? value : fallback
-}
-
-function stringArrayParam(params: Record<string, unknown> | undefined, key: string): string[] {
-  const value = params?.[key]
-  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : []
-}
-
-function MiniNetworkPreview({ data }: { data: WorkflowNodeType["data"] }) {
-  const miniNetwork = data.miniNetwork
-  if (!miniNetwork || typeof miniNetwork !== "object") return null
-  const preview = miniNetwork as { nodes?: unknown; edges?: unknown; mode?: unknown }
-  const nodes = typeof preview.nodes === "number" ? preview.nodes : 3
-  const edges = typeof preview.edges === "number" ? preview.edges : Math.max(0, nodes - 1)
-
-  return (
-    <div
-      className="mt-1.5 grid h-7 grid-cols-[auto_1fr_auto] items-center gap-1.5 rounded-sm border border-border/70 bg-background/45 px-1.5"
-      title="Node-internal mini network"
-    >
-      <span className="font-mono text-[8px] uppercase tracking-[0.1em] text-muted-foreground">NET</span>
-      <div className="relative h-4">
-        <span className="absolute left-0 top-1/2 h-px w-full -translate-y-1/2 bg-border" aria-hidden />
-        {Array.from({ length: Math.min(4, Math.max(2, nodes)) }).map((_, index, arr) => (
-          <span
-            key={index}
-            className="absolute top-1/2 size-1.5 -translate-y-1/2 rounded-full border border-[#a8d8ff] bg-card"
-            style={{ left: `${(index / Math.max(1, arr.length - 1)) * 100}%` }}
-            aria-hidden
-          />
-        ))}
-      </div>
-      <span className="font-mono text-[8px] text-muted-foreground">
-        {nodes}/{edges}
-      </span>
-    </div>
-  )
-}
-
-function WorkflowNodeComponent({ id, data, selected }: NodeProps<WorkflowNodeType>) {
-  const router = useRouter()
-  const currentSearchParams = useSearchParams()
-  const proposalFocused = data.proposalFocused === true
-  const internalLocked = data.internalLocked === true
-  const internalDraft = data.internalDraft === true
-  const workflowProject = useFlowStore((s) => s.workflowProject)
-  const networkStackLength = useFlowStore((s) => s.networkStack.length)
-  const contextualZoom = useSettingsStore((s) => s.contextualZoom)
-  const language = useSettingsStore((s) => s.language)
-  const zoom = useStore((s) => s.transform[2])
-  const updateNodeInternals = useUpdateNodeInternals()
-  const canonical = readCanonical(data)
-  const projectNode = findWorkflowProjectNodeByCanvasId(workflowProject, id)
-  const nodeViewContract = buildCanonicalNodeViewContract(projectNode, data, id)
-  const isBusinessLevel = networkStackLength === 0
-  const displayId = getNodeDisplayId(data)
-  const isImageGeneration = displayId === IMAGE_GENERATION_CATALOG_ID
-  const isImageAsset = displayId === IMAGE_ASSET_CATALOG_ID
-  const imageStudioParams = canonical?.params
-  const canvasDocumentId = stringParam(imageStudioParams, "canvasDocumentId")
-  const snapshotId = data.imageStudioSummary?.snapshotId ?? stringParam(imageStudioParams, "snapshotId")
-  const modelFingerprint = data.imageStudioSummary?.modelFingerprint ?? ""
-  const recentAssetIds = data.imageStudioSummary?.recentAssetIds ?? []
-  const pinnedAssetIds = stringArrayParam(imageStudioParams, "assetIds")
-  const imageRuntimeWaiting = data.runtimeRunState?.status === "waiting"
-  // Contextual Zoom: <0.5 = icon only, 0.5-1 = compact, >1 = full
-  const detail: "low" | "mid" | "high" = !contextualZoom
-    ? "high"
-    : zoom < 0.5
-      ? "low"
-      : zoom < 1
-        ? "mid"
-        : "high"
-
-  const primitivePorts = nodeViewContract.ports.length > 0
-    ? nodeViewContract.ports
-    : Array.isArray(data.primitivePorts)
-    ? (data.primitivePorts as Array<{ id: string; direction: string; type: string }>)
-    : []
-  const primitiveOutputs = primitivePorts
-    .filter((port) => port.direction === "output")
-    .map((port) => ({
-      id: port.id,
-      label: port.type.toLowerCase() === "evidencebatch" ? "EvidenceBatch" : portDisplayLabel(port, language),
-      type: port.type,
-      accent: port.type === "assertion" || port.type.toLowerCase() === "evidencebatch" ? "#4ade80" : undefined,
-    }))
-  const primitiveInputs = primitivePorts
-    .filter((port) => port.direction === "input")
-    .map((port) => ({ id: port.id, label: portDisplayLabel(port, language), type: port.type }))
-  const connectedInputPorts = workflowProject.edges
-    .filter((edge) => edge.target === id)
-    .map((edge) => edge.targetPort)
-  const connectedOutputPorts = workflowProject.edges
-    .filter((edge) => edge.source === id)
-    .map((edge) => edge.sourcePort)
-  const semanticPorts = semanticFallbackPorts(canonical?.kind, language)
-  const inputs = mergeNodePorts(
-    primitiveInputs.length > 0 ? primitiveInputs : semanticPorts.inputs,
-    connectedInputPorts,
-    "input",
-    language,
-  )
-  const outputs = mergeNodePorts(
-    primitiveOutputs.length > 0 ? primitiveOutputs : semanticPorts.outputs,
-    connectedOutputPorts,
-    "output",
-    language,
-  )
-  const portSignature = [
-    ...inputs.map((port) => `in:${port.id ?? "__default__"}`),
-    ...outputs.map((port) => `out:${port.id ?? "__default__"}`),
-  ].join("|")
-  const portInterfaceRows = [
-    ...inputs.map((port) => ({ direction: "IN" as const, port })),
-    ...outputs.map((port) => ({ direction: "OUT" as const, port })),
-  ]
-
-  useEffect(() => {
-    updateNodeInternals(id)
-  }, [id, portSignature, updateNodeInternals])
-
-  const summary = paramSummary(data)
-  const nodeShape = nodeDisplayShape(data)
-  const clipPath = shapeClips[nodeShape]
-  const borderColor = selected ? "var(--foreground)" : proposalFocused ? "#ff7a17" : "var(--border)"
-  const prefersCustomLabel =
-    projectNode?.ui?.preferCustomLabel === true || shouldPreserveNodeAuthoredText(data)
-  const systemText = localizeNodeText(
-    displayId,
-    { label: data.label, description: data.description },
-    language,
-  )
-  const localized = prefersCustomLabel
-    ? { label: data.label, description: data.description }
-    : systemText
-  const businessLabel = prefersCustomLabel
-    ? localized.label
-    : businessNodeName({
-        label: localized.label,
-        kind: nodeViewContract.identity.kind as WorkflowNodeKind,
-        capability: nodeViewContract.identity.capability as WorkflowCapability,
-        params: implementationParams(projectNode) ?? canonical?.params,
-        language,
-      })
-  const visual = getNodeVisualSignature(data)
-  const mapBadges = readMapBadges(data)
-  const evidenceBatchItemCount = data.runtimeEvidenceBatches?.reduce((sum, batch) => sum + batch.itemCount, 0) ?? 0
-  const nodeStyle = {
-    clipPath,
-    borderRadius: clipPath ? undefined : 6,
-    "--node-stripe": visual.stripe,
-  } as React.CSSProperties
-  const handleProps = (
-    port: VisibleNodePort,
-    handleType: "source" | "target",
-  ) => {
-    const openPortMenu = (
-      event: MouseEvent | KeyboardEvent,
-      position: { x: number; y: number },
-    ) => {
-      event.preventDefault()
-      event.stopPropagation()
-      window.dispatchEvent(new CustomEvent("opencli:workflow-port-menu", {
-        detail: {
-          nodeId: id,
-          handleId: port.id ?? null,
-          handleType,
-          label: port.label,
-          type: port.type ?? "unknown",
-          x: position.x,
-          y: position.y,
-        },
-      }))
-    }
-
-    return {
-      "aria-haspopup": "menu" as const,
-      "aria-label": `${isBusinessLevel ? businessLabel : nodeViewContract.identity.label} · ${handleType === "source" ? "输出" : "输入"} · ${port.id ?? "default"} · ${port.type ?? "unknown"}`,
-      "data-port-direction": handleType === "source" ? "output" : "input",
-      "data-port-id": port.id ?? "default",
-      "data-port-name": port.label,
-      "data-port-type": port.type ?? "unknown",
-      tabIndex: 0,
-      onClickCapture: (event: MouseEvent) => {
-        if (!event.altKey) return
-        openPortMenu(event, { x: event.clientX, y: event.clientY })
-      },
-      onContextMenu: (event: MouseEvent) => {
-        openPortMenu(event, { x: event.clientX, y: event.clientY })
-      },
-      onKeyDown: (event: KeyboardEvent) => {
-        const opensMenu = event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")
-        if (!opensMenu) return
-        const bounds = event.currentTarget.getBoundingClientRect()
-        openPortMenu(event, {
-          x: bounds.left + bounds.width / 2,
-          y: bounds.top + bounds.height / 2,
-        })
-      },
-    }
-  }
-
-  const sourceHandleStyle = (i: number) =>
-    outputs.length === 1
-      ? { left: "50%" }
-      : { left: `${((i + 1) / (outputs.length + 1)) * 100}%` }
-  const targetHandleStyle = (i: number) =>
-    inputs.length === 1
-      ? { left: "50%" }
-      : { left: `${((i + 1) / (inputs.length + 1)) * 100}%` }
-
-  const openImageStudio = (
-    event: MouseEvent<HTMLButtonElement>,
-    mode: "authoring" | "gallery" = "authoring",
-  ) => {
-    event.preventDefault()
-    event.stopPropagation()
-    const searchParams = new URLSearchParams()
-    searchParams.set("workspace", currentSearchParams.get("workspace") ?? "")
-    searchParams.set("project", currentSearchParams.get("project") ?? "")
-    searchParams.set("workflow", currentSearchParams.get("workflow") ?? workflowProject.id)
-    searchParams.set("node", id)
-    searchParams.set("document", canvasDocumentId)
-    if (mode === "gallery") searchParams.set("mode", "gallery")
-    router.push(`/studio/workflow/image?${searchParams.toString()}`)
-  }
-
-  if (detail === "low") {
-    return (
-      <div
-        data-workflow-node="true"
-        data-status={data.status ?? "idle"}
-        data-runtime-status={data.runtimeCapability?.status ?? "unknown"}
-        data-selected={selected ? "true" : "false"}
-        data-package-state={internalLocked ? "locked" : internalDraft ? "draft" : "canonical"}
-        aria-label={`${isBusinessLevel ? businessLabel : nodeViewContract.identity.label}, ${nodeViewContract.identity.kind}, ${runtimeStatusLabel(nodeViewContract.status.capability)}`}
-        className={cn(
-          "workflow-node-card flex size-12 items-center justify-center bg-card text-card-foreground ring-1 transition-colors",
-          selected ? "ring-foreground/40" : "ring-border",
-          proposalFocused && "ring-2 ring-[#ff7a17]/45",
-        )}
-        style={nodeStyle}
-        title={`${isBusinessLevel ? businessLabel : nodeViewContract.identity.label} · ${nodeViewContract.identity.kind} · ${runtimeStatusLabel(nodeViewContract.status.capability)} · ${inputs.length} in / ${outputs.length} out`}
-      >
-        <span className="workflow-node-mini-code">{visual.code}</span>
-        {inputs.map((input, index) => (
-          <Handle
-            key={portKey(input.id, "in")}
-            type="target"
-            id={input.id}
-            position={Position.Top}
-            className={handleCls}
-            style={targetHandleStyle(index)}
-            {...handleProps(input, "target")}
-          />
-        ))}
-        {outputs.map((out) => (
-          <Handle
-            key={portKey(out.id, "out")}
-            id={out.id}
-            type="source"
-            position={Position.Bottom}
-            className={handleCls}
-            style={sourceHandleStyle(outputs.indexOf(out))}
-            {...handleProps(out, "source")}
-          />
-        ))}
-      </div>
-    )
-  }
-
-  return (
-    <div
-      data-workflow-node="true"
-      data-status={data.status ?? "idle"}
-      data-runtime-status={data.runtimeCapability?.status ?? "unknown"}
-      data-selected={selected ? "true" : "false"}
-        data-package-state={internalLocked ? "locked" : internalDraft ? "draft" : "canonical"}
-      aria-label={`${isBusinessLevel ? businessLabel : nodeViewContract.identity.label}, ${nodeViewContract.identity.kind}, ${runtimeStatusLabel(nodeViewContract.status.capability)}`}
-      className={cn(
-        "workflow-node-card group relative overflow-hidden bg-card text-card-foreground transition-colors",
-        internalLocked ? "w-[244px]" : "w-[204px]",
-        selected ? "ring-1 ring-foreground/30" : "ring-1 ring-border hover:ring-[#3a3d42]",
-        proposalFocused && "ring-2 ring-[#ff7a17]/40",
-      )}
-      style={{
-        ...nodeStyle,
-        outline: `1px solid ${borderColor}`,
-        outlineOffset: "-1px",
-      }}
-    >
-      <div className={cn("flex min-h-[72px] gap-2 py-2", shapePadding(nodeShape))}>
-        <div className="workflow-node-sigil flex w-10 shrink-0 flex-col items-center justify-center gap-1 border-r border-border/70 pr-2">
-          <span className="font-mono text-[13px] font-semibold leading-none text-foreground" aria-hidden>
-            {visual.glyph}
-          </span>
-          <span className="max-w-9 truncate font-mono text-[9px] uppercase tracking-[0.12em] text-muted-foreground/90">
-            {visual.code}
-          </span>
-        </div>
-
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center justify-between gap-1.5">
-            <span className="truncate font-mono text-[9px] uppercase tracking-[0.08em] text-muted-foreground/80">
-              {prefersCustomLabel
-                ? id === "collection-need" ? "工作流入口" : "工作流输出"
-                : internalLocked
-                  ? typeCaption(data.category, canonical?.capability ?? data.nodeType)
-                  : internalDraft
-                    ? "DRAFT INTERNAL"
-                    : typeCaption(data.category, data.nodeType)}
-            </span>
-            <span className="flex min-w-0 shrink-0 items-center gap-1">
-              {prefersCustomLabel ? null : <RuntimeCapabilityBadge data={data} title={localized.description} />}
-              <NodeStatus status={imageRuntimeWaiting ? "waiting" : data.status} />
-            </span>
-          </div>
-
-          <p className="mt-1 truncate text-[13px] font-medium leading-tight">{isBusinessLevel ? businessLabel : localized.label}</p>
-
-          {detail === "high" && summary && !prefersCustomLabel ? (
-            <code className="mt-1 block truncate font-mono text-[10px] leading-tight text-muted-foreground">
-              {summary}
-            </code>
-          ) : null}
-
-          {detail === "high" && isImageGeneration && !prefersCustomLabel ? (
-            <div className="nodrag nopan mt-2 space-y-1.5" onPointerDown={(event) => event.stopPropagation()}>
-              <div className="grid grid-cols-2 gap-1 rounded-[3px] border border-border/70 bg-background/45 px-2 py-1.5 font-mono text-[9px] text-muted-foreground">
-                <span>SNAPSHOT</span>
-                <span className="truncate text-right text-foreground">{snapshotId || "DRAFT"}</span>
-                <span>MODEL</span>
-                <span className="truncate text-right text-foreground">{modelFingerprint || "UNSET"}</span>
-                <span>ASSETS</span>
-                <span className="text-right text-foreground">{recentAssetIds.length}</span>
-              </div>
-              <button
-                type="button"
-                onClick={openImageStudio}
-                className="flex h-6 w-full items-center justify-center gap-1.5 rounded-[3px] border border-border bg-background/80 font-mono text-[9px] uppercase tracking-[0.08em] text-foreground transition-colors hover:border-foreground/40 hover:bg-accent"
-              >
-                <Wand2 className="size-3" />
-                {canvasDocumentId ? "Open Image Studio" : "Create Image Canvas"}
-              </button>
-            </div>
-          ) : null}
-
-          {detail === "high" && isImageAsset && !prefersCustomLabel ? (
-            <div className="nodrag nopan mt-2 space-y-1.5" onPointerDown={(event) => event.stopPropagation()}>
-              <div className="rounded-[3px] border border-border/70 bg-background/45 px-2 py-1.5 font-mono text-[9px] text-muted-foreground">
-                PINNED ASSETS <span className="float-right text-foreground">{pinnedAssetIds.length}</span>
-              </div>
-              <button
-                type="button"
-                onClick={(event) => openImageStudio(event, "gallery")}
-                className="flex h-6 w-full items-center justify-center rounded-[3px] border border-border bg-background/80 font-mono text-[9px] uppercase tracking-[0.08em] text-foreground transition-colors hover:border-foreground/40 hover:bg-accent"
-              >
-                Select Workspace Assets
-              </button>
-            </div>
-          ) : null}
-
-          {detail === "high" && mapBadges.length > 0 ? (
-            <div className="mt-1.5 flex flex-wrap gap-1">
-              {mapBadges.map((badge) => (
-                <span
-                  key={badge.key}
-                  className={cn(
-                    "rounded-[3px] border border-border/70 bg-background/45 px-1 py-0.5 font-mono text-[8px] uppercase tracking-[0.08em]",
-                    badge.tone,
-                  )}
-                >
-                  {badge.label}
-                </span>
-              ))}
-            </div>
-          ) : null}
-
-          {detail === "high" ? <MiniNetworkPreview data={data} /> : null}
-        </div>
-      </div>
-
-      {detail === "high" ? (
-        <div className="border-t border-border/80 py-0.5">
-          {portInterfaceRows.map(({ direction, port }) => (
-            <div
-              key={`${direction}-${portKey(port.id, "interface-row")}`}
-              className={cn("flex items-center justify-between font-mono text-[10px] text-muted-foreground", shapePadding(nodeShape))}
-              style={{ height: ROW_H }}
-              title={`${direction} · ${port.id ?? "default"}: ${port.type ?? "unknown"}`}
-            >
-              <span className="shrink-0 text-[9px] font-semibold tracking-[0.08em] text-foreground/75">
-                {direction} · {port.id ?? "default"}
-              </span>
-              <span className="ml-2 flex min-w-0 items-center gap-1.5">
-                <span className="truncate">
-                  {port.label === "EvidenceBatch" && evidenceBatchItemCount > 0
-                    ? `${port.label} · ${evidenceBatchItemCount}`
-                    : port.label}
-                </span>
-                {port.type && port.type !== "unknown" ? (
-                  <span className="shrink-0 text-[8px] text-muted-foreground/60">[{port.type}]</span>
-                ) : null}
-                {port.accent ? (
-                  <span
-                    className="size-1.5 rounded-full"
-                    style={{ backgroundColor: port.accent }}
-                    aria-hidden
-                  />
-                ) : null}
-              </span>
-            </div>
-          ))}
-        </div>
-      ) : null}
-
-
-      {/* handles aligned to port rows */}
-      {inputs.map((input, index) => (
-        <div
-          key={portKey(input.id, "in")}
-          className="workflow-port-anchor workflow-port-anchor-input"
-          style={targetHandleStyle(index)}
-        >
-          <span className="workflow-port-name" title={`${input.label} · ${input.type ?? "unknown"}`}>
-            {input.label}
-          </span>
-          <Handle
-            type="target"
-            id={input.id}
-            position={Position.Top}
-            className={handleCls}
-            {...handleProps(input, "target")}
-          />
-        </div>
-      ))}
-      {outputs.map((out, i) => (
-        <div
-          key={portKey(out.id, "out")}
-          className="workflow-port-anchor workflow-port-anchor-output"
-          style={sourceHandleStyle(i)}
-        >
-          <span className="workflow-port-name" title={`${out.label} · ${out.type ?? "unknown"}`}>
-            {out.label}
-          </span>
-          <Handle
-            id={out.id}
-            type="source"
-            position={Position.Bottom}
-            className={handleCls}
-            {...handleProps(out, "source")}
-          />
-        </div>
-      ))}
-    </div>
-  )
-}
-
-type VisibleNodePort = { id?: string; label: string; type?: string; accent?: string }
 
 function mergeNodePorts(
   declared: VisibleNodePort[],
@@ -737,58 +94,146 @@ function mergeNodePorts(
   direction: "input" | "output",
   language: WorkflowLanguage,
 ): VisibleNodePort[] {
-  const ports = new Map<string, VisibleNodePort>()
-  for (const port of declared) {
-    ports.set(portKey(port.id), port)
-  }
+  const ports = new Map(declared.map((port) => [portKey(port.id), port]))
   for (const id of connectedIds) {
-    // An omitted edge port means the contract resolver chooses one of the
-    // declared ports. It is not a second anonymous Canvas port.
-    if (id === undefined && declared.length > 0) continue
+    if (id === undefined && declared.length) continue
     const key = portKey(id)
-    if (!ports.has(key)) {
-      ports.set(key, {
-        id,
-        label: portDisplayLabel({ id, direction, type: "unknown" }, language),
-        type: "unknown",
-      })
-    }
+    if (!ports.has(key)) ports.set(key, { id, label: portDisplayLabel({ id, direction, type: "unknown" }, language), type: "unknown" })
   }
   return Array.from(ports.values())
 }
 
-function semanticFallbackPorts(kind: string | undefined, language: WorkflowLanguage): {
-  inputs: VisibleNodePort[]
-  outputs: VisibleNodePort[]
-} {
-  const visible = (id: string, direction: "input" | "output", type: string): VisibleNodePort => ({
-    id,
-    label: portDisplayLabel({ id, direction, type }, language),
-    type,
-  })
+function semanticFallbackPorts(kind: string | undefined, language: WorkflowLanguage): { inputs: VisibleNodePort[]; outputs: VisibleNodePort[] } {
+  const visible = (id: string, direction: "input" | "output", type: string): VisibleNodePort => ({ id, label: portDisplayLabel({ id, direction, type }, language), type })
   switch (kind) {
-    case "schedule":
-      return {
-        inputs: [],
-        outputs: [visible("out", "output", "trigger")],
-      }
-    case "source":
-      return {
-        inputs: [visible("in", "input", "trigger")],
-        outputs: [visible("out", "output", "items[]")],
-      }
-    case "sink":
-      return {
-        inputs: [visible("records", "input", "record[]")],
-        outputs: [visible("stored", "output", "storedItems[]")],
-      }
-    default:
-      return { inputs: [], outputs: [] }
+    case "schedule": return { inputs: [], outputs: [visible("out", "output", "trigger")] }
+    case "source": return { inputs: [visible("in", "input", "trigger")], outputs: [visible("out", "output", "items[]")] }
+    case "sink": return { inputs: [visible("records", "input", "record[]")], outputs: [visible("stored", "output", "storedItems[]")] }
+    default: return { inputs: [], outputs: [] }
   }
 }
 
-function portKey(id: string | undefined, prefix = "port") {
-  return `${prefix}:${id ?? "__default__"}`
+function portKey(id: string | undefined, prefix = "port") { return `${prefix}:${id ?? "__default__"}` }
+type WorkflowNodeProps = {
+  id: string
+  data: WorkflowNodeType["data"]
+  selected: boolean
+}
+
+
+function WorkflowNodeComponent({ id, data, selected }: WorkflowNodeProps) {
+  const workflowProject = useFlowStore((state) => state.workflowProject)
+  const networkStackLength = useFlowStore((state) => state.networkStack.length)
+  const language = useSettingsStore((state) => state.language)
+  const projectNode = findWorkflowProjectNodeByCanvasId(workflowProject, id)
+  const contract = buildCanonicalNodeViewContract(projectNode, data, id)
+  const canonical = data.canonical as { kind?: string; capability?: string; params?: Record<string, unknown> } | undefined
+  const displayId = getNodeDisplayId(data)
+  const prefersCustomLabel = projectNode?.ui?.preferCustomLabel === true || shouldPreserveNodeAuthoredText(data)
+  const localized = prefersCustomLabel
+    ? { label: data.label, description: data.description }
+    : localizeNodeText(displayId, { label: data.label, description: data.description }, language)
+  const title = networkStackLength === 0 && !prefersCustomLabel
+    ? businessNodeName({ label: localized.label, kind: contract.identity.kind as WorkflowNodeKind, capability: contract.identity.capability as WorkflowCapability, params: canonical?.params, language })
+    : localized.label
+  const declared = contract.ports.length ? contract.ports : Array.isArray(data.primitivePorts) ? data.primitivePorts as Array<{ id: string; direction: string; type: string }> : []
+  const semantic = semanticFallbackPorts(canonical?.kind, language)
+  const declaredInputs = declared
+    .filter((port) => port.direction === "input")
+    .map((port) => ({ id: port.id, label: portDisplayLabel(port, language), type: port.type }))
+  const declaredOutputs = declared
+    .filter((port) => port.direction === "output")
+    .map((port) => ({ id: port.id, label: portDisplayLabel(port, language), type: port.type }))
+  const resolvedInputs = mergeNodePorts(
+    declaredInputs.length ? declaredInputs : semantic.inputs,
+    workflowProject.edges.filter((edge) => edge.target === id).map((edge) => edge.targetPort),
+    "input",
+    language,
+  )
+  const resolvedOutputs = mergeNodePorts(
+    declaredOutputs.length ? declaredOutputs : semantic.outputs,
+    workflowProject.edges.filter((edge) => edge.source === id).map((edge) => edge.sourcePort),
+    "output",
+    language,
+  )
+  const interfaceRows = [...resolvedInputs.map((port) => ({ direction: "IN" as const, port })), ...resolvedOutputs.map((port) => ({ direction: "OUT" as const, port }))]
+  const portSignature = interfaceRows.map(({ direction, port }) => `${direction}:${port.id ?? "__default__"}`).join("|")
+
+  const openPortMenu = (
+    event: MouseEvent<HTMLDivElement> | KeyboardEvent<HTMLDivElement>,
+    port: VisibleNodePort,
+    handleType: "source" | "target",
+    point: { x: number; y: number },
+  ) => {
+    event.preventDefault()
+    event.stopPropagation()
+    window.dispatchEvent(new CustomEvent("opencli:workflow-port-menu", {
+      detail: { nodeId: id, handleId: port.id ?? null, handleType, label: port.label, type: port.type ?? "unknown", ...point },
+    }))
+  }
+  const visual = getNodeVisualSignature(data)
+  const Icon = getIcon(data.icon)
+  const status = nodeStatus(data.runtimeRunState?.status === "waiting" ? "waiting" : data.status)
+  const packageState = data.internalLocked ? "locked" : data.internalDraft ? "draft" : "canonical"
+  const summary = paramSummary(data)
+
+  const capability = data.runtimeCapability
+    ? <span className={cn("workflow-node-capability", runtimeStatusTone(data.runtimeCapability.status))}>{runtimeStatusLabel(data.runtimeCapability.status)}</span>
+    : null
+  const stateLabel = [status, capability ? runtimeStatusLabel(data.runtimeCapability!.status) : null, data.internalLocked ? "locked" : null]
+    .filter(Boolean)
+    .join(", ")
+
+  return (
+    <WorkflowNodeRoot
+      nodeId={id}
+      selected={selected}
+      status={status}
+      packageState={packageState}
+      label={`${title}, ${contract.identity.kind}, ${stateLabel}`}
+      style={{ ...workflowNodeSize(interfaceRows.length), "--node-accent": visual.stripe } as CSSProperties}
+    >
+      <WorkflowNodeSurface>
+        <WorkflowNodeHeader
+          icon={Icon}
+          accent={visual.stripe}
+          eyebrow={typeCaption(data.category, canonical?.capability ?? data.nodeType)}
+          title={title}
+          status={status}
+          locked={data.internalLocked === true}
+          summary={summary ? <WorkflowNodeSummary>{summary}</WorkflowNodeSummary> : null}
+          capability={capability}
+        />
+        <WorkflowNodeInterface nodeId={id} portSignature={portSignature}>
+          {interfaceRows.map(({ direction, port }) => <WorkflowNodeInterfaceRow key={`${direction}-${portKey(port.id)}`} direction={direction} id={port.id ?? "default"} label={port.label} type={port.type} />)}
+        </WorkflowNodeInterface>
+      </WorkflowNodeSurface>
+      {resolvedInputs.map((port, index) => (
+        <WorkflowNodePortHandle
+          key={portKey(port.id, "in")}
+          port={port}
+          direction="input"
+          directionLabel={language === "zh-CN" ? "输入" : "Input"}
+          nodeTitle={title}
+          index={index}
+          count={resolvedInputs.length}
+          onOpenMenu={openPortMenu}
+        />
+      ))}
+      {resolvedOutputs.map((port, index) => (
+        <WorkflowNodePortHandle
+          key={portKey(port.id, "out")}
+          port={port}
+          direction="output"
+          directionLabel={language === "zh-CN" ? "输出" : "Output"}
+          nodeTitle={title}
+          index={index}
+          count={resolvedOutputs.length}
+          onOpenMenu={openPortMenu}
+        />
+      ))}
+    </WorkflowNodeRoot>
+  )
 }
 
 export default memo(WorkflowNodeComponent)

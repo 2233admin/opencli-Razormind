@@ -23,6 +23,7 @@ import type {
 import type { HelperLines } from "./helper-lines"
 import { resolveCollisions, findFreePosition, nodeRect } from "./collision"
 import type { LayoutDirection, LayoutEngine } from "./layout"
+import { workflowNodeSizeForData } from "./node-geometry"
 import { NODE_PALETTE } from "./palette"
 import { createLayoutActions } from "./store-layout-actions"
 import {
@@ -893,24 +894,30 @@ export const useFlowStore = create<FlowState>((set, get) => ({
           : item.nodeType === "shape"
             ? "shape"
             : "workflow"
-    const size = isGroup ? { width: 320, height: 220 } : isShape ? { width: 140, height: 100 } : { width: 240, height: 96 }
+    const nodeData: WorkflowNodeData = {
+      label: item.label,
+      nodeType: item.nodeType,
+      category: item.category,
+      icon: item.icon,
+      color: item.color,
+      status: "idle",
+      ...(item.shape ? { shape: item.shape } : {}),
+      ...item.defaultData,
+    }
+    const size = isGroup
+      ? { width: 320, height: 220 }
+      : isShape
+        ? { width: 140, height: 100 }
+        : workflowNodeSizeForData(nodeData)
     const freePos = isGroup ? position : findFreePosition(get().nodes, position, size)
     const newNode: WorkflowNode = {
       id,
       type: rfType,
       position: freePos,
-      data: {
-        label: item.label,
-        nodeType: item.nodeType,
-        category: item.category,
-        icon: item.icon,
-        color: item.color,
-        status: "idle",
-        ...(item.shape ? { shape: item.shape } : {}),
-        ...item.defaultData,
-      },
+      data: nodeData,
       ...(isGroup ? { width: 320, height: 220, style: { width: 320, height: 220 } } : {}),
       ...(isShape ? { width: 140, height: 100, style: { width: 140, height: 100 } } : {}),
+      ...(rfType === "workflow" ? { width: size.width, height: size.height, style: { width: size.width, height: size.height } } : {}),
     }
     // 分组容器必须排在数组最前，保证 React Flow 的 parent-before-child 顺序
     set((state) => ({
@@ -924,7 +931,9 @@ export const useFlowStore = create<FlowState>((set, get) => ({
     if (!options?.suppressSnapshot) get().takeSnapshot()
     const { workflowProject, nodes, networkStack } = get()
     const localId = `${item.idPrefix}-${workflowNodeId(6)}`
-    const freePos = findFreePosition(nodes, position, { width: 196, height: 78 })
+    const nodeData = primitiveToNodeData(item, runtimeCapability)
+    const size = workflowNodeSizeForData(nodeData)
+    const freePos = findFreePosition(nodes, position, size)
     const parentNetwork = networkStack.at(-1)
     const canonicalNode = canonicalNodeFromPrimitive(item, localId, freePos, runtimeCapability)
     const id = parentNetwork ? scopedInternalId(parentNetwork.nodeId, localId) : localId
@@ -933,7 +942,7 @@ export const useFlowStore = create<FlowState>((set, get) => ({
       type: "workflow",
       position: freePos,
       data: {
-        ...primitiveToNodeData(item, runtimeCapability),
+        ...nodeData,
         ...(parentNetwork
           ? {
               canonical: {
@@ -948,6 +957,9 @@ export const useFlowStore = create<FlowState>((set, get) => ({
             }
           : { packageDraft: true }),
       },
+      width: size.width,
+      height: size.height,
+      style: { width: size.width, height: size.height },
     }
     let projectForEdit = workflowProject
     if (parentNetwork) {

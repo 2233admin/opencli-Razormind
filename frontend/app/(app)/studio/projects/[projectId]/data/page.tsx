@@ -32,6 +32,8 @@ import { toast } from 'sonner'
 import { EmptyState, ErrorState, LoadingState } from '@/components/shell/data-states'
 import { PageContainer } from '@/components/shell/page-container'
 import { ProjectNavigation } from '@/components/studio/project-navigation'
+import { RunContextBanner } from '@/components/studio/run-context-banner'
+import { parseRunNavigation } from '@/lib/studio/run-navigation'
 import { Badge } from '@/components/ui/badge'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -280,7 +282,8 @@ export default function ProjectDataWorkbenchPage({ params }: { params: Promise<{
   const { projectId } = use(params)
   const searchParams = useSearchParams()
   const workspaceId = searchParams.get('workspace')
-  const preferredWorkflowId = searchParams.get('workflow')
+  const navigationContext = parseRunNavigation(searchParams)
+  const preferredWorkflowId = navigationContext.workflow
   const [view, setView] = useState<WorkbenchView>('dataset')
   const [search, setSearch] = useState(searchParams.get('search') ?? '')
   const [status, setStatus] = useState('all')
@@ -536,6 +539,7 @@ export default function ProjectDataWorkbenchPage({ params }: { params: Promise<{
       <div className="border-b pb-3">
         <ProjectNavigation active="data" workspaceId={workspaceId} projectId={projectId} workflowId={workflowId} />
       </div>
+      <RunContextBanner context={navigationContext} projectId={projectId} />
 
       <section className="grid gap-3 sm:grid-cols-3" aria-label="项目数据摘要">
         <Summary label="项目记录" value={total.toLocaleString('zh-CN')} icon={Database} />

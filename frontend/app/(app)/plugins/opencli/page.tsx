@@ -105,8 +105,8 @@ function AdapterDetails({ plugin }: { plugin: OpenCLIAdapterPlugin }) {
           </div>
         </section>
 
-        <Button className="w-full" nativeButton={false} render={<Link href="/studio" />}>
-          在工作流中使用
+        <Button className="w-full" nativeButton={false} render={<Link href={`/studio?${new URLSearchParams({ provider: 'opencli', adapter: plugin.id }).toString()}`} />}>
+          带着能力进入 Studio
         </Button>
       </div>
     </SheetContent>
