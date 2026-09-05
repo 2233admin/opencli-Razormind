@@ -7,7 +7,8 @@ const sections: Record<string, string> = {
   overview: '项目', operations: '运行', data: '数据', evidence: '证据',
   relationships: '关系', api: 'API', workflow: '编排',
 }
-const contextKeys = ['workspace', 'project', 'workflow', 'run', 'trace', 'conversation', 'record']
+const contextKeys = ['workspace', 'project', 'workflow', 'run', 'trace', 'conversation', 'record', 'artifact']
+const dataViews = new Set(['dataset', 'profile', 'quality', 'files', 'artifacts'])
 
 export function workTabFromHref(href: string, workspace: string): WorkTab | null {
   // Stored navigation is untrusted. Accept only known local product routes.
@@ -27,13 +28,16 @@ export function workTabFromHref(href: string, workspace: string): WorkTab | null
     if (value) query.set(key, value)
   }
   query.set('project', project)
+  const view = url.searchParams.get('view')
+  if (match?.[2] === 'data' && view && dataViews.has(view)) query.set('view', view)
   if (query.has('conversation') && url.searchParams.get('agent') === '1') query.set('agent', '1')
   query.sort()
   const section = editor ? 'workflow' : match?.[2] ?? 'overview'
   // A trace cursor is presentation state, not a second copy of the same run.
-  const id = JSON.stringify([workspace, project, section, query.get('workflow'), query.get('run'), query.get('conversation'), query.get('record')])
-  const subject = query.get('conversation') ?? query.get('run') ?? project
-  return { id, href: `${url.pathname}?${query}`, label: `${sections[section]} · ${subject.slice(0, 12)}` }
+  const id = JSON.stringify([workspace, project, section, query.get('workflow'), query.get('run'), query.get('conversation'), query.get('record'), query.get('artifact')])
+  const subject = query.get('artifact') ?? query.get('conversation') ?? query.get('run') ?? project
+  const label = section === 'data' && query.has('artifact') ? '产物' : sections[section]
+  return { id, href: `${url.pathname}?${query}`, label: `${label} · ${subject.slice(0, 12)}` }
 }
 
 export function openWorkTab(tabs: WorkTab[], tab: WorkTab): WorkTab[] {

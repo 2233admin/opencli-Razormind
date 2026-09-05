@@ -71,9 +71,14 @@ export default function StudioPage() {
   const deleteProject = useDeleteWorkspaceProject()
 
   useEffect(() => {
-    if (workspaceId || !workspaces.data?.length) return
-    const requestedWorkspaceId = new URLSearchParams(window.location.search).get('workspace')
+    if (!workspaces.data?.length) return
+    const requestedWorkspaceId = new URLSearchParams(searchQuery).get('workspace')
     const requestedWorkspace = workspaces.data.find((workspace) => workspace.id === requestedWorkspaceId)
+    if (requestedWorkspace) {
+      setWorkspaceId(requestedWorkspace.id)
+      return
+    }
+    if (workspaceId && !requestedWorkspaceId) return
     const governedWorkspace = governedWorkspaces.data?.find((workspace) => workspace.id === requestedWorkspaceId)
     if (!requestedWorkspace && requestedWorkspaceId && governedWorkspaces.isLoading) return
     const mappedWorkspace = governedWorkspace
@@ -85,19 +90,23 @@ export default function StudioPage() {
     const preferredWorkspaceId = window.localStorage.getItem('opencli:studio-workspace')
     const preferredWorkspace = workspaces.data.find((workspace) => workspace.id === preferredWorkspaceId)
     setWorkspaceId(
-      requestedWorkspace?.id
-        ?? (governedWorkspace ? governedWorkspace.id : undefined)
+      (governedWorkspace ? governedWorkspace.id : undefined)
         ?? mappedWorkspace?.id
         ?? preferredWorkspace?.id
         ?? (workspaces.data.length === 1 ? workspaces.data[0].id : null),
     )
-  }, [workspaceId, workspaces.data, governedWorkspaces.data, governedWorkspaces.isLoading])
+  }, [searchQuery, workspaceId, workspaces.data, governedWorkspaces.data, governedWorkspaces.isLoading])
 
   useEffect(() => {
     if (workspaceId && workspaces.data?.some((workspace) => workspace.id === workspaceId)) {
       window.localStorage.setItem('opencli:studio-workspace', workspaceId)
+      const query = new URLSearchParams(searchQuery)
+      if (!query.has('workspace')) {
+        query.set('workspace', workspaceId)
+        router.replace(`/studio?${query}`, { scroll: false })
+      }
     }
-  }, [workspaceId, workspaces.data])
+  }, [router, searchQuery, workspaceId, workspaces.data])
 
   useEffect(() => {
     if (!workspaceId || createIntentHandled.current) return
@@ -216,7 +225,12 @@ export default function StudioPage() {
         ) : null}
         <div className="flex flex-wrap items-center gap-2">
           {(workspaces.data?.length ?? 0) > 1 ? (
-            <Select value={workspaceId ?? ''} onValueChange={(value) => setWorkspaceId(value || null)}>
+            <Select value={workspaceId ?? ''} onValueChange={(value) => {
+              if (!value) return
+              const query = new URLSearchParams(searchQuery)
+              query.set('workspace', value)
+              router.replace(`/studio?${query}`, { scroll: false })
+            }}>
               <SelectTrigger className="min-h-11 min-w-48 rounded-lg border-0 bg-muted/60 shadow-none" aria-label="切换工作区">
                 <Building2 className="size-3.5 text-muted-foreground" aria-hidden />
                 <SelectValue>{selectedWorkspace?.name ?? '选择工作区'}</SelectValue>

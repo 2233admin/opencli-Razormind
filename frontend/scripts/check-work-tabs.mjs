@@ -36,3 +36,18 @@ test('close selects a neighbour only when closing the current work', () => {
   assert.equal(closeWorkTab(tabs, tabs[0].id, tabs[1].id).next, null)
   assert.deepEqual(closeWorkTab([tabs[0]], tabs[0].id, tabs[0].id), { tabs: [], next: null })
 })
+
+test('restored report tabs retain the artifact and data view without mixing report identities', () => {
+  const report = '/studio/projects/p/data?workspace=w&workflow=f&run=r&artifact=s%3Aa&view=artifacts'
+  const first = workTabFromHref(report, 'w')
+  const second = workTabFromHref(report.replace('s%3Aa', 's%3Ab'), 'w')
+  assert.notEqual(first.id, second.id)
+  const restored = restoreWorkTabs(JSON.stringify([first, second]), 'w')
+  assert.equal(restored.length, 2)
+  const query = new URL(restored[0].href, 'https://test.invalid').searchParams
+  assert.equal(query.get('artifact'), 's:a')
+  assert.equal(query.get('view'), 'artifacts')
+  assert.equal(query.get('run'), 'r')
+  assert.equal(workTabFromHref(report.replace('view=artifacts', 'view=unknown'), 'w').href.includes('view='), false)
+  assert.deepEqual(restoreWorkTabs(JSON.stringify(restored), 'other'), [])
+})
