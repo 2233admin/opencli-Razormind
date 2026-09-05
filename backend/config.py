@@ -253,6 +253,12 @@ class Settings(BaseSettings):
     # pinned Python 3.10 sidecar instead of the Python 3.13 API process.
     kats_runtime_url: str = "http://localhost:8096"
     kats_runtime_timeout_seconds: float = 120.0
+    # Optional External Analysis Runtime. PostgreSQL/SQLite remain authoritative;
+    # this endpoint is consulted only when an analysis capability is requested.
+    questdb_analysis_runtime_enabled: bool = False
+    questdb_analysis_runtime_url: str = "http://localhost:9000"
+    questdb_analysis_runtime_health_url: str = "http://localhost:9003"
+    questdb_analysis_runtime_timeout_seconds: float = Field(default=2.0, gt=0, le=30)
     # Managed acquisition runtime. The commit/version are code-owned pins;
     # this path merely locates the installed checkout on every platform.
     ohmyopencli_root: str = "/opt/ohmyopencli"

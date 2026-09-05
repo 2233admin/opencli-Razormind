@@ -7,7 +7,16 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.models.acquisition import AcquisitionExecution, AcquisitionExecutionStatus
-from backend.schemas.acquisition import AcquisitionSubmission
+from backend.models.studio import StudioProject, StudioWorkflow, StudioWorkflowVersion
+from backend.models.workflow_run import WorkflowRun
+from backend.schemas.acquisition import AcquisitionRunCorrelation, AcquisitionSubmission
+
+
+class AcquisitionRunCorrelationError(ValueError):
+    code = "workflow_run_correlation_invalid"
+
+    def __init__(self) -> None:
+        super().__init__(self.code)
 
 
 @dataclass(frozen=True)
@@ -19,7 +28,9 @@ class SubmissionOutcome:
 
 def request_fingerprint(body: AcquisitionSubmission) -> str:
     canonical = json.dumps(
-        body.model_dump(mode="json"), sort_keys=True, separators=(",", ":")
+        body.model_dump(mode="json", exclude_none=True),
+        sort_keys=True,
+        separators=(",", ":"),
     ).encode("utf-8")
     return hashlib.sha256(canonical).hexdigest()
 
@@ -53,6 +64,10 @@ async def submit_execution(
             created=False,
         )
 
+    correlation = body.workflow_run_correlation
+    if correlation is not None:
+        await _validate_workflow_run_correlation(db, correlation)
+
     execution = AcquisitionExecution(
         request_id=body.request_id,
         idempotency_key=body.idempotency_key,
@@ -64,6 +79,10 @@ async def submit_execution(
         environment=body.environment,
         required_artifacts=body.required_artifacts,
         geo_refs=body.geo_refs,
+        workspace_id=correlation.workspace_id if correlation is not None else None,
+        project_id=correlation.project_id if correlation is not None else None,
+        workflow_id=correlation.workflow_id if correlation is not None else None,
+        run_id=correlation.run_id if correlation is not None else None,
         status=AcquisitionExecutionStatus.ACCEPTED,
         artifact_refs=[],
     )
@@ -84,6 +103,30 @@ async def submit_execution(
     return SubmissionOutcome(
         execution=execution, idempotency_match=True, created=True
     )
+
+
+async def _validate_workflow_run_correlation(
+    db: AsyncSession,
+    correlation: AcquisitionRunCorrelation,
+) -> None:
+    project = await db.get(StudioProject, correlation.project_id)
+    workflow = await db.get(StudioWorkflow, correlation.workflow_id)
+    run = await db.get(WorkflowRun, correlation.run_id)
+    if (
+        project is None
+        or project.workspace_id != correlation.workspace_id
+        or project.archived
+        or workflow is None
+        or workflow.project_id != correlation.project_id
+        or workflow.archived
+        or run is None
+        or run.workflow_id != correlation.workflow_id
+        or run.studio_workflow_version_id is None
+    ):
+        raise AcquisitionRunCorrelationError()
+    version = await db.get(StudioWorkflowVersion, run.studio_workflow_version_id)
+    if version is None or version.workflow_id != correlation.workflow_id:
+        raise AcquisitionRunCorrelationError()
 
 
 async def cancel_execution(

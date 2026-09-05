@@ -124,6 +124,14 @@ _Avoid_: embedded DataFoundry UI, mandatory analysis subsystem, top-level DataFo
 An optional connected analysis service, including a separately deployed DataFoundry instance, that fulfills a Data Analysis Plugin's governed execution contract for remote or scaled analysis. OpenCLI retains Project, Workflow, authorization, Run, evidence, artifact reference, and delivery ownership.
 _Avoid_: Execution Resource, iframe integration, remote system as authoritative Project state
 
+**Analysis Snapshot**:
+A user-requested, time-bounded, redacted projection of authoritative Run or acquisition facts into an External Analysis Runtime. It is disposable, defaults to 30-day retention, and never becomes a source for replay, authorization, or business state.
+_Avoid_: replica, dual write, analytics database of record, raw trace export
+
+**OODA Analysis Loop**:
+A governed Observe-Orient-Decide-Act cycle that observes authoritative Run facts, orients them through an Analysis Snapshot, records the decision as a Finding, and acts only through an Agent Operation Proposal and the normal Gate and Actuator path.
+_Avoid_: autonomous remediation loop, monitoring dashboard, direct QuestDB action
+
 **Agent Deployment**:
 A Project-authorized placement of a workspace-owned Runtime Agent with its effective model, resources, tools, and permissions. Workflow nodes reference Agent Deployments rather than copying Agent definitions or assigning a global Agent directly.
 _Avoid_: Agent copy, global Agent assignment, Automation Agent

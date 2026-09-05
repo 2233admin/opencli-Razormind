@@ -174,6 +174,37 @@ services:
       interval: 10s
       timeout: 5s
       retries: 6
+  # ── Optional External Analysis Runtime ──────────────────────────────────
+  # PostgreSQL/SQLite remain authoritative. This profile is started only for
+  # user-requested, disposable Analysis Snapshots and is never an API dependency.
+  questdb:
+    profiles: ["analysis-runtime"]
+    image: questdb/questdb:10.0.1
+    environment:
+      DO_CHOWN: "false"
+    ports:
+      - "127.0.0.1:${QUESTDB_HTTP_PORT:-9000}:9000"
+      - "127.0.0.1:${QUESTDB_HEALTH_PORT:-9003}:9003"
+    volumes:
+      - questdb_data:/var/lib/questdb
+    networks:
+      - questdb_runtime
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop:
+      - ALL
+    cap_add:
+      - SETGID
+      - SETUID
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 512
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:9003"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
       start_period: 20s
     restart: unless-stopped
 
@@ -234,6 +265,10 @@ services:
       PAW_PROGRAM_ID: ${PAW_PROGRAM_ID:-}
       PAW_RUNTIME_TIMEOUT_SECONDS: ${PAW_RUNTIME_TIMEOUT_SECONDS:-30}
       PAW_MAX_TOKENS: ${PAW_MAX_TOKENS:-512}
+      QUESTDB_ANALYSIS_RUNTIME_ENABLED: ${QUESTDB_ANALYSIS_RUNTIME_ENABLED:-false}
+      QUESTDB_ANALYSIS_RUNTIME_URL: ${QUESTDB_ANALYSIS_RUNTIME_URL:-http://questdb:9000}
+      QUESTDB_ANALYSIS_RUNTIME_HEALTH_URL: ${QUESTDB_ANALYSIS_RUNTIME_HEALTH_URL:-http://questdb:9003}
+      QUESTDB_ANALYSIS_RUNTIME_TIMEOUT_SECONDS: ${QUESTDB_ANALYSIS_RUNTIME_TIMEOUT_SECONDS:-2}
       INVOKEAI_ENABLED: ${INVOKEAI_ENABLED:-false}
       INVOKEAI_BASE_URL: http://invokeai:9090
       INVOKEAI_API_TOKEN: ${INVOKEAI_API_TOKEN:-}
@@ -249,6 +284,7 @@ services:
       - dify_runtime
       - kats_runtime
       - paw_runtime
+      - questdb_runtime
       - invokeai-private
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -609,6 +645,8 @@ networks:
   # PAW has no egress; only the API and Celery worker can reach it.
   paw_runtime:
     internal: true
+  questdb_runtime:
+    internal: true
   # Dedicated outbound network: the Graphon sidecar can reach server-owned
   # sandbox/model endpoints without becoming reachable from sibling services.
   dify_egress:
@@ -622,3 +660,4 @@ volumes:
   agent_profile_1:
   agent_profile:
   invokeai_data:
+  questdb_data:

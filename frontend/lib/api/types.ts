@@ -1233,6 +1233,88 @@ export interface ProjectRuntimeSummary {
   recent_logs: ProjectRuntimeLog[];
 }
 
+export type RunAnalysisSnapshotCapabilityState =
+  | "disabled"
+  | "unavailable"
+  | "unhealthy"
+  | "ready";
+
+export interface RunAnalysisSnapshotCapability {
+  runtime: "questdb";
+  state: RunAnalysisSnapshotCapabilityState;
+  reasonCode: string | null;
+}
+
+export interface RunAnalysisSnapshotSourceRange {
+  startAt: string;
+  endAt: string;
+}
+
+export type RunAnalysisSnapshotRangeRequest = RunAnalysisSnapshotSourceRange;
+
+export interface RunAnalysisSnapshotRowCounts {
+  workflowTraceEvents: number;
+  acquisitionExecutionMetrics: number;
+  total: number;
+}
+
+export interface RunAnalysisSnapshotPreview {
+  runId: string;
+  sourceRange: RunAnalysisSnapshotSourceRange;
+  rowCounts: RunAnalysisSnapshotRowCounts;
+  eligible: boolean;
+}
+
+export type RunAnalysisSnapshotStatus =
+  | "exporting"
+  | "completed"
+  | "failed"
+  | "expired";
+
+export interface RunAnalysisSnapshotReceipt {
+  snapshotId: string;
+  runId: string;
+  runtime: "questdb";
+  status: RunAnalysisSnapshotStatus;
+  schemaVersion: 1;
+  redactionVersion: 1;
+  sourceRange: RunAnalysisSnapshotSourceRange;
+  rowCounts: RunAnalysisSnapshotRowCounts;
+  createdAt: string;
+  completedAt: string | null;
+  expiresAt: string;
+  failureCode: string | null;
+}
+
+export interface RunAnalysisSnapshotSummary {
+  snapshotId: string;
+  sourceRange: RunAnalysisSnapshotSourceRange;
+  throughput: {
+    total: number;
+    perMinute: number;
+  };
+  latency: {
+    sampleCount: number;
+    averageMs: number | null;
+    p95Ms: number | null;
+    maxMs: number | null;
+  };
+  failureRate: {
+    failed: number;
+    total: number;
+    rate: number;
+  };
+  eventTypes: Array<{
+    eventType: string;
+    count: number;
+  }>;
+  nodes: Array<{
+    nodeId: string | null;
+    eventCount: number;
+    failureCount: number;
+  }>;
+}
+
 export interface WorkflowDraftRead {
   revision: number;
   graph: import("@/lib/workflow/schema").WorkflowProject;

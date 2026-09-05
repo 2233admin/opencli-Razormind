@@ -77,7 +77,16 @@ async def submit_execution(
     db: AsyncSession = Depends(get_db),
 ) -> AcquisitionExecutionRead:
     await _validate_capability(body)
-    outcome = await acquisition_service.submit_execution(db, body)
+    try:
+        outcome = await acquisition_service.submit_execution(db, body)
+    except acquisition_service.AcquisitionRunCorrelationError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": exc.code,
+                "message": "Workflow run correlation is invalid",
+            },
+        ) from exc
     if not outcome.idempotency_match:
         raise HTTPException(
             status_code=409,

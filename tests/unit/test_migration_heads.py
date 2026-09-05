@@ -14,7 +14,7 @@ def test_alembic_has_one_head():
     config = Config()
     config.set_main_option("script_location", "backend/migrations")
 
-    assert ScriptDirectory.from_config(config).get_heads() == ["r6s7t8u9v0w1"]
+    assert ScriptDirectory.from_config(config).get_heads() == ["int20260905a"]
 
 
 def test_ci_downgrade_target_is_unambiguous():
@@ -70,7 +70,82 @@ def test_upgrade_head_creates_identity_and_operations_tables(monkeypatch):
         "iii_collection_attempts",
         "iii_collection_outbox",
         "iii_collection_lifecycle_observations",
+        "analysis_snapshot_receipts",
     } <= tables
+
+
+def test_analysis_snapshot_migration_adds_typed_correlation_and_receipts(monkeypatch):
+    with TemporaryDirectory() as directory:
+        database = Path(directory) / "migration.db"
+        monkeypatch.setenv("DATABASE_URL", f"sqlite+aiosqlite:///{database.as_posix()}")
+        get_settings.cache_clear()
+        config = Config()
+        config.set_main_option("script_location", "backend/migrations")
+
+        try:
+            command.upgrade(config, "head")
+        finally:
+            get_settings.cache_clear()
+
+        connection = sqlite3.connect(database)
+        try:
+            acquisition_columns = {
+                row[1]
+                for row in connection.execute(
+                    "PRAGMA table_info(acquisition_executions)"
+                )
+            }
+            acquisition_indexes = {
+                row[1]
+                for row in connection.execute(
+                    "PRAGMA index_list(acquisition_executions)"
+                )
+            }
+            acquisition_table_sql = connection.execute(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' "
+                "AND name = 'acquisition_executions'"
+            ).fetchone()[0]
+            receipt_columns = {
+                row[1]
+                for row in connection.execute(
+                    "PRAGMA table_info(analysis_snapshot_receipts)"
+                )
+            }
+            receipt_indexes = {
+                row[1]
+                for row in connection.execute(
+                    "PRAGMA index_list(analysis_snapshot_receipts)"
+                )
+            }
+        finally:
+            connection.close()
+
+    assert {"workspace_id", "project_id", "workflow_id", "run_id"} <= acquisition_columns
+    assert "ix_acquisition_executions_analysis_scope_started_at" in acquisition_indexes
+    assert "ck_acquisition_executions_complete_run_correlation" in acquisition_table_sql
+    assert {
+        "selection_hash",
+        "workspace_id",
+        "project_id",
+        "workflow_id",
+        "studio_workflow_version_id",
+        "run_id",
+        "requested_by_user_id",
+        "schema_version",
+        "redaction_version",
+        "source_start_at",
+        "source_end_at",
+        "workflow_trace_event_count",
+        "acquisition_execution_metric_count",
+        "total_row_count",
+        "status",
+        "failure_code",
+        "attempt_count",
+        "last_attempt_at",
+        "completed_at",
+        "expires_at",
+    } <= receipt_columns
+    assert "ix_analysis_snapshot_scope_created" in receipt_indexes
 
 
 def test_workflow_run_version_foreign_key_is_restrict(monkeypatch):

@@ -5,6 +5,7 @@ from fastapi import APIRouter
 from backend.api.v1 import (
     agent_conversations,
     agents,
+    analysis_snapshots,
     automations,
     browser_act,
     browser_containers,
@@ -13,6 +14,7 @@ from backend.api.v1 import (
     chat,
     consumer_grants,
     control,
+    controlled_receiver_routes,
     cookies,
     dashboard,
     delivery_authorization_routes,
@@ -21,10 +23,8 @@ from backend.api.v1 import (
     delivery_execution_routes,
     dify_imports,
     geo_acquisition,
-    iii_collections,
     identity,
-    odp_reconciliation,
-    research_graph_v2_routes,
+    iii_collections,
     image_studio,
     internal_agent_runs,
     internal_automations,
@@ -32,6 +32,7 @@ from backend.api.v1 import (
     model_defaults,
     nodes,
     notifications,
+    odp_reconciliation,
     operations_agents,
     operations_inbox,
     plan_ir,
@@ -41,6 +42,7 @@ from backend.api.v1 import (
     project_source_bindings,
     providers,
     records,
+    research_graph_v2_routes,
     schedules,
     skill_bridge,
     skill_record,
@@ -61,6 +63,7 @@ v1_router = APIRouter(prefix="/api/v1")
 
 v1_router.include_router(agents.router)
 v1_router.include_router(agent_conversations.router)
+v1_router.include_router(analysis_snapshots.router)
 v1_router.include_router(geo_acquisition.router)
 v1_router.include_router(iii_collections.router)
 v1_router.include_router(automations.router)
