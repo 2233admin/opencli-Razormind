@@ -256,21 +256,27 @@ async def _claim_delivery(
     owner = uuid.uuid4().hex
     now = datetime.now(UTC)
     async with session_factory() as db:
-        row = await db.scalar(
-            select(ConnectorOutboundDelivery)
-            .where(ConnectorOutboundDelivery.id == delivery_id)
-            .with_for_update()
+        result = await db.execute(
+            update(ConnectorOutboundDelivery)
+            .where(
+                ConnectorOutboundDelivery.id == delivery_id,
+                ConnectorOutboundDelivery.status.in_(("pending", "retryable_failed")),
+            )
+            .values(
+                status="connecting",
+                lease_owner=owner,
+                lease_generation=ConnectorOutboundDelivery.lease_generation + 1,
+                lease_expires_at=now + timedelta(seconds=LEASE_SECONDS),
+                attempt_count=ConnectorOutboundDelivery.attempt_count + 1,
+            )
+            .returning(ConnectorOutboundDelivery.lease_generation)
         )
-        if row is None or row.status not in {"pending", "retryable_failed"}:
+        generation = result.scalar_one_or_none()
+        if generation is None:
+            await db.rollback()
             return None
-        row.status = "connecting"
-        row.lease_owner = owner
-        row.lease_generation += 1
-        row.lease_expires_at = now + timedelta(seconds=LEASE_SECONDS)
-        row.attempt_count += 1
-        generation = row.lease_generation
         await db.commit()
-    return owner, generation
+    return owner, int(generation)
 
 
 async def _set_fenced_state(
@@ -367,6 +373,29 @@ async def _load_send_snapshot(
         return row, credentials, payload
 
 
+async def _claim_crypto_failed(
+    session_factory: async_sessionmaker[AsyncSession], delivery_id: str
+) -> bool:
+    """Distinguish a shared-key claim failure without exposing the plaintext."""
+
+    async with session_factory() as db:
+        delivery = await db.get(ConnectorOutboundDelivery, delivery_id)
+        if (
+            delivery is None
+            or delivery.purpose != "artifact_offer"
+            or delivery.artifact_grant_id is None
+        ):
+            return False
+        grant = await db.get(ConnectorArtifactGrant, delivery.artifact_grant_id)
+        if grant is None:
+            return False
+        try:
+            decrypt(grant.claim_ciphertext)
+        except CredentialCryptoError:
+            return True
+        return False
+
+
 async def _authorize_and_mark_sending(
     session_factory: async_sessionmaker[AsyncSession],
     *,
@@ -378,17 +407,19 @@ async def _authorize_and_mark_sending(
     from backend.services.connector_reply_grant_service import authorize_delivery
 
     async with session_factory() as db:
-        fenced = await db.scalar(
-            select(ConnectorOutboundDelivery)
+        fence = await db.execute(
+            update(ConnectorOutboundDelivery)
             .where(
                 ConnectorOutboundDelivery.id == delivery_id,
                 ConnectorOutboundDelivery.status == "connecting",
                 ConnectorOutboundDelivery.lease_owner == owner,
                 ConnectorOutboundDelivery.lease_generation == generation,
             )
-            .with_for_update()
+            .values(lease_expires_at=ConnectorOutboundDelivery.lease_expires_at)
+            .returning(ConnectorOutboundDelivery.id)
         )
-        if fenced is None:
+        if fence.scalar_one_or_none() is None:
+            await db.rollback()
             return None
         row, _ = await authorize_delivery(db, delivery_id=delivery_id, lock_scope=True)
         payload = await _payload_for_row(db, row, lock_scope=True)
@@ -424,6 +455,10 @@ async def deliver_outbound(
         row, credentials, payload = await _load_send_snapshot(session_factory, delivery_id)
     except (ConnectorCredentialUnavailableError, ValueError) as exc:
         code = exc.args[0] if exc.args and isinstance(exc.args[0], str) else "authorization_failed"
+        if isinstance(exc, ConnectorCredentialUnavailableError) and await _claim_crypto_failed(
+            session_factory, delivery_id
+        ):
+            code = "claim_decryption_failed"
         await _set_fenced_state(
             session_factory,
             delivery_id=delivery_id,
@@ -496,6 +531,10 @@ async def deliver_outbound(
                 if exc.args and isinstance(exc.args[0], str)
                 else "authorization_changed"
             )
+            if isinstance(exc, ConnectorCredentialUnavailableError) and await _claim_crypto_failed(
+                session_factory, delivery_id
+            ):
+                code = "claim_decryption_failed"
             await _set_fenced_state(
                 session_factory,
                 delivery_id=delivery_id,

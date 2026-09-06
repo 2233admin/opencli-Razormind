@@ -33,6 +33,7 @@ from backend.services import connector_reply_grant_service as grants
 from backend.services import connector_reply_worker as worker
 from backend.services.connector_outbound_service import (
     create_artifact_offer_delivery,
+    create_text_delivery,
     deliver_outbound,
 )
 from backend.services.connector_receipt_service import (
@@ -155,13 +156,18 @@ def _message(
     )
 
 
-def _artifact_detail(*, conversation_id: str | None = "p2-conversation") -> ProjectArtifactDetail:
+def _artifact_detail(
+    *,
+    conversation_id: str | None = "p2-conversation",
+    media_type: str = "text/plain",
+    content: dict | None = None,
+) -> ProjectArtifactDetail:
     now = datetime.now(UTC)
     return ProjectArtifactDetail(
         id="session:artifact",
         artifact_id="artifact",
         title="Connector report",
-        media_type="text/plain",
+        media_type=media_type,
         kind="report",
         content_hash="artifact-content-hash",
         workspace_id="p2-studio",
@@ -175,7 +181,7 @@ def _artifact_detail(*, conversation_id: str | None = "p2-conversation") -> Proj
         created_at=now,
         updated_at=now,
         schema_version="1",
-        content={"body": "authorized artifact body"},
+        content=content if content is not None else {"body": "authorized artifact body"},
         payload={},
         provenance={"conversation_id": conversation_id},
         grounding_artifact_ids=[],
@@ -477,6 +483,50 @@ async def test_artifact_grant_replay_claim_and_delivery_redeems_atomically(p2_sc
 
 
 @pytest.mark.asyncio
+async def test_native_markdown_content_field_creates_text_delivery(p2_scope, monkeypatch):
+    factory = p2_scope
+    reply, _ = await _grant(factory)
+    _install_artifact_detail(
+        monkeypatch,
+        _artifact_detail(
+            media_type="text/markdown",
+            content={"content": "# Native report\n\nVerified body"},
+        ),
+    )
+    async with factory() as db:
+        created = await artifacts.create_artifact_grant(
+            db,
+            "p2-governed",
+            "p2-project",
+            reply.public_id,
+            _identity(),
+            ConnectorArtifactGrantCreate(
+                request_id="native-markdown",
+                artifact_public_id="session:artifact",
+                workflow_id="p2-workflow",
+                run_id="p2-run",
+            ),
+        )
+        assert created.claim_text is not None
+        receipt = await persist_verified_message(
+            db,
+            "p2-installation-id",
+            _message(created.claim_text, message_id="native-markdown-claim"),
+        )
+        await db.commit()
+        receipt_id = receipt.id
+    await worker.process_connector_receipt(factory, receipt_id)
+    async with factory() as db:
+        receipt = await db.get(ConnectorInboundReceipt, receipt_id)
+        assert receipt is not None and receipt.status == "completed"
+        assert receipt.outbound_delivery_id is not None
+        delivery = await db.get(ConnectorOutboundDelivery, receipt.outbound_delivery_id)
+        assert delivery is not None
+        assert delivery.payload_kind == "text"
+        assert delivery.safe_text == "# Native report\n\nVerified body"
+
+
+@pytest.mark.asyncio
 async def test_artifact_grant_requires_trusted_conversation_origin(p2_scope, monkeypatch):
     factory = p2_scope
     reply, _ = await _grant(factory)
@@ -498,6 +548,45 @@ async def test_artifact_grant_requires_trusted_conversation_origin(p2_scope, mon
             )
         await db.rollback()
         assert await db.scalar(select(func.count()).select_from(ConnectorArtifactGrant)) == 0
+
+
+@pytest.mark.asyncio
+async def test_concurrent_artifact_request_returns_one_claim_and_offer(p2_scope, monkeypatch):
+    factory = p2_scope
+    reply, _ = await _grant(factory)
+    _install_artifact_detail(monkeypatch, _artifact_detail())
+    body = ConnectorArtifactGrantCreate(
+        request_id="artifact-concurrent",
+        artifact_public_id="session:artifact",
+        workflow_id="p2-workflow",
+        run_id="p2-run",
+    )
+
+    async def create():
+        async with factory() as db:
+            return await artifacts.create_artifact_grant(
+                db,
+                "p2-governed",
+                "p2-project",
+                reply.public_id,
+                _identity(),
+                body,
+            )
+
+    first, second = await asyncio.gather(create(), create())
+    assert sorted((first.created, second.created)) == [False, True]
+    claims = [item.claim_text for item in (first, second) if item.claim_text is not None]
+    assert len(claims) == 1
+    async with factory() as db:
+        assert await db.scalar(select(func.count()).select_from(ConnectorArtifactGrant)) == 1
+        assert (
+            await db.scalar(
+                select(func.count())
+                .select_from(ConnectorOutboundDelivery)
+                .where(ConnectorOutboundDelivery.purpose == "artifact_offer")
+            )
+            == 1
+        )
 
 
 @pytest.mark.asyncio
@@ -557,6 +646,129 @@ async def test_two_connector_turns_advance_revision_cursor_and_reuse_history(p2_
 
 
 @pytest.mark.asyncio
+async def test_completed_turn_recovery_does_not_call_model_twice(p2_scope):
+    factory = p2_scope
+    reply, activation = await _grant(factory)
+    async with factory() as db:
+        activation.status = "sent"
+        activation.provider_message_id = "activation-message"
+        await db.merge(activation)
+        receipt = await persist_verified_message(
+            db,
+            "p2-installation-id",
+            _message(
+                "recover this",
+                message_id="completed-before-receipt-finalize",
+                reply_to="activation-message",
+            ),
+        )
+        await db.commit()
+        receipt_id = receipt.id
+    claim = await worker._claim_receipt(factory, receipt_id)
+    assert claim is not None
+    owner, receipt_generation, grant_generation = claim
+    calls = 0
+
+    async def first_runner(_db, _body, _identity, **_kwargs):
+        nonlocal calls
+        calls += 1
+        return chat.ChatReply(type="message", content="durably completed")
+
+    async with factory() as db:
+        access = await grants.authorize_receipt_for_agent(
+            db,
+            receipt_id=receipt_id,
+            lease_owner=owner,
+            receipt_lease_generation=receipt_generation,
+            grant_lease_generation=grant_generation,
+        )
+        await conversations.send_connector_message(
+            db,
+            access,
+            request_id=worker._turn_request_id(
+                "p2-installation-id", "completed-before-receipt-finalize"
+            ),
+            content="recover this",
+            chat_runner=first_runner,
+        )
+    async with factory() as db:
+        receipt = await db.get(ConnectorInboundReceipt, receipt_id)
+        current_grant = await db.get(ConnectorReplyGrant, reply.id)
+        assert receipt is not None and current_grant is not None
+        receipt.lease_expires_at = datetime.now(UTC) - timedelta(seconds=1)
+        current_grant.execution_lease_expires_at = datetime.now(UTC) - timedelta(seconds=1)
+        await db.commit()
+
+    async def forbidden_runner(*_args, **_kwargs):
+        raise AssertionError("completed deterministic turn must not call the model again")
+
+    await worker.process_connector_receipt(factory, receipt_id, chat_runner=forbidden_runner)
+    assert calls == 1
+    async with factory() as db:
+        receipt = await db.get(ConnectorInboundReceipt, receipt_id)
+        assert receipt is not None and receipt.status == "completed"
+        assert receipt.outbound_delivery_id is not None
+        assert (
+            await db.scalar(
+                select(func.count())
+                .select_from(AgentConversationTurn)
+                .where(AgentConversationTurn.conversation_id == "p2-conversation")
+            )
+            == 1
+        )
+
+
+@pytest.mark.asyncio
+async def test_connector_proposal_uses_existing_turn_and_notice_path(p2_scope):
+    factory = p2_scope
+    _, activation = await _grant(factory)
+    async with factory() as db:
+        activation.status = "sent"
+        activation.provider_message_id = "activation-message"
+        await db.merge(activation)
+        receipt = await persist_verified_message(
+            db,
+            "p2-installation-id",
+            _message(
+                "prepare change",
+                message_id="proposal-inbound",
+                reply_to="activation-message",
+            ),
+        )
+        await db.commit()
+        receipt_id = receipt.id
+
+    async def proposal_runner(_db, _body, _identity, **kwargs):
+        provenance = kwargs["proposal_provenance"]
+        assert provenance.conversation_id == "p2-conversation"
+        return chat.ChatReply(
+            type="proposal",
+            proposal=chat.Proposal(
+                tool="toggle_source",
+                args={"source_id": "source", "enabled": True},
+                summary="Enable source",
+                diff="enabled: false -> true",
+                work_item_id="work-item",
+                workspace_id="p2-governed",
+                proposal_version="v1",
+            ),
+        )
+
+    await worker.process_connector_receipt(factory, receipt_id, chat_runner=proposal_runner)
+    async with factory() as db:
+        receipt = await db.get(ConnectorInboundReceipt, receipt_id)
+        turn = await db.scalar(select(AgentConversationTurn))
+        delivery = await db.scalar(
+            select(ConnectorOutboundDelivery).where(
+                ConnectorOutboundDelivery.purpose == "proposal_notice"
+            )
+        )
+        assert receipt is not None and receipt.status == "proposal"
+        assert turn is not None and turn.status == "proposal"
+        assert delivery is not None and delivery.safe_text == "Enable source"
+
+
+@pytest.mark.asyncio
 async def test_stale_receipt_and_grant_generations_cannot_renew(p2_scope):
     factory = p2_scope
     reply, activation = await _grant(factory)
@@ -586,6 +798,90 @@ async def test_stale_receipt_and_grant_generations_cannot_renew(p2_scope):
         receipt_generation=receipt_generation,
         grant_generation=grant_generation,
     )
+
+
+@pytest.mark.asyncio
+async def test_two_sqlite_workers_cannot_claim_same_receipt_or_grant(p2_scope):
+    factory = p2_scope
+    _, activation = await _grant(factory)
+    async with factory() as db:
+        activation.status = "sent"
+        activation.provider_message_id = "activation-message"
+        await db.merge(activation)
+        receipt = await persist_verified_message(
+            db,
+            "p2-installation-id",
+            _message(
+                "concurrent claim",
+                message_id="concurrent-receipt-claim",
+                reply_to="activation-message",
+            ),
+        )
+        await db.commit()
+        receipt_id = receipt.id
+    results = await asyncio.gather(
+        worker._claim_receipt(factory, receipt_id),
+        worker._claim_receipt(factory, receipt_id),
+    )
+    assert sum(result is not None for result in results) == 1
+    async with factory() as db:
+        receipt = await db.get(ConnectorInboundReceipt, receipt_id)
+        grant = await db.scalar(select(ConnectorReplyGrant))
+        assert receipt is not None and receipt.lease_generation == 1
+        assert grant is not None and grant.execution_lease_generation == 1
+
+
+@pytest.mark.asyncio
+async def test_recovery_cursor_prevents_retryable_head_starvation(p2_scope, monkeypatch):
+    factory = p2_scope
+    reply, activation = await _grant(factory)
+    async with factory() as db:
+        activation.status = "sent"
+        activation.provider_message_id = "activation-message"
+        await db.merge(activation)
+        for index in range(6):
+            await persist_verified_message(
+                db,
+                "p2-installation-id",
+                _message(
+                    f"queued-{index}",
+                    message_id=f"queued-receipt-{index}",
+                    reply_to="activation-message",
+                ),
+            )
+        for index in range(6):
+            create_text_delivery(
+                db,
+                installation_id="p2-installation-id",
+                reply_grant_id=reply.id,
+                purpose="agent_reply",
+                chat_id="oc-bound",
+                text=f"retryable-{index}",
+                dedupe_owner_id=f"retryable-{index}",
+            ).status = "retryable_failed"
+        await db.commit()
+        receipt_ids = list(
+            await db.scalars(
+                select(ConnectorInboundReceipt.id).order_by(
+                    ConnectorInboundReceipt.created_at, ConnectorInboundReceipt.id
+                )
+            )
+        )
+        delivery_ids = list(
+            await db.scalars(
+                select(ConnectorOutboundDelivery.id)
+                .where(ConnectorOutboundDelivery.status == "retryable_failed")
+                .order_by(ConnectorOutboundDelivery.created_at, ConnectorOutboundDelivery.id)
+            )
+        )
+    scheduled_receipts: list[str] = []
+    scheduled_deliveries: list[str] = []
+    monkeypatch.setattr(worker, "schedule_connector_receipt", scheduled_receipts.append)
+    monkeypatch.setattr(worker, "schedule_connector_outbound", scheduled_deliveries.append)
+    await worker.recover_connector_receipts(limit=5)
+    await worker.recover_connector_receipts(limit=5)
+    assert receipt_ids[-1] in scheduled_receipts
+    assert delivery_ids[-1] in scheduled_deliveries
 
 
 @pytest.mark.asyncio
@@ -1016,3 +1312,66 @@ async def test_corrupt_claim_fails_grant_and_delivery_without_sdk(p2_scope):
         assert offer is not None and offer.error_code == "claim_decryption_failed"
         assert artifact is not None and artifact.status == "failed"
         assert artifact.active_slot is None
+
+
+@pytest.mark.asyncio
+async def test_wrong_shared_key_fails_claim_permanently_and_restore_does_not_retry(
+    p2_scope, monkeypatch
+):
+    factory = p2_scope
+    reply, _ = await _grant(factory)
+    claim = "shared-key-claim-material"
+    async with factory() as db:
+        artifact = ConnectorArtifactGrant(
+            public_id="wrong-key-grant",
+            reply_grant_id=reply.id,
+            conversation_id=reply.conversation_id,
+            created_by_user_id="p2-user",
+            create_request_id="wrong-key-request",
+            create_request_hash="b" * 64,
+            workspace_id="p2-governed",
+            studio_workspace_id="p2-studio",
+            project_id="p2-project",
+            workflow_id="p2-workflow",
+            run_id="run",
+            artifact_public_id="session:artifact",
+            artifact_id="artifact",
+            session_id="session",
+            content_hash="c" * 64,
+            title="Report",
+            media_type="application/json",
+            simulated=True,
+            claim_digest=__import__("hashlib").sha256(claim.encode()).hexdigest(),
+            claim_ciphertext=encrypt(claim),
+            status="active",
+            version=1,
+            expires_at=datetime.now(UTC) + timedelta(minutes=30),
+            active_slot="d" * 64,
+        )
+        db.add(artifact)
+        await db.flush()
+        offer = create_artifact_offer_delivery(db, grant=artifact, reply_grant=reply)
+        await db.commit()
+        offer_id = offer.id
+    correct_key = __import__("os").environ["CREDENTIAL_ENCRYPTION_KEY"]
+    monkeypatch.setenv("CREDENTIAL_ENCRYPTION_KEY", Fernet.generate_key().decode())
+
+    def channel_factory(**_kwargs):
+        raise AssertionError("SDK must not be constructed when the shared key changed")
+
+    assert await deliver_outbound(factory, offer_id, channel_factory=channel_factory) == "failed"
+    async with factory() as db:
+        offer = await db.get(ConnectorOutboundDelivery, offer_id)
+        artifact = await db.scalar(
+            select(ConnectorArtifactGrant).where(
+                ConnectorArtifactGrant.public_id == "wrong-key-grant"
+            )
+        )
+        assert offer is not None and offer.error_code == "claim_decryption_failed"
+        assert artifact is not None and artifact.status == "failed"
+        assert artifact.error_code == "claim_decryption_failed"
+        assert artifact.active_slot is None
+    monkeypatch.setenv("CREDENTIAL_ENCRYPTION_KEY", correct_key)
+    assert (
+        await deliver_outbound(factory, offer_id, channel_factory=channel_factory) == "not_claimed"
+    )

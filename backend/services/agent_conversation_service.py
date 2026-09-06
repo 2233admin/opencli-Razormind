@@ -548,6 +548,15 @@ class ConnectorConversationAccessProtocol(Protocol):
 
     async def owns_execution_fence(self, db: AsyncSession) -> bool: ...
 
+    async def mark_turn_failed(
+        self,
+        db: AsyncSession,
+        *,
+        turn_id: str,
+        code: str,
+        error_message: str,
+    ) -> bool: ...
+
     async def reauthorize_for_finalize(self, db: AsyncSession) -> None: ...
 
     async def advance_revision_cursor(self, db: AsyncSession, *, next_revision: int) -> bool: ...
@@ -566,20 +575,14 @@ async def _mark_connector_turn_failed(
     if execution_fence_lost is not None and execution_fence_lost():
         return
     async with db.begin():
-        turn = await db.scalar(
-            select(AgentConversationTurn)
-            .where(AgentConversationTurn.id == turn_id)
-            .with_for_update()
+        if execution_fence_lost is not None and execution_fence_lost():
+            return
+        await access.mark_turn_failed(
+            db,
+            turn_id=turn_id,
+            code=code,
+            error_message=_redact_error(message),
         )
-        if turn is None or turn.status != AgentConversationTurnStatus.RUNNING.value:
-            return
-        if not await access.owns_execution_fence(db) or (
-            execution_fence_lost is not None and execution_fence_lost()
-        ):
-            return
-        turn.status = AgentConversationTurnStatus.FAILED.value
-        turn.error_code = code
-        turn.error_message = _redact_error(message)
 
 
 async def send_connector_message(

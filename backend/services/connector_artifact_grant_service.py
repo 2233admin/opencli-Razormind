@@ -533,7 +533,13 @@ async def create_artifact_delivery_for_receipt(
         or detail.content_hash != grant.content_hash
     ):
         raise ValueError("artifact_scope_or_hash_changed")
-    body = detail.content.get("body") if isinstance(detail.content, dict) else None
+    body = None
+    if isinstance(detail.content, dict):
+        for field in ("body", "content"):
+            candidate = detail.content.get(field)
+            if isinstance(candidate, str):
+                body = candidate
+                break
     if grant.media_type in {"text/plain", "text/markdown", "text/html"} and isinstance(body, str):
         return create_text_delivery(
             db,

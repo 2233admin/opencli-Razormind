@@ -9,11 +9,15 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException, status
-from sqlalchemy import select, update
+from sqlalchemy import exists, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.models.agent_conversation import AgentConversation, AgentConversationStatus
+from backend.models.agent_conversation import (
+    AgentConversation,
+    AgentConversationStatus,
+    AgentConversationTurn,
+)
 from backend.models.connector_reply import (
     ConnectorInboundReceipt,
     ConnectorInstallation,
@@ -455,6 +459,49 @@ class ConnectorConversationAccess:
             .with_for_update()
         )
         return receipt is not None and grant is not None
+
+    async def mark_turn_failed(
+        self,
+        db: AsyncSession,
+        *,
+        turn_id: str,
+        code: str,
+        error_message: str,
+    ) -> bool:
+        """Write a failed turn only while both persisted fences still match."""
+
+        self.assert_sealed()
+        now = _now()
+        receipt_fence = exists(
+            select(ConnectorInboundReceipt.id).where(
+                ConnectorInboundReceipt.id == self.receipt_id,
+                ConnectorInboundReceipt.status == "processing",
+                ConnectorInboundReceipt.lease_owner == self.lease_owner,
+                ConnectorInboundReceipt.lease_generation == self.receipt_lease_generation,
+                ConnectorInboundReceipt.grant_lease_generation == self.grant_lease_generation,
+                ConnectorInboundReceipt.lease_expires_at > now,
+            )
+        )
+        grant_fence = exists(
+            select(ConnectorReplyGrant.id).where(
+                ConnectorReplyGrant.id == self.grant_id,
+                ConnectorReplyGrant.execution_receipt_id == self.receipt_id,
+                ConnectorReplyGrant.execution_lease_owner == self.lease_owner,
+                ConnectorReplyGrant.execution_lease_generation == self.grant_lease_generation,
+                ConnectorReplyGrant.execution_lease_expires_at > now,
+            )
+        )
+        result = await db.execute(
+            update(AgentConversationTurn)
+            .where(
+                AgentConversationTurn.id == turn_id,
+                AgentConversationTurn.status == "running",
+                receipt_fence,
+                grant_fence,
+            )
+            .values(status="failed", error_code=code, error_message=error_message)
+        )
+        return bool(result.rowcount)
 
     async def advance_revision_cursor(self, db: AsyncSession, *, next_revision: int) -> bool:
         self.assert_sealed()

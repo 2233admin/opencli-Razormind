@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import or_, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from backend.models.agent_conversation import AgentConversationTurn
@@ -49,11 +49,9 @@ _session_factory: async_sessionmaker[AsyncSession] | None = None
 _chat_runner: Callable[..., Any] | None = None
 _tasks: dict[str, asyncio.Task[None]] = {}
 _recovery_task: asyncio.Task[None] | None = None
+_receipt_recovery_cursor: tuple[datetime, str] | None = None
+_delivery_recovery_cursor: tuple[datetime, str] | None = None
 _readiness = ConnectorReplyWorkerReadiness()
-
-
-def _aware(value: datetime) -> datetime:
-    return value.replace(tzinfo=UTC) if value.tzinfo is None else value
 
 
 async def start_connector_reply_worker(
@@ -66,10 +64,13 @@ async def start_connector_reply_worker(
     """Configure this process to accept durable connector receipt claims."""
 
     global _session_factory, _chat_runner, _readiness, _recovery_task
+    global _receipt_recovery_cursor, _delivery_recovery_cursor
     if _readiness.started:
         return _readiness
     _session_factory = session_factory
     _chat_runner = chat_runner
+    _receipt_recovery_cursor = None
+    _delivery_recovery_cursor = None
     _readiness = ConnectorReplyWorkerReadiness(
         configured=reply_enabled,
         started=reply_enabled,
@@ -98,6 +99,7 @@ async def recover_connector_receipts(*, limit: int = 100) -> int:
         return 0
     if not 1 <= limit <= 1_000:
         raise ValueError("connector recovery limit must be 1..1000")
+    global _receipt_recovery_cursor, _delivery_recovery_cursor
     now = datetime.now(UTC)
     scheduled = 0
     async with _session_factory() as db:
@@ -130,31 +132,71 @@ async def recover_connector_receipts(*, limit: int = 100) -> int:
                 lease_generation=ConnectorOutboundDelivery.lease_generation + 1,
             )
         )
-        receipts = list(
-            await db.scalars(
-                select(ConnectorInboundReceipt)
-                .where(
-                    or_(
-                        ConnectorInboundReceipt.status.in_(("received", "retryable_failed")),
-                        (
-                            (ConnectorInboundReceipt.status == "processing")
-                            & (ConnectorInboundReceipt.lease_expires_at <= now)
-                        ),
-                    )
+        receipt_condition = or_(
+            ConnectorInboundReceipt.status.in_(("received", "retryable_failed")),
+            (
+                (ConnectorInboundReceipt.status == "processing")
+                & (ConnectorInboundReceipt.lease_expires_at <= now)
+            ),
+        )
+        receipt_query = select(ConnectorInboundReceipt).where(receipt_condition)
+        if _receipt_recovery_cursor is not None:
+            cursor_time, cursor_id = _receipt_recovery_cursor
+            receipt_query = receipt_query.where(
+                or_(
+                    ConnectorInboundReceipt.created_at > cursor_time,
+                    (
+                        (ConnectorInboundReceipt.created_at == cursor_time)
+                        & (ConnectorInboundReceipt.id > cursor_id)
+                    ),
                 )
-                .order_by(ConnectorInboundReceipt.created_at, ConnectorInboundReceipt.id)
-                .limit(limit)
             )
-        )
-        deliveries = list(
-            await db.scalars(
-                select(ConnectorOutboundDelivery)
-                .where(ConnectorOutboundDelivery.status.in_(("pending", "retryable_failed")))
-                .order_by(ConnectorOutboundDelivery.created_at, ConnectorOutboundDelivery.id)
-                .limit(limit)
+        receipt_query = receipt_query.order_by(
+            ConnectorInboundReceipt.created_at, ConnectorInboundReceipt.id
+        ).limit(limit)
+        receipts = list(await db.scalars(receipt_query))
+        if not receipts and _receipt_recovery_cursor is not None:
+            receipts = list(
+                await db.scalars(
+                    select(ConnectorInboundReceipt)
+                    .where(receipt_condition)
+                    .order_by(ConnectorInboundReceipt.created_at, ConnectorInboundReceipt.id)
+                    .limit(limit)
+                )
             )
-        )
+        delivery_condition = ConnectorOutboundDelivery.status.in_(("pending", "retryable_failed"))
+        delivery_query = select(ConnectorOutboundDelivery).where(delivery_condition)
+        if _delivery_recovery_cursor is not None:
+            cursor_time, cursor_id = _delivery_recovery_cursor
+            delivery_query = delivery_query.where(
+                or_(
+                    ConnectorOutboundDelivery.created_at > cursor_time,
+                    (
+                        (ConnectorOutboundDelivery.created_at == cursor_time)
+                        & (ConnectorOutboundDelivery.id > cursor_id)
+                    ),
+                )
+            )
+        delivery_query = delivery_query.order_by(
+            ConnectorOutboundDelivery.created_at, ConnectorOutboundDelivery.id
+        ).limit(limit)
+        deliveries = list(await db.scalars(delivery_query))
+        if not deliveries and _delivery_recovery_cursor is not None:
+            deliveries = list(
+                await db.scalars(
+                    select(ConnectorOutboundDelivery)
+                    .where(delivery_condition)
+                    .order_by(ConnectorOutboundDelivery.created_at, ConnectorOutboundDelivery.id)
+                    .limit(limit)
+                )
+            )
         await db.commit()
+    _receipt_recovery_cursor = (
+        (receipts[-1].created_at, receipts[-1].id) if len(receipts) == limit else None
+    )
+    _delivery_recovery_cursor = (
+        (deliveries[-1].created_at, deliveries[-1].id) if len(deliveries) == limit else None
+    )
     for receipt in receipts:
         schedule_connector_receipt(receipt.id)
         scheduled += 1
@@ -287,20 +329,40 @@ async def _claim_receipt(
 ) -> tuple[str, int, int] | None:
     owner = uuid.uuid4().hex
     now = datetime.now(UTC)
+    expires = now + timedelta(seconds=LEASE_SECONDS)
     async with session_factory() as db:
-        receipt = await db.scalar(
-            select(ConnectorInboundReceipt)
-            .where(ConnectorInboundReceipt.id == receipt_id)
-            .with_for_update()
+        receipt_claim = await db.execute(
+            update(ConnectorInboundReceipt)
+            .where(
+                ConnectorInboundReceipt.id == receipt_id,
+                ConnectorInboundReceipt.reply_grant_id.is_not(None),
+                or_(
+                    ConnectorInboundReceipt.status.in_(("received", "retryable_failed")),
+                    (
+                        (ConnectorInboundReceipt.status == "processing")
+                        & (ConnectorInboundReceipt.lease_expires_at <= now)
+                    ),
+                ),
+            )
+            .values(
+                status="processing",
+                lease_owner=owner,
+                lease_generation=ConnectorInboundReceipt.lease_generation + 1,
+                lease_expires_at=expires,
+                processing_started_at=func.coalesce(
+                    ConnectorInboundReceipt.processing_started_at, now
+                ),
+                attempt_count=ConnectorInboundReceipt.attempt_count + 1,
+            )
+            .returning(ConnectorInboundReceipt.lease_generation)
         )
-        if receipt is None or receipt.reply_grant_id is None:
+        receipt_generation = receipt_claim.scalar_one_or_none()
+        if receipt_generation is None:
+            await db.rollback()
             return None
-        expired_processing = (
-            receipt.status == "processing"
-            and receipt.lease_expires_at is not None
-            and _aware(receipt.lease_expires_at) <= now
-        )
-        if receipt.status not in {"received", "retryable_failed"} and not expired_processing:
+        receipt = await db.get(ConnectorInboundReceipt, receipt_id)
+        if receipt is None or receipt.reply_grant_id is None:
+            await db.rollback()
             return None
         request_id = _turn_request_id(receipt.installation_id, receipt.provider_message_id)
         prior_turn = (
@@ -313,8 +375,7 @@ async def _claim_receipt(
             if receipt.intent == "reply" and receipt.conversation_id is not None
             else None
         )
-        if expired_processing and prior_turn is not None and prior_turn.status == "running":
-            stale_owner = receipt.lease_owner
+        if prior_turn is not None and prior_turn.status == "running":
             stale_grant_generation = receipt.grant_lease_generation
             receipt.status = "permanent_failed"
             receipt.stable_error_code = "agent_execution_indeterminate"
@@ -323,50 +384,64 @@ async def _claim_receipt(
             prior_turn.status = "failed"
             prior_turn.error_code = "agent_execution_indeterminate"
             prior_turn.error_message = "Connector execution result is indeterminate"
-            stale_grant = await db.get(ConnectorReplyGrant, receipt.reply_grant_id)
-            if (
-                stale_grant is not None
-                and stale_grant.execution_receipt_id == receipt.id
-                and stale_grant.execution_lease_owner == stale_owner
-                and stale_grant.execution_lease_generation == stale_grant_generation
-            ):
-                stale_grant.execution_receipt_id = None
-                stale_grant.execution_lease_owner = None
-                stale_grant.execution_lease_expires_at = None
+            await db.execute(
+                update(ConnectorReplyGrant)
+                .where(
+                    ConnectorReplyGrant.id == receipt.reply_grant_id,
+                    ConnectorReplyGrant.execution_receipt_id == receipt.id,
+                    ConnectorReplyGrant.execution_lease_generation == stale_grant_generation,
+                )
+                .values(
+                    execution_receipt_id=None,
+                    execution_lease_owner=None,
+                    execution_lease_expires_at=None,
+                    execution_lease_generation=ConnectorReplyGrant.execution_lease_generation + 1,
+                )
+            )
             await db.commit()
             return None
-        grant = await db.scalar(
-            select(ConnectorReplyGrant)
-            .where(ConnectorReplyGrant.id == receipt.reply_grant_id)
-            .with_for_update()
+        grant_claim = await db.execute(
+            update(ConnectorReplyGrant)
+            .where(
+                ConnectorReplyGrant.id == receipt.reply_grant_id,
+                or_(
+                    ConnectorReplyGrant.execution_receipt_id.is_(None),
+                    (
+                        (ConnectorReplyGrant.execution_receipt_id == receipt.id)
+                        & (
+                            ConnectorReplyGrant.execution_lease_expires_at.is_(None)
+                            | (ConnectorReplyGrant.execution_lease_expires_at <= now)
+                        )
+                    ),
+                ),
+            )
+            .values(
+                execution_receipt_id=receipt.id,
+                execution_lease_owner=owner,
+                execution_lease_generation=ConnectorReplyGrant.execution_lease_generation + 1,
+                execution_lease_expires_at=expires,
+            )
+            .returning(ConnectorReplyGrant.execution_lease_generation)
         )
-        if grant is None:
-            receipt.status = "permanent_failed"
-            receipt.stable_error_code = "reply_grant_unavailable"
+        grant_generation = grant_claim.scalar_one_or_none()
+        if grant_generation is None:
+            grant_exists = await db.scalar(
+                select(ConnectorReplyGrant.id).where(
+                    ConnectorReplyGrant.id == receipt.reply_grant_id
+                )
+            )
+            receipt.status = "retryable_failed" if grant_exists is not None else "permanent_failed"
+            receipt.stable_error_code = (
+                "reply_grant_busy" if grant_exists is not None else "reply_grant_unavailable"
+            )
+            receipt.lease_owner = None
+            receipt.lease_expires_at = None
             await db.commit()
             return None
-        if (
-            grant.execution_receipt_id is not None
-            and grant.execution_receipt_id != receipt.id
-            and grant.execution_lease_expires_at is not None
-            and _aware(grant.execution_lease_expires_at) > now
-        ):
-            return None
-        receipt.status = "processing"
-        receipt.lease_owner = owner
-        receipt.lease_generation += 1
-        receipt.lease_expires_at = now + timedelta(seconds=LEASE_SECONDS)
-        receipt.processing_started_at = receipt.processing_started_at or now
-        receipt.attempt_count += 1
-        grant.execution_receipt_id = receipt.id
-        grant.execution_lease_owner = owner
-        grant.execution_lease_generation += 1
-        grant.execution_lease_expires_at = now + timedelta(seconds=LEASE_SECONDS)
-        receipt_generation = receipt.lease_generation
-        grant_generation = grant.execution_lease_generation
-        receipt.grant_lease_generation = grant_generation
+        receipt.grant_lease_generation = int(grant_generation)
+        receipt.stable_error_code = None
         await db.commit()
-        return owner, receipt_generation, grant_generation
+        return owner, int(receipt_generation), int(grant_generation)
 
 
 async def renew_receipt_lease(
@@ -446,17 +521,24 @@ async def _finalize_receipt_with_delivery(
     from backend.services.connector_outbound_service import create_text_delivery
 
     async with session_factory() as db:
-        receipt = await db.scalar(
-            select(ConnectorInboundReceipt)
+        fence = await db.execute(
+            update(ConnectorInboundReceipt)
             .where(
                 ConnectorInboundReceipt.id == receipt_id,
                 ConnectorInboundReceipt.status == "processing",
                 ConnectorInboundReceipt.lease_owner == owner,
                 ConnectorInboundReceipt.lease_generation == receipt_generation,
+                ConnectorInboundReceipt.grant_lease_generation == grant_generation,
             )
-            .with_for_update()
+            .values(lease_expires_at=ConnectorInboundReceipt.lease_expires_at)
+            .returning(ConnectorInboundReceipt.id)
         )
+        if fence.scalar_one_or_none() is None:
+            await db.rollback()
+            return None
+        receipt = await db.get(ConnectorInboundReceipt, receipt_id)
         if receipt is None or receipt.reply_grant_id is None:
+            await db.rollback()
             return None
         reply = await db.scalar(
             select(ConnectorReplyGrant)
@@ -469,7 +551,7 @@ async def _finalize_receipt_with_delivery(
             .with_for_update()
         )
         if reply is None:
-            return None
+            raise ValueError("reply_grant_unavailable")
         existing = (
             await db.get(ConnectorOutboundDelivery, receipt.outbound_delivery_id)
             if receipt.outbound_delivery_id is not None
@@ -487,7 +569,7 @@ async def _finalize_receipt_with_delivery(
                 )
             else:
                 if turn is None or not isinstance(turn.response, dict):
-                    return None
+                    raise ValueError("connector_turn_unavailable")
                 if turn.response.get("type") == "proposal":
                     proposal = turn.response.get("proposal")
                     summary = proposal.get("summary") if isinstance(proposal, dict) else None
@@ -512,20 +594,45 @@ async def _finalize_receipt_with_delivery(
                     reply_to_message_id=receipt.provider_message_id,
                 )
             await db.flush()
-            receipt.outbound_delivery_id = delivery.id
         else:
             delivery = existing
-        receipt.turn_id = turn.id if turn is not None else receipt.turn_id
-        receipt.status = (
-            "proposal" if turn is not None and turn.status == "proposal" else "completed"
+        next_status = "proposal" if turn is not None and turn.status == "proposal" else "completed"
+        receipt_result = await db.execute(
+            update(ConnectorInboundReceipt)
+            .where(
+                ConnectorInboundReceipt.id == receipt_id,
+                ConnectorInboundReceipt.status == "processing",
+                ConnectorInboundReceipt.lease_owner == owner,
+                ConnectorInboundReceipt.lease_generation == receipt_generation,
+                ConnectorInboundReceipt.grant_lease_generation == grant_generation,
+            )
+            .values(
+                outbound_delivery_id=delivery.id,
+                turn_id=turn.id if turn is not None else receipt.turn_id,
+                status=next_status,
+                processed_at=datetime.now(UTC),
+                stable_error_code=None,
+                lease_owner=None,
+                lease_expires_at=None,
+            )
         )
-        receipt.processed_at = datetime.now(UTC)
-        receipt.stable_error_code = None
-        receipt.lease_owner = None
-        receipt.lease_expires_at = None
-        reply.execution_receipt_id = None
-        reply.execution_lease_owner = None
-        reply.execution_lease_expires_at = None
+        reply_result = await db.execute(
+            update(ConnectorReplyGrant)
+            .where(
+                ConnectorReplyGrant.id == reply.id,
+                ConnectorReplyGrant.execution_receipt_id == receipt_id,
+                ConnectorReplyGrant.execution_lease_owner == owner,
+                ConnectorReplyGrant.execution_lease_generation == grant_generation,
+            )
+            .values(
+                execution_receipt_id=None,
+                execution_lease_owner=None,
+                execution_lease_expires_at=None,
+            )
+        )
+        if not receipt_result.rowcount or not reply_result.rowcount:
+            await db.rollback()
+            return None
         await db.commit()
         return delivery.id
 
@@ -540,32 +647,42 @@ async def _fail_receipt(
     code: str,
 ) -> None:
     async with session_factory() as db:
-        receipt = await db.scalar(
-            select(ConnectorInboundReceipt)
+        receipt_result = await db.execute(
+            update(ConnectorInboundReceipt)
             .where(
                 ConnectorInboundReceipt.id == receipt_id,
+                ConnectorInboundReceipt.status == "processing",
                 ConnectorInboundReceipt.lease_owner == owner,
                 ConnectorInboundReceipt.lease_generation == receipt_generation,
+                ConnectorInboundReceipt.grant_lease_generation == grant_generation,
             )
-            .with_for_update()
+            .values(
+                status="permanent_failed",
+                stable_error_code=code,
+                processed_at=datetime.now(UTC),
+                lease_owner=None,
+                lease_expires_at=None,
+            )
         )
-        if receipt is None:
+        if not receipt_result.rowcount:
+            await db.rollback()
             return
-        grant = await db.get(ConnectorReplyGrant, receipt.reply_grant_id)
-        receipt.status = "permanent_failed"
-        receipt.stable_error_code = code
-        receipt.processed_at = datetime.now(UTC)
-        receipt.lease_owner = None
-        receipt.lease_expires_at = None
-        if (
-            grant is not None
-            and grant.execution_receipt_id == receipt.id
-            and grant.execution_lease_owner == owner
-            and grant.execution_lease_generation == grant_generation
-        ):
-            grant.execution_receipt_id = None
-            grant.execution_lease_owner = None
-            grant.execution_lease_expires_at = None
+        grant_result = await db.execute(
+            update(ConnectorReplyGrant)
+            .where(
+                ConnectorReplyGrant.execution_receipt_id == receipt_id,
+                ConnectorReplyGrant.execution_lease_owner == owner,
+                ConnectorReplyGrant.execution_lease_generation == grant_generation,
+            )
+            .values(
+                execution_receipt_id=None,
+                execution_lease_owner=None,
+                execution_lease_expires_at=None,
+            )
+        )
+        if not grant_result.rowcount:
+            await db.rollback()
+            return
         await db.commit()
 
 
