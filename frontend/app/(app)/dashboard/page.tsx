@@ -46,7 +46,7 @@ import { ThroughputChart } from '@/components/monitor/throughput-chart'
 import { OperationalAnalytics } from '@/components/monitor/operational-analytics'
 import { WorkerAllocation } from '@/components/monitor/worker-allocation'
 import { FancyTestimonialsSlider, type Testimonial } from '@/components/eldoraui/testimonal-slider'
-import { BACKEND_HINT, ErrorState, LoadingState } from '@/components/shell/data-states'
+import { BACKEND_HINT, ErrorState } from '@/components/shell/data-states'
 import { PageContainer } from '@/components/shell/page-container'
 import { Badge } from '@/components/ui/badge'
 import { Button, buttonVariants } from '@/components/ui/button'
@@ -512,6 +512,41 @@ function runsToStream(
   }))
 }
 
+function DashboardPrimaryWorkspace({
+  statsState,
+  statsError,
+  onRetry,
+}: {
+  statsState?: 'loading' | 'error'
+  statsError?: string
+  onRetry?: () => void
+}) {
+  return (
+    <PageContainer eyebrow="Control plane" title="运营工作台" description="先处理异常，再推进正在运行的工作。">
+      <section aria-labelledby="ask-alice-title" className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(320px,390px)]">
+        <div className="min-w-0">
+          <div className="mb-3 flex items-end justify-between gap-3">
+            <div>
+              <p className="eyebrow-mono">Primary workspace / 主对话</p>
+              <h2 id="ask-alice-title" className="mt-1 text-lg font-semibold">Ask Alice</h2>
+              <p className="mt-1 text-sm text-muted-foreground">查询当前工作区，创建项目提案，并从这里继续已有会话。</p>
+            </div>
+            <Link href="/chat" className={buttonVariants({ variant: 'outline', size: 'sm' })}>完整对话 <ArrowRight aria-hidden /></Link>
+          </div>
+          <AgentConversationSurface presentation="dashboard" />
+        </div>
+        <AgentToolReference compact />
+      </section>
+      {statsState === 'loading' ? (
+        <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground" role="status">运营统计正在加载；主对话已可使用。</div>
+      ) : null}
+      {statsState === 'error' ? (
+        <ErrorState message={statsError} hint={BACKEND_HINT} action={onRetry ? <Button onClick={onRetry}>重新连接</Button> : undefined} />
+      ) : null}
+    </PageContainer>
+  )
+}
+
 export default function DashboardPage() {
   const stats = useDashboardStats()
   const activity = useDashboardActivity()
@@ -523,19 +558,11 @@ export default function DashboardPage() {
   const schedulesQuery = useSchedules({ enabled: true })
 
   if (stats.isLoading) {
-    return (
-      <PageContainer eyebrow="Control plane" title="运营工作台" description="先处理异常，再推进正在运行的工作。">
-        <LoadingState rows={3} />
-      </PageContainer>
-    )
+    return <DashboardPrimaryWorkspace statsState="loading" />
   }
 
   if (stats.isError || !stats.data) {
-    return (
-      <PageContainer eyebrow="Control plane" title="运营工作台" description="先处理异常，再推进正在运行的工作。">
-        <ErrorState message={(stats.error as Error)?.message} hint={BACKEND_HINT} action={<Button onClick={() => stats.refetch()}>重新连接</Button>} />
-      </PageContainer>
-    )
+    return <DashboardPrimaryWorkspace statsState="error" statsError={(stats.error as Error)?.message} onRetry={() => void stats.refetch()} />
   }
 
   const s = stats.data

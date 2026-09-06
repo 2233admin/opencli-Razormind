@@ -13,7 +13,7 @@ export default function ChatPage() {
     <PageContainer
       title="Ask Alice"
       eyebrow="主对话工作区"
-      description="在当前授权 Workspace 中查询状态、组织项目和确认变更。所有写入都会先展示提案。"
+      description="在当前授权工作区中查询状态、组织项目和确认变更。所有写入都会先展示提案。"
       actions={(
         <Button variant="outline" size="sm" nativeButton={false} render={<Link href="/dashboard" />}>
           返回概览
