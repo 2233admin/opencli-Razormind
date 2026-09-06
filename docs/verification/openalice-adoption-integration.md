@@ -125,3 +125,13 @@ root 的 `6de34f57` 准备了隔离 P2 浏览器环境。它故意使用不同�
 [固定版本审查记录](https://github.com/2233admin/opencli-Razormind/issues/125#issuecomment-5556053023)为 REVISE：后端须修正旧 worker 无 fence 失败写入和撤销后 artifact receipt 永久 processing；前端须修正领取 detail 撤销缓存、最终交付轮询和 failed 新授权，并补实际 redeem/revoke 浏览器闭环。原执行者按原 ownership 修复，独立 reviewer 随后复审。测试通过尚不等于本版本可验收。
 
 为使现有预览读取新接口，8046 在 connector 开关均显式关闭、lifespan off 下重启。仅预览 SQLite 应用了专属 P2 connector schema：事前使用 SQLite backup 保留副本，前后所有非 connector 模拟记录的 dump hash 相同；原业务数据库及服务未动。临时 worker 检查端口 8054 已停止，8047 用户预览继续运行。回复和领取执行仍待修正及完整验收，不启用真实外发。
+
+## SQLite 原子领取与报告交付闭环
+
+root 在 `65fb9055` 增加独立 SQLite 并发回归，复现两个 worker 同时领取同一 delivery 且 generation 均为 1。后端 `c31425b5`（整合 `e9acbe7e`）改用条件 UPDATE/RETURNING 争唯一胜者，最终写入双 fence，并让 connect 后复授权事务先获得 SQLite 写锁；恢复扫描以游标避免持续重试的队头饿死后续任务。真实 native Markdown 的 `content` 文本字段也已适配。原 reviewer 接受这些固定修复范围。
+
+UI `b93594db`、`cf34fc6d` 整合为 `c9543450`、`bf18d5b8`，修正撤销后的 detail 缓存、最终交付轮询、failed 新授权、真实 EXPORT 角色和可信 draft run。claim 保持仅组件内存；`retryable_failed` 继续轮询并明确等待后台重试。独立 UI 复审接受。
+
+root 独立 SQLite race/P2/migration/原会话 service **38 项通过**。完整 `playwright.connector-artifacts.config.mjs` 浏览器旅程 **1 项通过**：真实绑定、激活、回复原会话、offer、撤销与旧 claim 拒绝、新 request ID 重新授权、领取报告正文及 redeemed/sent、刷新不回显 claim、scope/Viewer 403 与 375px。测试运行真实前后端、SQLite、生产 connector worker 和 SDK 入站，仅原 chat seam/SDK 外发网络为本地替身。Next 字体下载超时使用回退字体，不影响测试通过。
+
+8048/8053 临时测试服务已释放，8046/8047 预览继续 HTTP 200，app 内已有已认证报告详情可直接查看。完整 P2 矩阵中的媒体边界、敏感信息扫描、异常结果分类和部分恢复证据仍在补齐，最终父目标独立审查尚未执行；本节不宣称 #125 或整批工作已完成。
