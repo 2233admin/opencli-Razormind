@@ -77,6 +77,11 @@ class Settings(BaseSettings):
     # be decrypted on the next process start.
     credential_encryption_key: str = ""
 
+    # Explicit rollout gates. Readiness also requires the connector worker to
+    # have started; storing an installation alone never enables execution.
+    connector_reply_enabled: bool = False
+    connector_artifact_delivery_enabled: bool = False
+
     # Database
     database_url: str = "sqlite+aiosqlite:///./opencli_admin.db"
 
