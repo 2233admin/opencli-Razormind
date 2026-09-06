@@ -217,12 +217,14 @@ def _artifact_detail(
     conversation_id: str | None = "p2-conversation",
     media_type: str = "text/plain",
     content: dict | None = None,
+    title: str = "Connector report",
+    simulated: bool = False,
 ) -> ProjectArtifactDetail:
     now = datetime.now(UTC)
     return ProjectArtifactDetail(
         id="session:artifact",
         artifact_id="artifact",
-        title="Connector report",
+        title=title,
         media_type=media_type,
         kind="report",
         content_hash="artifact-content-hash",
@@ -233,7 +235,7 @@ def _artifact_detail(
         session_id="session",
         conversation_id=conversation_id,
         source="native",
-        simulated=False,
+        simulated=simulated,
         created_at=now,
         updated_at=now,
         schema_version="1",
@@ -270,6 +272,31 @@ async def _grant(factory) -> tuple[ConnectorReplyGrant, ConnectorOutboundDeliver
         )
         assert grant is not None and activation is not None
         return grant, activation
+
+
+def test_connector_grant_canonical_hash_vectors_are_stable():
+    reply_body = ConnectorReplyGrantCreate(
+        request_id="ignored-by-hash",
+        installation_public_id="安装-1",
+        binding_public_id="绑定-2",
+        conversation_id="会话-3",
+        expires_in_seconds=12345,
+    )
+    artifact_body = ConnectorArtifactGrantCreate(
+        request_id="also-ignored-by-hash",
+        artifact_public_id="会话:报告-1",
+        workflow_id="流程-6",
+        run_id="运行-7",
+        expires_in_seconds=6789,
+    )
+    assert (
+        grants._canonical_hash("工作区-4", "项目-5", reply_body)
+        == "422070b9d090eec13543a09897f6777b2dd8f4df37df9fee84a55b41e6854b63"
+    )
+    assert (
+        artifacts._canonical_hash("工作区-4", "项目-5", artifact_body)
+        == "105fd88cdfe73b8fc06813b2a636ab4100049dc72dbb2de60707983ff502032a"
+    )
 
 
 @pytest.mark.asyncio
@@ -507,6 +534,37 @@ async def test_concurrent_same_request_has_one_grant_and_activation(p2_scope):
     async with factory() as db:
         assert await db.scalar(select(func.count()).select_from(ConnectorReplyGrant)) == 1
         assert await db.scalar(select(func.count()).select_from(ConnectorOutboundDelivery)) == 1
+
+
+@pytest.mark.asyncio
+async def test_concurrent_different_reply_requests_share_one_active_slot(p2_scope):
+    factory = p2_scope
+
+    async def create(request_id: str):
+        async with factory() as db:
+            return await grants.create_reply_grant(
+                db,
+                "p2-governed",
+                "p2-project",
+                _identity(),
+                _create(request_id),
+            )
+
+    results = await asyncio.gather(
+        create("different-reply-a"),
+        create("different-reply-b"),
+        return_exceptions=True,
+    )
+    created = [result for result in results if not isinstance(result, Exception)]
+    rejected = [result for result in results if isinstance(result, HTTPException)]
+    assert len(created) == 1 and created[0].created is True
+    assert len(rejected) == 1
+    assert rejected[0].status_code == 409
+    assert rejected[0].detail == "active_reply_grant_exists"
+    async with factory() as db:
+        assert await db.scalar(select(func.count()).select_from(ConnectorReplyGrant)) == 1
+        deliveries = list(await db.scalars(select(ConnectorOutboundDelivery)))
+        assert len(deliveries) == 1 and deliveries[0].purpose == "activation"
 
 
 @pytest.mark.asyncio
@@ -821,6 +879,73 @@ async def test_json_artifact_uses_canonical_in_memory_payload(p2_scope, monkeypa
 
 
 @pytest.mark.asyncio
+async def test_file_delivery_freezes_simulated_flag_and_sanitizes_artifact_title(
+    p2_scope, monkeypatch
+):
+    factory = p2_scope
+    reply, _ = await _grant(factory)
+    original_title = "../..\\机密/报告:" + ("x" * 300) + ".json"
+    original_detail = _artifact_detail(
+        media_type="application/json",
+        content={"body": {"preview": True}},
+        title=original_title,
+        simulated=True,
+    )
+    _install_artifact_detail(monkeypatch, original_detail)
+    async with factory() as db:
+        created = await artifacts.create_artifact_grant(
+            db,
+            "p2-governed",
+            "p2-project",
+            reply.public_id,
+            _identity(),
+            ConnectorArtifactGrantCreate(
+                request_id="simulated-file-artifact",
+                artifact_public_id="session:artifact",
+                workflow_id="p2-workflow",
+                run_id="p2-run",
+            ),
+        )
+        assert created.claim_text is not None
+        assert created.simulated is True
+        grant = await db.scalar(select(ConnectorArtifactGrant))
+        assert grant is not None
+        assert grant.simulated is True
+        assert grant.title == original_title[:255]
+        grant_id = grant.id
+        claim_text = created.claim_text
+    _install_artifact_detail(
+        monkeypatch,
+        original_detail.model_copy(update={"title": "changed.json", "simulated": False}),
+    )
+    async with factory() as db:
+        receipt = await persist_verified_message(
+            db,
+            "p2-installation-id",
+            _message(claim_text, message_id="simulated-file-claim"),
+        )
+        await db.commit()
+        receipt_id = receipt.id
+    await worker.process_connector_receipt(factory, receipt_id)
+    async with factory() as db:
+        receipt = await db.get(ConnectorInboundReceipt, receipt_id)
+        grant = await db.get(ConnectorArtifactGrant, grant_id)
+        assert receipt is not None and receipt.status == "completed"
+        assert receipt.outbound_delivery_id is not None
+        delivery = await db.get(ConnectorOutboundDelivery, receipt.outbound_delivery_id)
+        assert delivery is not None and delivery.payload_kind == "file"
+        assert delivery.media_type == "application/json"
+        assert delivery.file_name is not None and delivery.file_name.endswith(".json")
+        assert len(delivery.file_name) <= 255
+        assert "/" not in delivery.file_name and "\\" not in delivery.file_name
+        assert ".." not in delivery.file_name
+        assert "机密" not in delivery.file_name
+        assert delivery.file_name != "changed.json"
+        assert grant is not None and grant.simulated is True
+        assert grant.title == original_title[:255]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("media_type", "content"),
     (
@@ -1127,6 +1252,53 @@ async def test_concurrent_artifact_request_returns_one_claim_and_offer(p2_scope,
             )
             == 1
         )
+
+
+@pytest.mark.asyncio
+async def test_concurrent_different_artifact_requests_share_one_active_slot(p2_scope, monkeypatch):
+    factory = p2_scope
+    reply, _ = await _grant(factory)
+    _install_artifact_detail(monkeypatch, _artifact_detail())
+
+    async def create(request_id: str):
+        async with factory() as db:
+            return await artifacts.create_artifact_grant(
+                db,
+                "p2-governed",
+                "p2-project",
+                reply.public_id,
+                _identity(),
+                ConnectorArtifactGrantCreate(
+                    request_id=request_id,
+                    artifact_public_id="session:artifact",
+                    workflow_id="p2-workflow",
+                    run_id="p2-run",
+                ),
+            )
+
+    results = await asyncio.gather(
+        create("different-artifact-a"),
+        create("different-artifact-b"),
+        return_exceptions=True,
+    )
+    created = [result for result in results if not isinstance(result, Exception)]
+    rejected = [result for result in results if isinstance(result, HTTPException)]
+    assert len(created) == 1 and created[0].created is True
+    assert created[0].claim_text is not None
+    assert len(rejected) == 1
+    assert rejected[0].status_code == 409
+    assert rejected[0].detail == "active_artifact_grant_exists"
+    async with factory() as db:
+        assert await db.scalar(select(func.count()).select_from(ConnectorArtifactGrant)) == 1
+        offers = list(
+            await db.scalars(
+                select(ConnectorOutboundDelivery).where(
+                    ConnectorOutboundDelivery.purpose == "artifact_offer"
+                )
+            )
+        )
+        assert len(offers) == 1
+        assert offers[0].safe_text is None and offers[0].payload_bytes is None
 
 
 @pytest.mark.asyncio
@@ -2282,6 +2454,94 @@ async def test_corrupt_claim_fails_grant_and_delivery_without_sdk(p2_scope):
         assert offer is not None and offer.error_code == "claim_decryption_failed"
         assert artifact is not None and artifact.status == "failed"
         assert artifact.active_slot is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("missing_value", (None, ""))
+async def test_missing_claim_encryption_key_fails_permanently_without_sdk(
+    p2_scope, monkeypatch, missing_value
+):
+    factory = p2_scope
+    reply, _ = await _grant(factory)
+    _install_artifact_detail(monkeypatch, _artifact_detail(media_type="application/json"))
+    async with factory() as db:
+        created = await artifacts.create_artifact_grant(
+            db,
+            "p2-governed",
+            "p2-project",
+            reply.public_id,
+            _identity(),
+            ConnectorArtifactGrantCreate(
+                request_id="missing-key-artifact",
+                artifact_public_id="session:artifact",
+                workflow_id="p2-workflow",
+                run_id="p2-run",
+            ),
+        )
+        grant = await db.scalar(select(ConnectorArtifactGrant))
+        offer = await db.scalar(
+            select(ConnectorOutboundDelivery).where(
+                ConnectorOutboundDelivery.purpose == "artifact_offer"
+            )
+        )
+        assert created.claim_text is not None
+        assert grant is not None and offer is not None
+        grant_id = grant.id
+        offer_id = offer.id
+    original_key = __import__("os").environ["CREDENTIAL_ENCRYPTION_KEY"]
+    if missing_value is None:
+        monkeypatch.delenv("CREDENTIAL_ENCRYPTION_KEY")
+    else:
+        monkeypatch.setenv("CREDENTIAL_ENCRYPTION_KEY", missing_value)
+
+    def channel_factory(**_kwargs):
+        raise AssertionError("SDK must not be constructed without the claim encryption key")
+
+    assert await deliver_outbound(factory, offer_id, channel_factory=channel_factory) == "failed"
+    async with factory() as db:
+        grant = await db.get(ConnectorArtifactGrant, grant_id)
+        offer = await db.get(ConnectorOutboundDelivery, offer_id)
+        assert grant is not None and grant.status == "failed"
+        assert grant.error_code == "claim_decryption_failed"
+        assert grant.active_slot is None
+        assert offer is not None and offer.status == "failed"
+        assert offer.error_code == "claim_decryption_failed"
+        assert offer.lease_owner is None and offer.lease_expires_at is None
+    monkeypatch.setenv("CREDENTIAL_ENCRYPTION_KEY", original_key)
+    assert (
+        await deliver_outbound(factory, offer_id, channel_factory=channel_factory) == "not_claimed"
+    )
+    async with factory() as db:
+        replay = await artifacts.create_artifact_grant(
+            db,
+            "p2-governed",
+            "p2-project",
+            reply.public_id,
+            _identity(),
+            ConnectorArtifactGrantCreate(
+                request_id="missing-key-artifact",
+                artifact_public_id="session:artifact",
+                workflow_id="p2-workflow",
+                run_id="p2-run",
+            ),
+        )
+        assert replay.created is False
+        assert replay.status == "failed"
+        assert replay.claim_text is None
+        rebuilt = await artifacts.create_artifact_grant(
+            db,
+            "p2-governed",
+            "p2-project",
+            reply.public_id,
+            _identity(),
+            ConnectorArtifactGrantCreate(
+                request_id="missing-key-artifact-rebuilt",
+                artifact_public_id="session:artifact",
+                workflow_id="p2-workflow",
+                run_id="p2-run",
+            ),
+        )
+        assert rebuilt.created is True and rebuilt.claim_text is not None
 
 
 @pytest.mark.asyncio
