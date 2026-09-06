@@ -105,3 +105,13 @@ Sol 在connector工作树修正上述边界，并增加仅当前用户的my-bind
 Sol 已在干净的 `codex/openalice-replies-20260906`（基线 `4befc988`）开始后端实现，当前尚未交付或验收。root 在整合树 `92302911` 增加默认关闭的两个 rollout 配置，Ruff 与 diff check 通过；后续 main/model registry 接线由 root 独占。Luna 完成只读前端预检，明确复用受授权会话读取获得 governed Workspace，并补齐所需的本人 grant 状态读取/撤销合同；前端实施等待实际 API 交付。
 
 本记录只确认设计审查、正式派发和配置准备，不确认 P2 回复/产物领取已可用。预览 8046/8047 仍运行，原目录改动与业务服务/数据不变。
+
+## P2 接线与浏览器验收准备
+
+真实 worker 接口交付后，root 在 `94338d92` 接入生产 connector 生命周期：默认关闭时跳过导入和启动；开启时依次 start、recover，并在启动、恢复或服务异常后执行 stop。实际 `create_app(app_settings=...)` 的 6 项 worker 边界测试与 Ruff 通过，独立 reviewer 接受这部分接线。测试替换了 worker 边界，因此尚不证明实际 P2 worker 可用。
+
+[报告授权界面合同](https://github.com/2233admin/opencli-Razormind/issues/125#issuecomment-5555932351)全文远端回读匹配后，Luna 在独立 `codex/openalice-replies-ui-20260906` 开始实施授权、投递状态刷新、撤销与专属浏览器旅程。Sol 继续负责 P2 后端；root 独占共享接线和测试环境，不交叉修改同一文件。
+
+root 的 `6de34f57` 准备了隔离 P2 浏览器环境。它故意使用不同的 governed 与 Studio Workspace ID，通过真实生产 connector lifespan、HTTP、SQLite 和固定 SDK 入站检查范围映射；仅现有 chat 执行边界和 SDK 外发网络使用本地替身。外发观察端点仅由测试 runner 注册，限制本机与测试 token，记录仅存于临时进程内，不进入产品路由。共享 fixture 原有 HTTP 完整旅程 1 项回归、Ruff、Node 语法及定向 ESLint 通过；默认 Playwright 配置保留一个原有警告。
+
+实际 P2 前后端尚待整合，新的回复/领取浏览器旅程未运行，不能将测试环境准备视为功能验收。此时 8046 健康接口和 8047 `/studio` 均返回 200，现有用户预览继续可用。
