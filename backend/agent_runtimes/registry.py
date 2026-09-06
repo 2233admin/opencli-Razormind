@@ -58,6 +58,7 @@ def _load_all_runtimes() -> None:
     from backend.agent_runtimes import (  # noqa: F401
         bbx_adapter,
         codex_adapter,
+        isolated_session_adapter,
         hermes_adapter,
         miniflow_adapter,
         openclaw_adapter,
