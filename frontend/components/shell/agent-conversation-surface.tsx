@@ -537,6 +537,7 @@ export function AgentConversationSurface({
                 aria-label="选择 Agent Workspace"
               >
                 <option value="">选择工作区</option>
+                {workspaceId && !authorizedWorkspace && isTrustedStudioContext ? <option value={workspaceId}>当前项目工作区</option> : null}
                 {authorizedWorkspaces.data.map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}
               </select>
             </label>
