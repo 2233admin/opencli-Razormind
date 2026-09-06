@@ -236,6 +236,10 @@ async def dispatch_feishu_callback(
     from lark_channel.core.model import RawRequest
     from lark_channel.event.dispatcher_handler import EventDispatcherHandler
 
+    from backend.services.connector_sdk_logging import configure_connector_sdk_logging
+
+    configure_connector_sdk_logging()
+
     loop = asyncio.get_running_loop()
 
     def callback(event: Any) -> None:

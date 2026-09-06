@@ -473,6 +473,9 @@ async def deliver_outbound(
     if channel_factory is None:
         from lark_channel import FeishuChannel
 
+        from backend.services.connector_sdk_logging import configure_connector_sdk_logging
+
+        configure_connector_sdk_logging()
         channel_factory = FeishuChannel
     channel = channel_factory(
         app_id=(await _installation_app_id(session_factory, row.installation_id)),
