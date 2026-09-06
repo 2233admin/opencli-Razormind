@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import re
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -24,6 +25,7 @@ from backend.models.connector_reply import (
 LEASE_SECONDS = 30
 HEARTBEAT_SECONDS = 10
 RECOVERY_SECONDS = 60
+_STABLE_ERROR_RE = re.compile(r"^[a-z][a-z0-9_]{0,95}$")
 
 
 @dataclass(frozen=True)
@@ -48,6 +50,10 @@ _chat_runner: Callable[..., Any] | None = None
 _tasks: dict[str, asyncio.Task[None]] = {}
 _recovery_task: asyncio.Task[None] | None = None
 _readiness = ConnectorReplyWorkerReadiness()
+
+
+def _aware(value: datetime) -> datetime:
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value
 
 
 async def start_connector_reply_worker(
@@ -292,7 +298,7 @@ async def _claim_receipt(
         expired_processing = (
             receipt.status == "processing"
             and receipt.lease_expires_at is not None
-            and receipt.lease_expires_at <= now
+            and _aware(receipt.lease_expires_at) <= now
         )
         if receipt.status not in {"received", "retryable_failed"} and not expired_processing:
             return None
@@ -343,7 +349,7 @@ async def _claim_receipt(
             grant.execution_receipt_id is not None
             and grant.execution_receipt_id != receipt.id
             and grant.execution_lease_expires_at is not None
-            and grant.execution_lease_expires_at > now
+            and _aware(grant.execution_lease_expires_at) > now
         ):
             return None
         receipt.status = "processing"
@@ -472,10 +478,10 @@ async def _finalize_receipt_with_delivery(
         if existing is None:
             if receipt.intent == "artifact_claim":
                 if receipt.artifact_grant_id is None:
-                    return None
+                    raise ValueError("artifact_grant_unavailable")
                 artifact = await db.get(ConnectorArtifactGrant, receipt.artifact_grant_id)
                 if artifact is None or artifact.status != "active":
-                    return None
+                    raise ValueError("artifact_grant_unavailable")
                 delivery = await create_artifact_delivery_for_receipt(
                     db, receipt=receipt, grant=artifact, reply=reply
                 )
@@ -644,17 +650,21 @@ async def process_connector_receipt(
                     turn=turn,
                 )
     except Exception as exc:
-        code = getattr(exc, "detail", None)
-        await _fail_receipt(
-            session_factory,
-            receipt_id=receipt_id,
-            owner=owner,
-            receipt_generation=receipt_generation,
-            grant_generation=grant_generation,
-            code=(
-                code if isinstance(code, str) and len(code) <= 96 else "connector_processing_failed"
-            ),
-        )
+        if not lost.is_set():
+            code = getattr(exc, "detail", None)
+            if code is None and exc.args and isinstance(exc.args[0], str):
+                code = exc.args[0]
+            stable_code = (
+                code if isinstance(code, str) and _STABLE_ERROR_RE.fullmatch(code) else None
+            )
+            await _fail_receipt(
+                session_factory,
+                receipt_id=receipt_id,
+                owner=owner,
+                receipt_generation=receipt_generation,
+                grant_generation=grant_generation,
+                code=(stable_code or "connector_processing_failed"),
+            )
     finally:
         heartbeat.cancel()
         await asyncio.gather(heartbeat, return_exceptions=True)

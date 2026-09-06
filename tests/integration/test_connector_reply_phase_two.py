@@ -26,6 +26,7 @@ from backend.models.studio import StudioProject, StudioWorkflow, StudioWorkspace
 from backend.schemas.connector_reply import ConnectorArtifactGrantCreate, ConnectorReplyGrantCreate
 from backend.schemas.project_artifact import ProjectArtifactDetail
 from backend.security.identity import RequestIdentity
+from backend.services import agent_conversation_service as conversations
 from backend.services import connector_artifact_grant_service as artifacts
 from backend.services import connector_outbound_service as outbound
 from backend.services import connector_reply_grant_service as grants
@@ -320,6 +321,69 @@ async def test_claim_prefix_is_always_redacted_and_only_valid_claim_binds_artifa
 
 
 @pytest.mark.asyncio
+async def test_revoked_artifact_after_callback_fails_receipt_and_releases_grant(p2_scope):
+    factory = p2_scope
+    reply, _ = await _grant(factory)
+    claim = "revoked_claim_material_1234567890"
+    async with factory() as db:
+        artifact = ConnectorArtifactGrant(
+            id="revoked-artifact-grant-id",
+            public_id="revoked-artifact-grant",
+            reply_grant_id=reply.id,
+            conversation_id=reply.conversation_id,
+            created_by_user_id="p2-user",
+            create_request_id="revoked-artifact-request",
+            create_request_hash="8" * 64,
+            workspace_id="p2-governed",
+            studio_workspace_id="p2-studio",
+            project_id="p2-project",
+            workflow_id="p2-workflow",
+            run_id="run",
+            artifact_public_id="session:revoked-artifact",
+            artifact_id="revoked-artifact",
+            session_id="session",
+            content_hash="9" * 64,
+            title="Revoked report",
+            media_type="application/json",
+            simulated=True,
+            claim_digest=__import__("hashlib").sha256(claim.encode()).hexdigest(),
+            claim_ciphertext=encrypt(claim),
+            status="active",
+            version=1,
+            expires_at=datetime.now(UTC) + timedelta(minutes=30),
+            active_slot="a" * 64,
+        )
+        db.add(artifact)
+        await db.commit()
+    async with factory() as db:
+        receipt = await persist_verified_message(
+            db,
+            "p2-installation-id",
+            _message(f"领取 {claim}", message_id="claim-revoked-after-ack"),
+        )
+        await db.commit()
+        assert receipt.status == "received"
+        receipt_id = receipt.id
+    async with factory() as db:
+        artifact = await db.get(ConnectorArtifactGrant, "revoked-artifact-grant-id")
+        assert artifact is not None
+        artifact.status = "revoked"
+        artifact.active_slot = None
+        artifact.revoked_at = datetime.now(UTC)
+        await db.commit()
+    await worker.process_connector_receipt(factory, receipt_id)
+    async with factory() as db:
+        receipt = await db.get(ConnectorInboundReceipt, receipt_id)
+        reply = await db.get(ConnectorReplyGrant, reply.id)
+        assert receipt is not None and receipt.status == "permanent_failed"
+        assert receipt.stable_error_code == "artifact_grant_unavailable"
+        assert receipt.lease_owner is None and receipt.lease_expires_at is None
+        assert reply is not None and reply.execution_receipt_id is None
+        assert reply.execution_lease_owner is None
+        assert reply.execution_lease_expires_at is None
+
+
+@pytest.mark.asyncio
 async def test_artifact_grant_replay_claim_and_delivery_redeems_atomically(p2_scope, monkeypatch):
     factory = p2_scope
     reply, _ = await _grant(factory)
@@ -522,6 +586,94 @@ async def test_stale_receipt_and_grant_generations_cannot_renew(p2_scope):
         receipt_generation=receipt_generation,
         grant_generation=grant_generation,
     )
+
+
+@pytest.mark.asyncio
+async def test_stale_failure_writer_cannot_mark_takeover_turn_failed(p2_scope):
+    factory = p2_scope
+    _, activation = await _grant(factory)
+    async with factory() as db:
+        activation.status = "sent"
+        activation.provider_message_id = "activation-message"
+        await db.merge(activation)
+        receipt = await persist_verified_message(
+            db,
+            "p2-installation-id",
+            _message(
+                "question",
+                message_id="takeover-before-turn",
+                reply_to="activation-message",
+            ),
+        )
+        await db.commit()
+        receipt_id = receipt.id
+    first_claim = await worker._claim_receipt(factory, receipt_id)
+    assert first_claim is not None
+    first_owner, first_receipt_generation, first_grant_generation = first_claim
+    async with factory() as db:
+        stale_access = await grants.authorize_receipt_for_agent(
+            db,
+            receipt_id=receipt_id,
+            lease_owner=first_owner,
+            receipt_lease_generation=first_receipt_generation,
+            grant_lease_generation=first_grant_generation,
+        )
+        receipt = await db.get(ConnectorInboundReceipt, receipt_id)
+        grant = await db.scalar(select(ConnectorReplyGrant))
+        assert receipt is not None and grant is not None
+        receipt.lease_expires_at = datetime.now(UTC) - timedelta(seconds=1)
+        grant.execution_lease_expires_at = datetime.now(UTC) - timedelta(seconds=1)
+        await db.commit()
+    second_claim = await worker._claim_receipt(factory, receipt_id)
+    assert second_claim is not None
+    second_owner, second_receipt_generation, second_grant_generation = second_claim
+    started = asyncio.Event()
+    finish = asyncio.Event()
+
+    async def blocking_runner(_db, _body, _identity, **_kwargs):
+        started.set()
+        await finish.wait()
+        return chat.ChatReply(type="message", content="takeover answer")
+
+    async with factory() as takeover_db:
+        takeover_access = await grants.authorize_receipt_for_agent(
+            takeover_db,
+            receipt_id=receipt_id,
+            lease_owner=second_owner,
+            receipt_lease_generation=second_receipt_generation,
+            grant_lease_generation=second_grant_generation,
+        )
+        request_id = worker._turn_request_id("p2-installation-id", "takeover-before-turn")
+        takeover_task = asyncio.create_task(
+            conversations.send_connector_message(
+                takeover_db,
+                takeover_access,
+                request_id=request_id,
+                content="question",
+                chat_runner=blocking_runner,
+            )
+        )
+        await asyncio.wait_for(started.wait(), timeout=2)
+        async with factory() as stale_db:
+            turn = await stale_db.scalar(
+                select(AgentConversationTurn).where(AgentConversationTurn.request_id == request_id)
+            )
+            assert turn is not None and turn.status == "running"
+            await conversations._mark_connector_turn_failed(
+                stale_db,
+                stale_access,
+                turn.id,
+                code="stale_failure",
+                message="stale worker",
+            )
+        async with factory() as check_db:
+            turn = await check_db.scalar(
+                select(AgentConversationTurn).where(AgentConversationTurn.request_id == request_id)
+            )
+            assert turn is not None and turn.status == "running"
+        finish.set()
+        _, completed = await takeover_task
+        assert completed.status == "completed"
 
 
 @pytest.mark.asyncio
@@ -793,10 +945,22 @@ async def test_lost_receipt_heartbeat_discards_model_result(p2_scope, monkeypatc
         turn = await db.scalar(
             select(AgentConversationTurn).where(AgentConversationTurn.request_id.like("feishu:%"))
         )
-        assert receipt is not None and receipt.status == "permanent_failed"
+        assert receipt is not None and receipt.status == "processing"
         assert receipt.outbound_delivery_id is None
         assert conversation is not None and conversation.revision == 0
         assert current_grant is not None and current_grant.conversation_revision_cursor == 0
+        assert turn is not None and turn.status == "running"
+        receipt.lease_expires_at = datetime.now(UTC) - timedelta(seconds=1)
+        current_grant.execution_lease_expires_at = datetime.now(UTC) - timedelta(seconds=1)
+        await db.commit()
+    await worker.process_connector_receipt(factory, receipt_id, chat_runner=fake_runner)
+    async with factory() as db:
+        receipt = await db.get(ConnectorInboundReceipt, receipt_id)
+        turn = await db.scalar(
+            select(AgentConversationTurn).where(AgentConversationTurn.request_id.like("feishu:%"))
+        )
+        assert receipt is not None and receipt.status == "permanent_failed"
+        assert receipt.stable_error_code == "agent_execution_indeterminate"
         assert turn is not None and turn.status == "failed"
 
 

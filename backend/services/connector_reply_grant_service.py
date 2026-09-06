@@ -426,6 +426,36 @@ class ConnectorConversationAccess:
         if self._seal is not _SEAL:
             raise RuntimeError("invalid connector conversation capability")
 
+    async def owns_execution_fence(self, db: AsyncSession) -> bool:
+        """Lock and verify the receipt/grant generations for a short write."""
+
+        self.assert_sealed()
+        now = _now()
+        receipt = await db.scalar(
+            select(ConnectorInboundReceipt.id)
+            .where(
+                ConnectorInboundReceipt.id == self.receipt_id,
+                ConnectorInboundReceipt.status == "processing",
+                ConnectorInboundReceipt.lease_owner == self.lease_owner,
+                ConnectorInboundReceipt.lease_generation == self.receipt_lease_generation,
+                ConnectorInboundReceipt.grant_lease_generation == self.grant_lease_generation,
+                ConnectorInboundReceipt.lease_expires_at > now,
+            )
+            .with_for_update()
+        )
+        grant = await db.scalar(
+            select(ConnectorReplyGrant.id)
+            .where(
+                ConnectorReplyGrant.id == self.grant_id,
+                ConnectorReplyGrant.execution_receipt_id == self.receipt_id,
+                ConnectorReplyGrant.execution_lease_owner == self.lease_owner,
+                ConnectorReplyGrant.execution_lease_generation == self.grant_lease_generation,
+                ConnectorReplyGrant.execution_lease_expires_at > now,
+            )
+            .with_for_update()
+        )
+        return receipt is not None and grant is not None
+
     async def advance_revision_cursor(self, db: AsyncSession, *, next_revision: int) -> bool:
         self.assert_sealed()
         result = await db.execute(
@@ -443,23 +473,19 @@ class ConnectorConversationAccess:
 
     async def reauthorize_for_finalize(self, db: AsyncSession) -> None:
         self.assert_sealed()
-        receipt = await db.get(ConnectorInboundReceipt, self.receipt_id)
-        grant = await db.get(ConnectorReplyGrant, self.grant_id)
-        if (
-            receipt is None
-            or grant is None
-            or receipt.status != "processing"
-            or receipt.lease_owner != self.lease_owner
-            or receipt.lease_generation != self.receipt_lease_generation
-            or receipt.lease_expires_at is None
-            or _aware(receipt.lease_expires_at) <= _now()
-            or grant.execution_receipt_id != self.receipt_id
-            or grant.execution_lease_owner != self.lease_owner
-            or grant.execution_lease_generation != self.grant_lease_generation
-            or grant.execution_lease_expires_at is None
-            or _aware(grant.execution_lease_expires_at) <= _now()
-        ):
+        if not await self.owns_execution_fence(db):
             raise ValueError("connector_lease_lost")
+        receipt = await db.scalar(
+            select(ConnectorInboundReceipt)
+            .where(ConnectorInboundReceipt.id == self.receipt_id)
+            .execution_options(populate_existing=True)
+        )
+        grant = await db.scalar(
+            select(ConnectorReplyGrant)
+            .where(ConnectorReplyGrant.id == self.grant_id)
+            .execution_options(populate_existing=True)
+        )
+        assert receipt is not None and grant is not None
         await _reauthorize(db, grant, receipt=receipt)
 
 
@@ -527,19 +553,38 @@ async def _reauthorize(
     grant: ConnectorReplyGrant,
     *,
     receipt: ConnectorInboundReceipt | None = None,
+    lock_scope: bool = False,
 ) -> tuple[ConnectorInstallation, AgentConversation]:
     now = _now()
     if grant.status != "active" or _aware(grant.expires_at) <= now:
         raise ValueError("reply_grant_unavailable")
-    installation = await db.get(ConnectorInstallation, grant.installation_id)
-    binding = await db.get(ConnectorPrincipalBinding, grant.binding_id)
-    user = await db.get(User, grant.bound_user_id)
-    workspace = await db.get(Workspace, grant.workspace_id)
-    conversation = await db.get(AgentConversation, grant.conversation_id)
+
+    def scoped(query):
+        return query.with_for_update() if lock_scope else query
+
+    installation = await db.scalar(
+        scoped(
+            select(ConnectorInstallation).where(ConnectorInstallation.id == grant.installation_id)
+        )
+    )
+    binding = await db.scalar(
+        scoped(
+            select(ConnectorPrincipalBinding).where(
+                ConnectorPrincipalBinding.id == grant.binding_id
+            )
+        )
+    )
+    user = await db.scalar(scoped(select(User).where(User.id == grant.bound_user_id)))
+    workspace = await db.scalar(scoped(select(Workspace).where(Workspace.id == grant.workspace_id)))
+    conversation = await db.scalar(
+        scoped(select(AgentConversation).where(AgentConversation.id == grant.conversation_id))
+    )
     membership = await db.scalar(
-        select(WorkspaceMembership).where(
-            WorkspaceMembership.workspace_id == grant.workspace_id,
-            WorkspaceMembership.user_id == grant.bound_user_id,
+        scoped(
+            select(WorkspaceMembership).where(
+                WorkspaceMembership.workspace_id == grant.workspace_id,
+                WorkspaceMembership.user_id == grant.bound_user_id,
+            )
         )
     )
     if (
@@ -579,17 +624,23 @@ async def _reauthorize(
 
 
 async def authorize_delivery(
-    db: AsyncSession, *, delivery_id: str
+    db: AsyncSession, *, delivery_id: str, lock_scope: bool = False
 ) -> tuple[ConnectorOutboundDelivery, ConnectorInstallation]:
-    row = await db.scalar(
-        select(ConnectorOutboundDelivery).where(ConnectorOutboundDelivery.id == delivery_id)
+    delivery_query = select(ConnectorOutboundDelivery).where(
+        ConnectorOutboundDelivery.id == delivery_id
     )
+    if lock_scope:
+        delivery_query = delivery_query.with_for_update()
+    row = await db.scalar(delivery_query)
     if row is None:
         raise ValueError("delivery_unavailable")
-    grant = await db.get(ConnectorReplyGrant, row.reply_grant_id)
+    grant_query = select(ConnectorReplyGrant).where(ConnectorReplyGrant.id == row.reply_grant_id)
+    if lock_scope:
+        grant_query = grant_query.with_for_update()
+    grant = await db.scalar(grant_query)
     if grant is None or row.chat_id != grant.p2p_chat_id:
         raise ValueError("delivery_scope_mismatch")
-    installation, _ = await _reauthorize(db, grant)
+    installation, _ = await _reauthorize(db, grant, lock_scope=lock_scope)
     return row, installation
 
 

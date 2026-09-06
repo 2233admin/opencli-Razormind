@@ -546,25 +546,40 @@ class ConnectorConversationAccessProtocol(Protocol):
 
     def assert_sealed(self) -> None: ...
 
+    async def owns_execution_fence(self, db: AsyncSession) -> bool: ...
+
     async def reauthorize_for_finalize(self, db: AsyncSession) -> None: ...
 
     async def advance_revision_cursor(self, db: AsyncSession, *, next_revision: int) -> bool: ...
 
 
 async def _mark_connector_turn_failed(
-    db: AsyncSession, turn_id: str, *, code: str, message: str
+    db: AsyncSession,
+    access: ConnectorConversationAccessProtocol,
+    turn_id: str,
+    *,
+    code: str,
+    message: str,
+    execution_fence_lost: Callable[[], bool] | None = None,
 ) -> None:
     await db.rollback()
+    if execution_fence_lost is not None and execution_fence_lost():
+        return
     async with db.begin():
         turn = await db.scalar(
             select(AgentConversationTurn)
             .where(AgentConversationTurn.id == turn_id)
             .with_for_update()
         )
-        if turn is not None and turn.status == AgentConversationTurnStatus.RUNNING.value:
-            turn.status = AgentConversationTurnStatus.FAILED.value
-            turn.error_code = code
-            turn.error_message = _redact_error(message)
+        if turn is None or turn.status != AgentConversationTurnStatus.RUNNING.value:
+            return
+        if not await access.owns_execution_fence(db) or (
+            execution_fence_lost is not None and execution_fence_lost()
+        ):
+            return
+        turn.status = AgentConversationTurnStatus.FAILED.value
+        turn.error_code = code
+        turn.error_message = _redact_error(message)
 
 
 async def send_connector_message(
@@ -735,6 +750,7 @@ async def send_connector_message(
         await model_db.rollback()
         await _mark_connector_turn_failed(
             db,
+            access,
             turn_id,
             code=(
                 "model_unavailable"
@@ -742,17 +758,30 @@ async def send_connector_message(
                 else "model_error"
             ),
             message=str(exc),
+            execution_fence_lost=execution_fence_lost,
         )
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, "模型调用失败") from exc
     except HTTPException:
         await model_db.rollback()
         await _mark_connector_turn_failed(
-            db, turn_id, code="connector_authorization_changed", message="connector turn rejected"
+            db,
+            access,
+            turn_id,
+            code="connector_authorization_changed",
+            message="connector turn rejected",
+            execution_fence_lost=execution_fence_lost,
         )
         raise
     except Exception as exc:
         await model_db.rollback()
-        await _mark_connector_turn_failed(db, turn_id, code="model_error", message=str(exc))
+        await _mark_connector_turn_failed(
+            db,
+            access,
+            turn_id,
+            code="model_error",
+            message=str(exc),
+            execution_fence_lost=execution_fence_lost,
+        )
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, "模型调用失败") from exc
     finally:
         await model_db.close()

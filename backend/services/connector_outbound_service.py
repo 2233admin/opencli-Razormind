@@ -327,6 +327,33 @@ async def _set_fenced_state(
         return bool(result.rowcount)
 
 
+async def _payload_for_row(
+    db: AsyncSession,
+    row: ConnectorOutboundDelivery,
+    *,
+    lock_scope: bool = False,
+) -> str | bytes:
+    if row.payload_kind == "artifact_offer":
+        grant_query = select(ConnectorArtifactGrant).where(
+            ConnectorArtifactGrant.id == row.artifact_grant_id
+        )
+        if lock_scope:
+            grant_query = grant_query.with_for_update()
+        grant = await db.scalar(grant_query)
+        if grant is None or grant.status != "active":
+            raise ValueError("artifact_grant_unavailable")
+        try:
+            claim = decrypt(grant.claim_ciphertext)
+        except CredentialCryptoError as exc:
+            raise ValueError("claim_decryption_failed") from exc
+        return f"产物已授权：{grant.title}\n领取 {claim}"
+    if row.payload_kind == "text" and row.safe_text is not None:
+        return row.safe_text
+    if row.payload_kind == "file" and row.payload_bytes is not None:
+        return row.payload_bytes
+    raise ValueError("outbound_payload_invalid")
+
+
 async def _load_send_snapshot(
     session_factory: async_sessionmaker[AsyncSession], delivery_id: str
 ) -> tuple[ConnectorOutboundDelivery, Any, str | bytes]:
@@ -335,23 +362,50 @@ async def _load_send_snapshot(
     async with session_factory() as db:
         row, installation = await authorize_delivery(db, delivery_id=delivery_id)
         credentials = read_installation_credentials(installation)
-        if row.payload_kind == "artifact_offer":
-            grant = await db.get(ConnectorArtifactGrant, row.artifact_grant_id)
-            if grant is None or grant.status != "active":
-                raise ValueError("artifact_grant_unavailable")
-            try:
-                claim = decrypt(grant.claim_ciphertext)
-            except CredentialCryptoError as exc:
-                raise ValueError("claim_decryption_failed") from exc
-            payload: str | bytes = f"产物已授权：{grant.title}\n领取 {claim}"
-        elif row.payload_kind == "text" and row.safe_text is not None:
-            payload = row.safe_text
-        elif row.payload_kind == "file" and row.payload_bytes is not None:
-            payload = row.payload_bytes
-        else:
-            raise ValueError("outbound_payload_invalid")
+        payload = await _payload_for_row(db, row)
         db.expunge(row)
         return row, credentials, payload
+
+
+async def _authorize_and_mark_sending(
+    session_factory: async_sessionmaker[AsyncSession],
+    *,
+    delivery_id: str,
+    owner: str,
+    generation: int,
+    expected_snapshot: tuple[Any, ...],
+) -> tuple[ConnectorOutboundDelivery, str | bytes] | None:
+    from backend.services.connector_reply_grant_service import authorize_delivery
+
+    async with session_factory() as db:
+        fenced = await db.scalar(
+            select(ConnectorOutboundDelivery)
+            .where(
+                ConnectorOutboundDelivery.id == delivery_id,
+                ConnectorOutboundDelivery.status == "connecting",
+                ConnectorOutboundDelivery.lease_owner == owner,
+                ConnectorOutboundDelivery.lease_generation == generation,
+            )
+            .with_for_update()
+        )
+        if fenced is None:
+            return None
+        row, _ = await authorize_delivery(db, delivery_id=delivery_id, lock_scope=True)
+        payload = await _payload_for_row(db, row, lock_scope=True)
+        current_snapshot = (
+            row.request_hash,
+            row.payload_hash,
+            row.sdk_uuid,
+            row.chat_id,
+            row.reply_to_message_id,
+            row.purpose,
+        )
+        if current_snapshot != expected_snapshot:
+            raise ValueError("outbound_snapshot_changed")
+        row.status = "sending"
+        await db.commit()
+        db.expunge(row)
+        return row, payload
 
 
 async def deliver_outbound(
@@ -422,26 +476,20 @@ async def deliver_outbound(
         if lost.is_set():
             return "fence_lost"
         try:
-            fresh_row, _, fresh_payload = await _load_send_snapshot(session_factory, delivery_id)
-            immutable_snapshot = (
-                fresh_row.request_hash,
-                fresh_row.payload_hash,
-                fresh_row.sdk_uuid,
-                fresh_row.chat_id,
-                fresh_row.reply_to_message_id,
-                fresh_row.purpose,
+            authorized = await _authorize_and_mark_sending(
+                session_factory,
+                delivery_id=delivery_id,
+                owner=owner,
+                generation=generation,
+                expected_snapshot=(
+                    row.request_hash,
+                    row.payload_hash,
+                    row.sdk_uuid,
+                    row.chat_id,
+                    row.reply_to_message_id,
+                    row.purpose,
+                ),
             )
-            if immutable_snapshot != (
-                row.request_hash,
-                row.payload_hash,
-                row.sdk_uuid,
-                row.chat_id,
-                row.reply_to_message_id,
-                row.purpose,
-            ):
-                raise ValueError("outbound_snapshot_changed")
-            row = fresh_row
-            payload = fresh_payload
         except (ConnectorCredentialUnavailableError, ValueError) as exc:
             code = (
                 exc.args[0]
@@ -458,16 +506,9 @@ async def deliver_outbound(
                 error_code=code,
             )
             return "failed"
-        marked = await _set_fenced_state(
-            session_factory,
-            delivery_id=delivery_id,
-            owner=owner,
-            generation=generation,
-            expected=("connecting",),
-            state="sending",
-        )
-        if not marked:
+        if authorized is None:
             return "fence_lost"
+        row, payload = authorized
         try:
             message: Any = payload
             if row.payload_kind == "file":
