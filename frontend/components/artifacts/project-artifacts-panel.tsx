@@ -16,6 +16,7 @@ import { useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 
 import { InboxConversationThread, InboxConversationUnavailable } from '@/components/inbox/inbox-conversation-thread'
+import { ConnectorReplyGrantPanel } from '@/components/artifacts/connector-reply-grant-panel'
 import { ReportContentView } from '@/components/artifacts/report-content-view'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -248,6 +249,7 @@ export function ProjectArtifactsPanel({
                 {current.conversation_id ? (
                   <div className="mt-3"><InboxConversationThread conversationId={current.conversation_id} context={{ project_id: current.project_id, workflow_id: current.workflow_id, run_id: current.run_id, surface: 'project_artifact' }} /></div>
                 ) : <div className="mt-3"><InboxConversationUnavailable reason="missing" /></div>}
+                <ConnectorReplyGrantPanel artifact={current} open={Boolean(selectedId && selected)} />
               </section>
             ) : null}
           </div>
