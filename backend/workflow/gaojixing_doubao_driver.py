@@ -290,7 +290,11 @@ class OpenCLIDoubaoEvidenceDriver:
             return capture
 
     async def inspect_current(
-        self, *, question_id: str, question: str
+        self,
+        *,
+        question_id: str,
+        question: str,
+        reconciliation: dict[str, str] | None = None,
     ) -> dict[str, Any] | None:
         """Read the current conversation; never create a chat or submit a question."""
 
@@ -303,21 +307,20 @@ class OpenCLIDoubaoEvidenceDriver:
             if target_state is None:
                 return None
             target_id = str(target_state["target_id"])
-            expected_chat_url = target_state.get("conversation_url")
+            if target_state["phase"] == "submitted-formal":
+                expected_chat_url = target_state.get("conversation_url")
+                is_reconciliation = False
+            else:
+                confirmation = _read_reconciliation(reconciliation)
+                if confirmation is None or confirmation["target_id"] != target_id:
+                    return None
+                expected_chat_url = confirmation["chat_url"]
+                is_reconciliation = True
             targets = await self._target_lister(endpoint)
             matches = [row for row in targets if _target_id(row) == target_id]
-            if len(matches) != 1:
-                return None
-            current_url = str(matches[0].get("url") or "").strip()
-            if target_state["phase"] == "submitted-formal":
-                if current_url != expected_chat_url:
-                    return None
-            elif (
-                target_state["phase"] != "target-owned"
-                or not _verification_artifact_exists(
-                    self._target_state_root, question_id=question_id
-                )
-                or not _FORMAL_CHAT_URL.fullmatch(current_url)
+            if (
+                len(matches) != 1
+                or str(matches[0].get("url") or "").strip() != expected_chat_url
             ):
                 return None
             target_endpoint = _target_websocket_url(matches[0])
@@ -327,9 +330,7 @@ class OpenCLIDoubaoEvidenceDriver:
             if status_code:
                 return None
             chat_url = _chat_url(status_rows)
-            if chat_url != current_url or (
-                expected_chat_url is not None and chat_url != expected_chat_url
-            ):
+            if chat_url != expected_chat_url:
                 return None
             capture = await _maybe_await(
                 self._page_capture(
@@ -343,7 +344,7 @@ class OpenCLIDoubaoEvidenceDriver:
                     require_existing_page=True,
                 )
             )
-            if target_state["phase"] == "submitted-formal":
+            if not is_reconciliation:
                 return capture
             if not _completed_recovery_capture(
                 capture,
@@ -370,14 +371,6 @@ class OpenCLIDoubaoEvidenceDriver:
             )
             if final_code or _chat_url(final_rows) != chat_url:
                 return None
-            _write_target_state(
-                self._target_state_root,
-                question_id=question_id,
-                question=question,
-                target_id=target_id,
-                conversation_url=chat_url,
-                initial_chat_url=target_state.get("initial_chat_url"),
-            )
             return capture
 
 
@@ -696,32 +689,26 @@ def _read_target_state(
     }
 
 
-def _verification_artifact_exists(root: Path, *, question_id: str) -> bool:
-    if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{0,63}", question_id):
-        return False
-    state_path = _target_state_path(root, question_id)
-    try:
-        state_mtime_ns = state_path.stat().st_mtime_ns
-    except OSError:
-        return False
-    verification_root = root / "verification" / question_id
-    for pattern in (
-        "*_verification-captcha.png",
-        "*_verification-login.png",
-        "*_verification-access.png",
+def _read_reconciliation(
+    reconciliation: dict[str, str] | None,
+) -> dict[str, str] | None:
+    if not isinstance(reconciliation, dict) or set(reconciliation) != {
+        "target_id",
+        "chat_url",
+    }:
+        return None
+    target_id = reconciliation.get("target_id")
+    chat_url = reconciliation.get("chat_url")
+    if (
+        not isinstance(target_id, str)
+        or not target_id.strip()
+        or target_id != target_id.strip()
+        or not isinstance(chat_url, str)
+        or chat_url != chat_url.strip()
+        or not _FORMAL_CHAT_URL.fullmatch(chat_url)
     ):
-        for path in verification_root.glob(pattern):
-            try:
-                content = path.read_bytes()
-                expected_prefix = hashlib.sha256(content).hexdigest()[:20]
-                if (
-                    path.name.startswith(f"{expected_prefix}_verification-")
-                    and path.stat().st_mtime_ns >= state_mtime_ns
-                ):
-                    return True
-            except OSError:
-                continue
-    return False
+        return None
+    return {"target_id": target_id, "chat_url": chat_url}
 
 
 def _completed_recovery_capture(
