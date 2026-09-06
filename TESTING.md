@@ -23,6 +23,23 @@
 
 ## 环境准备
 
+### BMad 技能渲染运行时
+
+`_bmad/scripts/render_skill.py`、`config_utils.py` 及许可证恢复自官方
+[`bmad-code-org/BMAD-METHOD@beb368e5fc9b95bcec5e1de5bc7870dc15bece72`](https://github.com/bmad-code-org/BMAD-METHOD/tree/beb368e5fc9b95bcec5e1de5bc7870dc15bece72)；
+脚本保持上游原样，仅恢复这两个脚本和许可证，不代表恢复了完整 BMad 安装。
+`_bmad/config.toml` 是最小项目配置，不是找回的个人设置；不要提交私人技能覆盖文件。
+在仓库根目录渲染已安装的 build 技能：
+
+```bash
+uv run python _bmad/scripts/render_skill.py --project-root . --skill .agents/skills/bmad-build
+```
+
+生成的机器相关快照位于 `_bmad/render/`，已忽略，不应提交。此命令只验证技能渲染，
+不验证 Docker 镜像构建或容器运行。
+
+### 服务准备
+
 ```bash
 # 启动 Redis（Celery 模式需要；local 模式可跳过）
 docker compose up -d redis

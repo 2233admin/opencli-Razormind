@@ -82,6 +82,7 @@ chrome/extension-src/store-assets/
 
 # Local working artifacts (not for upstream)
 /PR-DESCRIPTION.md
+/_bmad/render/
 
 # Rust build
 odp-rs/target/
