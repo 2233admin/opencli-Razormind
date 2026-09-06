@@ -22,6 +22,7 @@ import type { ProjectRuntimeLog } from '@/lib/api/types'
 import { formatDateTime, formatRelative } from '@/lib/format'
 import { buildOperationsNodeTasks } from '@/lib/studio/operations-task-model'
 import { cn } from '@/lib/utils'
+import { extractGaojixingRecoveryCase } from '@/lib/workflow/live-run-monitor'
 import { buildRunUrl, clearRunNavigation, parseRunNavigation, shouldDiscardTraceHistoryEntry, traceCloseAction, type TraceHistoryEntry } from '@/lib/studio/run-navigation'
 
 const PAGE_SIZE = 20
@@ -94,10 +95,11 @@ export default function ProjectOperationsPage({
   const traceTotalEvents = traceQuery.data?.trace.projection.eventCount ?? selectedLog?.event_count ?? 0
   const traceHasNextPage = traceNextCursor > traceCursor && traceNextCursor < traceTotalEvents
   const traceStatus = traceQuery.data?.trace.projection.status ?? selectedLog?.status ?? null
+  const collectionRecovery = traceStatus === 'waiting' ? extractGaojixingRecoveryCase(traceEvents) : null
   const traceNodeTasks = buildOperationsNodeTasks(
     traceQuery.data?.trace.projection.nodeStates ?? [],
   )
-  const traceContext = selectedRun ? { workspace: workspaceId ?? undefined, project: projectId, workflow: selectedRun.workflowId, run: selectedRun.runId, trace: traceProjection?.traceId ?? selectedRun.traceId ?? selectedLog?.trace_id ?? undefined } : null
+  const traceContext = selectedRun ? { workspace: workspaceId ?? undefined, project: projectId, workflow: selectedRun.workflowId, run: selectedRun.runId, trace: traceProjection?.traceId ?? selectedRun.traceId ?? selectedLog?.trace_id ?? undefined, conversation: navigationContext.conversation } : null
   const snapshotRunStatus = traceProjection?.status ?? selectedLog?.status ?? null
   const snapshotRunStartAt = traceProjection?.startedAt ?? selectedLog?.started_at ?? null
   const snapshotRunEndAt = traceProjection?.updatedAt ?? selectedLog?.updated_at ?? null
@@ -252,6 +254,17 @@ export default function ProjectOperationsPage({
                 </div>
               </SheetHeader>
               <div className="space-y-5 px-4 pb-6">
+                {collectionRecovery ? (
+                  <div role="status" className="rounded-lg border border-warning/30 bg-warning/10 p-4 text-sm">
+                    <p className="font-medium">{collectionRecovery.status === 'waiting_verification' ? '豆包采集已暂停，等待页面验证' : '豆包采集已暂停，等待核对原会话'}</p>
+                    <p className="mt-2 leading-6 text-muted-foreground">
+                      {collectionRecovery.status === 'waiting_verification'
+                        ? '请在本次采集使用的浏览器页面完成验证，保留原会话。完成后从工作流运行面板继续采集，不要重新发送问题。'
+                        : '本次运行尚未确认完整采集结果。请先检查原会话与运行证据，避免重复提交同一问题。'}
+                    </p>
+                    {workflowHref ? <Link href={workflowHref} className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'mt-3')}>打开本次工作流运行</Link> : null}
+                  </div>
+                ) : null}
                 <div className="grid gap-2 sm:grid-cols-4">
                   <TraceMetric label="状态">{traceStatus ? <StatusBadge status={traceStatus} /> : '加载中…'}</TraceMetric>
                   <TraceMetric label="版本" value={traceQuery.data ? (traceQuery.data.workflow_version ? `Published v${traceQuery.data.workflow_version}` : 'Draft') : '加载中…'} />
