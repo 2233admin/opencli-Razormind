@@ -457,17 +457,19 @@ export function AgentConversationSurface({
       const result = confirmation.data?.data as Record<string, unknown> | undefined
       const resultProjectId = typeof result?.project_id === 'string' ? result.project_id : typeof proposal.args.project_id === 'string' ? proposal.args.project_id : null
       const resultWorkflowId = typeof result?.workflow_id === 'string' ? result.workflow_id : typeof proposal.args.workflow_id === 'string' ? proposal.args.workflow_id : null
-      const resultWorkspaceId = typeof result?.workspace_id === 'string' ? result.workspace_id : proposal.workspace_id ?? workspaceId
-      if (resultWorkspaceId && resultProjectId && resultWorkflowId && (proposal.tool === 'create_project' || proposal.tool === 'update_workflow_draft')) {
+      const resultWorkspaceId = typeof result?.studio_workspace_id === 'string' ? result.studio_workspace_id : typeof result?.workspace_id === 'string' ? result.workspace_id : workspaceId
+      if (resultWorkspaceId && resultProjectId && resultWorkflowId && ['create_project', 'update_workflow_draft', 'validate_workflow_draft', 'publish_workflow', 'run_managed_doubao_question'].includes(proposal.tool)) {
         await queryClient.invalidateQueries({ queryKey: ['workspace-projects', resultWorkspaceId] })
         await queryClient.invalidateQueries({ queryKey: ['project-workflows', resultWorkspaceId, resultProjectId] })
         if (requestGenerationRef.current !== requestGeneration) return
-        setCompletedResultHref(workflowDraftHref(
-          resultWorkspaceId,
-          resultProjectId,
-          resultWorkflowId,
-          sessionId,
-        ))
+        const resultRunId = typeof result?.run_id === 'string' ? result.run_id : null
+        setCompletedResultHref(resultRunId ? buildRunUrl('operations', {
+          workspace: resultWorkspaceId,
+          project: resultProjectId,
+          workflow: resultWorkflowId,
+          run: resultRunId,
+          conversation: sessionId ?? undefined,
+        }) : workflowDraftHref(resultWorkspaceId, resultProjectId, resultWorkflowId, sessionId))
       }
       setProposal(null)
       await Promise.all(proposalQueryKeys(proposalToConfirm).map((queryKey) =>

@@ -51,6 +51,12 @@ test('Agent Dock restores durable conversations and renders the explicit recent 
 })
 
 test('Agent Dock confirmation invalidates only proposal-related query keys', async () => {
+  for (const key of ['project-workflows', 'project-workflow-versions']) {
+    assert(proposalQueryKeys({ tool: 'publish_workflow', args: {} }).some((query) => query[0] === key))
+  }
+  for (const key of ['project-runtime-summary', 'project-runtime-logs', 'agent-conversations']) {
+    assert(proposalQueryKeys({ tool: 'run_managed_doubao_question', args: {} }).some((query) => query[0] === key))
+  }
   assert.deepEqual(
     proposalQueryKeys({ tool: 'toggle_source', workspace_id: 'workspace-1' }),
     [

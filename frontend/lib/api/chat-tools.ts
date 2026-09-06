@@ -16,9 +16,15 @@ export type ChatTool = {
 }
 
 export type ChatToolCatalog = {
-  version: string
+  version?: string
   tools: ChatTool[]
   source?: 'server' | 'fallback'
+}
+
+export type ChatToolContext = {
+  project_id?: string | null
+  workflow_id?: string | null
+  run_id?: string | null
 }
 
 type ChatToolCatalogResponse = {
@@ -51,9 +57,9 @@ export const LEGACY_CHAT_TOOL_CATALOG: ChatTool[] = [
 
 export const CHAT_TOOLS_QUERY_KEY = ['chat-tool-catalog'] as const
 
-export async function fetchChatToolCatalog(workspaceId?: string | null): Promise<ChatToolCatalog> {
+export async function fetchChatToolCatalog(workspaceId: string, context: ChatToolContext = {}): Promise<ChatToolCatalog> {
   const response = await apiClient.get<ChatToolCatalogResponse>('/chat/tools', {
-    params: workspaceId ? { workspace_id: workspaceId } : undefined,
+    params: { workspace_id: workspaceId, ...context },
   })
   const catalog = response.data.data
   if (!catalog || !Array.isArray(catalog.tools)) {
@@ -62,22 +68,26 @@ export async function fetchChatToolCatalog(workspaceId?: string | null): Promise
   return { ...catalog, source: 'server' }
 }
 
-export function useChatToolCatalog(workspaceId?: string | null) {
+export function useChatToolCatalog(workspaceId?: string | null, context: ChatToolContext = {}) {
   const query = useQuery({
-    queryKey: [...CHAT_TOOLS_QUERY_KEY, workspaceId ?? 'resolved'],
-    queryFn: () => fetchChatToolCatalog(workspaceId),
+    queryKey: [...CHAT_TOOLS_QUERY_KEY, workspaceId, context],
+    queryFn: () => fetchChatToolCatalog(workspaceId!, context),
+    enabled: Boolean(workspaceId),
     staleTime: 30_000,
     retry: 0,
   })
+  const legacyEndpoint = query.error instanceof Error && 'status' in query.error && query.error.status === 404
 
   return {
     catalog: query.data ?? {
       version: 'legacy-chat-contract',
-      tools: LEGACY_CHAT_TOOL_CATALOG,
+      tools: legacyEndpoint ? LEGACY_CHAT_TOOL_CATALOG : [],
       source: 'fallback' as const,
     },
     loading: query.isLoading,
     error: query.error instanceof Error ? query.error.message : null,
     serverCatalogAvailable: Boolean(query.data),
+    legacyEndpoint,
+    retry: query.refetch,
   }
 }

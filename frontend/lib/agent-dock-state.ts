@@ -28,6 +28,9 @@ const QUERY_KEYS_BY_PROPOSAL_TOOL: Readonly<Record<string, readonly (readonly un
   update_provider: [['providers']],
   create_project: [['workspace-projects']],
   update_workflow_draft: [['workspace-projects'], ['project-workflows']],
+  validate_workflow_draft: [['project-workflows']],
+  publish_workflow: [['project-workflows'], ['project-workflow-versions'], ['workspace-projects']],
+  run_managed_doubao_question: [['project-runtime-summary'], ['project-runtime-logs'], ['agent-conversations']],
 }
 
 export function proposalQueryKeys(proposal: AgentProposalLike): readonly (readonly unknown[])[] {

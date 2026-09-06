@@ -16,11 +16,6 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 
-function useWorkspaceFromUrl() {
-  const params = useSearchParams()
-  return params.get('workspace')
-}
-
 function CapabilityStatus({ readiness }: { readiness: 'runnable' | 'blocked' | 'composed' | 'plugin_required' }) {
   return (
     <span className={cn('rounded-full border px-2 py-0.5 text-[11px]', nodeCapabilityReadinessTone(readiness))}>
@@ -30,10 +25,15 @@ function CapabilityStatus({ readiness }: { readiness: 'runnable' | 'blocked' | '
 }
 
 export function AgentToolReference({ compact = false }: { compact?: boolean }) {
-  const workspaceParam = useWorkspaceFromUrl()
+  const params = useSearchParams()
+  const workspaceParam = params.get('workspace')
   const workspaces = useGovernedWorkspaces()
   const workspaceId = workspaceParam ?? (workspaces.data?.length === 1 ? workspaces.data[0].id : null)
-  const { catalog: chatCatalog, loading: chatLoading, error: chatError, serverCatalogAvailable } = useChatToolCatalog(workspaceId)
+  const { catalog: chatCatalog, loading: chatLoading, error: chatError, serverCatalogAvailable, legacyEndpoint, retry } = useChatToolCatalog(workspaceId, {
+    project_id: params.get('project'),
+    workflow_id: params.get('workflow'),
+    run_id: params.get('run'),
+  })
   const capabilities = useBackendNodeCapabilityCatalog(Boolean(workspaceId), workspaceId)
   const nodes = capabilities.catalog?.nodes ?? []
   const visibleNodes = compact ? nodes.slice(0, 4) : nodes.slice(0, 8)
@@ -57,14 +57,18 @@ export function AgentToolReference({ compact = false }: { compact?: boolean }) {
           </Badge>
         </CardHeader>
         <CardContent className="space-y-2">
-          {!serverCatalogAvailable ? (
+          {legacyEndpoint ? (
             <div className="rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-xs text-muted-foreground">
               当前服务还未返回工具目录，下面是已知聊天契约摘要；不会因此扩大实际调用范围。
             </div>
           ) : null}
-          {chatError && !chatLoading ? (
-            <p className="text-xs text-muted-foreground" role="status">服务端目录暂时不可用，已显示兼容摘要。</p>
+          {chatError && !chatLoading && !legacyEndpoint ? (
+            <div className="rounded-md border border-destructive/30 p-3 text-xs" role="alert">
+              <p>工具目录读取失败：{chatError}</p>
+              <Button size="sm" variant="outline" className="mt-2" onClick={() => void retry()}>重新读取工具</Button>
+            </div>
           ) : null}
+          {!workspaceId ? <p className="text-xs text-muted-foreground" role="status">请选择一个已授权工作区后读取对话工具。</p> : null}
           <div className={cn('grid gap-2', compact ? 'sm:grid-cols-2' : 'sm:grid-cols-2')}>
             {chatCatalog.tools.map((tool) => (
               <div key={tool.name} className={cn('rounded-md border border-border/70 bg-background/60 p-2.5', tool.available === false && 'opacity-70')}>
