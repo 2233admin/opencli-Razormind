@@ -43,6 +43,8 @@ logger = logging.getLogger(__name__)
 LEASE_DURATION = timedelta(seconds=30)
 HEARTBEAT_INTERVAL_SECONDS = 5.0
 _PUBLIC_CAPTURE_FAILURE_CODES = frozenset({
+    "cdp-http-endpoint-required", "cdp-targets-unavailable", "doubao-target-missing",
+    "doubao-target-ambiguous", "doubao-target-lost", "doubao-target-websocket-missing",
     "doubao-new-failed", "doubao-ask-failed", "doubao-status-failed",
     "formal-chat-url-missing", "page-question-not-proven",
     "opencli-json-invalid", "opencli-runtime-unavailable", "opencli-runtime-timeout",
