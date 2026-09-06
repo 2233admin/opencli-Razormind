@@ -46,6 +46,9 @@ from backend.services.connector_outbound_service import (
     delivery_status,
 )
 from backend.services.connector_reply_grant_service import reauthorize_reply_grant
+from backend.services.studio_agent_session_access import (
+    resolve_stored_agent_session_workspace,
+)
 
 CLAIM_PLACEHOLDER = "[artifact claim]"
 _CLAIM_RE = re.compile(r"^领取 ([A-Za-z0-9_-]{24,128})$")
@@ -120,6 +123,14 @@ async def _owned_reply(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Connector reply grant not found")
     conversation = await db.get(AgentConversation, reply.conversation_id)
     if conversation is None or conversation.created_by_user_id != access.user_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Connector reply grant not found")
+    scope = await resolve_stored_agent_session_workspace(
+        db,
+        identity,
+        workspace_id=conversation.workspace_id,
+        context_binding=conversation.context_binding,
+    )
+    if scope.access.user_id != access.user_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Connector reply grant not found")
     return reply, access.user_id
 

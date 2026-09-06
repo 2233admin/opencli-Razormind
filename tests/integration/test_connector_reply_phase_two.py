@@ -139,10 +139,6 @@ def _identity() -> RequestIdentity:
     )
 
 
-def _oidc_identity() -> RequestIdentity:
-    return RequestIdentity(subject="p2-subject", auth_method="oidc")
-
-
 def _other_identity() -> RequestIdentity:
     return RequestIdentity(
         subject="p2-other-subject",
@@ -330,7 +326,22 @@ async def test_reply_grant_idempotency_active_slot_and_rebuild(p2_scope):
 
 
 @pytest.mark.asyncio
-async def test_oidc_identity_cannot_create_reply_grant_for_studio_conversation(p2_scope):
+@pytest.mark.parametrize(
+    "identity",
+    (
+        RequestIdentity(subject="p2-subject", auth_method="oidc"),
+        RequestIdentity(
+            subject="p2-subject",
+            auth_method="oidc",
+            is_platform_admin=True,
+        ),
+        RequestIdentity(subject="p2-subject", auth_method="local"),
+    ),
+    ids=("oidc-member", "oidc-platform-admin-claim", "local-nonadmin"),
+)
+async def test_untrusted_identity_cannot_create_reply_grant_for_studio_conversation(
+    p2_scope, identity
+):
     factory = p2_scope
     async with factory() as db:
         with pytest.raises(HTTPException) as raised:
@@ -338,7 +349,7 @@ async def test_oidc_identity_cannot_create_reply_grant_for_studio_conversation(p
                 db,
                 "p2-governed",
                 "p2-project",
-                _oidc_identity(),
+                identity,
                 _create("oidc-studio-denied"),
             )
         assert raised.value.status_code == 403
@@ -348,12 +359,143 @@ async def test_oidc_identity_cannot_create_reply_grant_for_studio_conversation(p
 
 
 @pytest.mark.asyncio
-async def test_local_admin_can_create_reply_grant_for_studio_conversation(p2_scope):
+@pytest.mark.parametrize("auth_method", ("local", "bootstrap"))
+async def test_local_admin_can_create_reply_grant_for_studio_conversation(p2_scope, auth_method):
     factory = p2_scope
-    reply, activation = await _grant(factory)
+    identity = RequestIdentity(
+        subject="p2-subject",
+        is_platform_admin=True,
+        auth_method=auth_method,
+    )
+    async with factory() as db:
+        created = await grants.create_reply_grant(
+            db,
+            "p2-governed",
+            "p2-project",
+            identity,
+            _create(f"{auth_method}-studio-admin"),
+        )
+    async with factory() as db:
+        reply = await db.scalar(select(ConnectorReplyGrant))
+        activation = await db.scalar(select(ConnectorOutboundDelivery))
+        assert reply is not None and activation is not None
+    assert created.created is True
     assert reply.created_by_user_id == "p2-user"
     assert reply.studio_workspace_id == "p2-studio"
     assert activation.purpose == "activation"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "identity",
+    (
+        RequestIdentity(subject="p2-subject", auth_method="oidc"),
+        RequestIdentity(
+            subject="p2-subject",
+            auth_method="oidc",
+            is_platform_admin=True,
+        ),
+        RequestIdentity(subject="p2-subject", auth_method="local"),
+    ),
+    ids=("oidc-member", "oidc-platform-admin-claim", "local-nonadmin"),
+)
+async def test_untrusted_identity_cannot_replay_read_or_revoke_studio_grants(
+    p2_scope, monkeypatch, identity
+):
+    factory = p2_scope
+    reply, _ = await _grant(factory)
+    _install_artifact_detail(monkeypatch, _artifact_detail())
+    artifact_body = ConnectorArtifactGrantCreate(
+        request_id="human-gate-artifact",
+        artifact_public_id="session:artifact",
+        workflow_id="p2-workflow",
+        run_id="p2-run",
+    )
+    async with factory() as db:
+        created_artifact = await artifacts.create_artifact_grant(
+            db,
+            "p2-governed",
+            "p2-project",
+            reply.public_id,
+            _identity(),
+            artifact_body,
+        )
+
+    operations = (
+        lambda db: grants.create_reply_grant(
+            db,
+            "p2-governed",
+            "p2-project",
+            identity,
+            _create(),
+        ),
+        lambda db: grants.list_reply_grants(
+            db,
+            "p2-governed",
+            "p2-project",
+            "p2-conversation",
+            identity,
+        ),
+        lambda db: grants.get_reply_grant(
+            db,
+            "p2-governed",
+            "p2-project",
+            reply.public_id,
+            identity,
+        ),
+        lambda db: grants.revoke_reply_grant(
+            db,
+            "p2-governed",
+            "p2-project",
+            reply.public_id,
+            identity,
+        ),
+        lambda db: artifacts.create_artifact_grant(
+            db,
+            "p2-governed",
+            "p2-project",
+            reply.public_id,
+            identity,
+            artifact_body,
+        ),
+        lambda db: artifacts.list_artifact_grants(
+            db,
+            "p2-governed",
+            "p2-project",
+            reply.public_id,
+            identity,
+        ),
+        lambda db: artifacts.get_artifact_grant(
+            db,
+            "p2-governed",
+            "p2-project",
+            reply.public_id,
+            created_artifact.artifact_grant_public_id,
+            identity,
+        ),
+        lambda db: artifacts.revoke_artifact_grant(
+            db,
+            "p2-governed",
+            "p2-project",
+            reply.public_id,
+            created_artifact.artifact_grant_public_id,
+            identity,
+        ),
+    )
+    for operation in operations:
+        async with factory() as db:
+            with pytest.raises(HTTPException) as raised:
+                await operation(db)
+            assert raised.value.status_code == 403
+            await db.rollback()
+    async with factory() as db:
+        stored_reply = await db.get(ConnectorReplyGrant, reply.id)
+        stored_artifact = await db.scalar(select(ConnectorArtifactGrant))
+        assert stored_reply is not None and stored_reply.status == "active"
+        assert stored_artifact is not None and stored_artifact.status == "active"
+        assert await db.scalar(select(func.count()).select_from(ConnectorReplyGrant)) == 1
+        assert await db.scalar(select(func.count()).select_from(ConnectorArtifactGrant)) == 1
+        assert await db.scalar(select(func.count()).select_from(ConnectorOutboundDelivery)) == 2
 
 
 @pytest.mark.asyncio

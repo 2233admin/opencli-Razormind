@@ -47,6 +47,9 @@ from backend.services.connector_installation_service import (
     read_installation_credentials,
 )
 from backend.services.connector_outbound_service import create_text_delivery, delivery_status
+from backend.services.studio_agent_session_access import (
+    resolve_stored_agent_session_workspace,
+)
 
 _SEAL = object()
 
@@ -84,6 +87,25 @@ def _active_slot(workspace_id: str, conversation_id: str, user_id: str) -> str:
     return hashlib.sha256(
         f"reply-slot-v1\0{workspace_id}\0{conversation_id}\0{user_id}".encode()
     ).hexdigest()
+
+
+async def _require_human_conversation_access(
+    db: AsyncSession,
+    *,
+    identity: RequestIdentity,
+    conversation: AgentConversation,
+    expected_user_id: str,
+) -> None:
+    """Apply the existing Studio human-entry gate without affecting connector workers."""
+
+    scope = await resolve_stored_agent_session_workspace(
+        db,
+        identity,
+        workspace_id=conversation.workspace_id,
+        context_binding=conversation.context_binding,
+    )
+    if scope.access.user_id != expected_user_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Agent conversation not found")
 
 
 async def _require_ready() -> None:
@@ -153,6 +175,12 @@ async def _owned_grant(
     conversation = await db.get(AgentConversation, row.conversation_id)
     if conversation is None or conversation.created_by_user_id != access.user_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Connector reply grant not found")
+    await _require_human_conversation_access(
+        db,
+        identity=identity,
+        conversation=conversation,
+        expected_user_id=access.user_id,
+    )
     return row, access.user_id
 
 
@@ -177,6 +205,15 @@ async def create_reply_grant(
         )
     )
     if existing is not None:
+        conversation = await db.get(AgentConversation, existing.conversation_id)
+        if conversation is None or conversation.created_by_user_id != access.user_id:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Agent conversation not found")
+        await _require_human_conversation_access(
+            db,
+            identity=identity,
+            conversation=conversation,
+            expected_user_id=access.user_id,
+        )
         if existing.create_request_hash != request_hash:
             raise HTTPException(status.HTTP_409_CONFLICT, "idempotency_key_reused")
         result = await _read(db, existing, created=False)
@@ -222,6 +259,12 @@ async def create_reply_grant(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Agent conversation not found")
     if conversation.status != AgentConversationStatus.ACTIVE.value:
         raise HTTPException(status.HTTP_409_CONFLICT, "Agent conversation is closed")
+    await _require_human_conversation_access(
+        db,
+        identity=identity,
+        conversation=conversation,
+        expected_user_id=access.user_id,
+    )
     raw_context = (
         conversation.context_binding if isinstance(conversation.context_binding, dict) else {}
     )
@@ -369,6 +412,12 @@ async def list_reply_grants(
     )
     if conversation is None or conversation.context_binding.get("project_id") != project_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Agent conversation not found")
+    await _require_human_conversation_access(
+        db,
+        identity=identity,
+        conversation=conversation,
+        expected_user_id=access.user_id,
+    )
     rows = list(
         await db.scalars(
             select(ConnectorReplyGrant)
