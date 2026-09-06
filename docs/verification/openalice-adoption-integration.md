@@ -115,3 +115,13 @@ Sol 已在干净的 `codex/openalice-replies-20260906`（基线 `4befc988`）开
 root 的 `6de34f57` 准备了隔离 P2 浏览器环境。它故意使用不同的 governed 与 Studio Workspace ID，通过真实生产 connector lifespan、HTTP、SQLite 和固定 SDK 入站检查范围映射；仅现有 chat 执行边界和 SDK 外发网络使用本地替身。外发观察端点仅由测试 runner 注册，限制本机与测试 token，记录仅存于临时进程内，不进入产品路由。共享 fixture 原有 HTTP 完整旅程 1 项回归、Ruff、Node 语法及定向 ESLint 通过；默认 Playwright 配置保留一个原有警告。
 
 实际 P2 前后端尚待整合，新的回复/领取浏览器旅程未运行，不能将测试环境准备视为功能验收。此时 8046 健康接口和 8047 `/studio` 均返回 200，现有用户预览继续可用。
+
+## P2 第一固定版本复核
+
+后端 `69eb63dd` 整合为 `97bb7fbd`，root 在 `6cc06639` 注册模型；前端 `fe38389a` 整合为 `8c05f305`。root 独立复跑 P2/迁移/生命周期 26 项，以及原会话/P1/实际应用 callback 回归 60 项，全部通过；完整 TypeScript 和前端修改范围 ESLint 通过。SQLite 清理测试对新表的循环外键发出排序警告，独立迁移 upgrade/downgrade 断言通过。
+
+真实临时 HTTP 服务使用生产 connector 生命周期，实际 readiness 和本人 grant 列表读取通过。root 在 `f0fdee1d` 修复仅测试 observer 被最后 MCP root mount 遮蔽的顺序问题；实测测试 token 返回 200，匿名返回 403。独立 reviewer 接受 fixture 隔离；固定 adapter 在调用时导入可替换 SDK 类，没有提前缓存第二条发送路径。
+
+[固定版本审查记录](https://github.com/2233admin/opencli-Razormind/issues/125#issuecomment-5556053023)为 REVISE：后端须修正旧 worker 无 fence 失败写入和撤销后 artifact receipt 永久 processing；前端须修正领取 detail 撤销缓存、最终交付轮询和 failed 新授权，并补实际 redeem/revoke 浏览器闭环。原执行者按原 ownership 修复，独立 reviewer 随后复审。测试通过尚不等于本版本可验收。
+
+为使现有预览读取新接口，8046 在 connector 开关均显式关闭、lifespan off 下重启。仅预览 SQLite 应用了专属 P2 connector schema：事前使用 SQLite backup 保留副本，前后所有非 connector 模拟记录的 dump hash 相同；原业务数据库及服务未动。临时 worker 检查端口 8054 已停止，8047 用户预览继续运行。回复和领取执行仍待修正及完整验收，不启用真实外发。
