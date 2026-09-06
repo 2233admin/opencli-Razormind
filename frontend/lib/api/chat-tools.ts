@@ -17,6 +17,8 @@ export type ChatTool = {
 
 export type ChatToolCatalog = {
   version?: string
+  workspace_id?: string
+  studio_workspace_id?: string | null
   tools: ChatTool[]
   source?: 'server' | 'fallback'
 }

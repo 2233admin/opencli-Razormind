@@ -34,7 +34,10 @@ export function AgentToolReference({ compact = false }: { compact?: boolean }) {
     workflow_id: params.get('workflow'),
     run_id: params.get('run'),
   })
-  const capabilities = useBackendNodeCapabilityCatalog(Boolean(workspaceId), workspaceId)
+  const capabilityWorkspaceId = chatCatalog.workspace_id
+    ?? workspaces.data?.find((workspace) => workspace.id === workspaceId)?.id
+    ?? null
+  const capabilities = useBackendNodeCapabilityCatalog(Boolean(capabilityWorkspaceId), capabilityWorkspaceId)
   const nodes = capabilities.catalog?.nodes ?? []
   const visibleNodes = compact ? nodes.slice(0, 4) : nodes.slice(0, 8)
 
@@ -123,7 +126,7 @@ export function AgentToolReference({ compact = false }: { compact?: boolean }) {
           ) : null}
           {capabilities.loading ? <p className="text-xs text-muted-foreground" role="status">正在读取当前 Workspace 的能力目录…</p> : null}
           {capabilities.error ? <p className="text-xs text-destructive" role="alert">能力目录读取失败：{capabilities.error}</p> : null}
-          {!capabilities.loading && !capabilities.error && workspaceId && visibleNodes.length === 0 ? (
+          {!capabilities.loading && !capabilities.error && capabilityWorkspaceId && visibleNodes.length === 0 ? (
             <div className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">当前 Workspace 暂无可展示的工作流能力。</div>
           ) : null}
           {visibleNodes.map((node) => (
@@ -141,7 +144,7 @@ export function AgentToolReference({ compact = false }: { compact?: boolean }) {
           ))}
           {nodes.length > visibleNodes.length ? <p className="text-[11px] text-muted-foreground">还有 {nodes.length - visibleNodes.length} 项能力，前往目录查看完整状态。</p> : null}
           <div className="flex flex-wrap gap-2 pt-1">
-            <Button size="sm" variant="outline" nativeButton={false} render={<Link href={workspaceId ? `/plugins?tab=capabilities&type=tool&workspace=${encodeURIComponent(workspaceId)}` : '/plugins?tab=capabilities&type=tool'} />}>
+            <Button size="sm" variant="outline" nativeButton={false} render={<Link href={capabilityWorkspaceId ? `/plugins?tab=capabilities&type=tool&workspace=${encodeURIComponent(capabilityWorkspaceId)}` : '/plugins?tab=capabilities&type=tool'} />}>
               查看完整能力目录
               <ArrowRight aria-hidden />
             </Button>
