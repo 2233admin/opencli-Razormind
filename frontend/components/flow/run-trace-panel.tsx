@@ -710,9 +710,9 @@ export function RunTracePanel({
               {gaojixingRecoveryCase ? (
                 <div className="mt-3 rounded-md border border-amber-500/30 bg-amber-500/10 p-3">
                   <p className="text-xs font-medium">{gaojixingRecoveryCase.status === 'waiting_verification' ? '需要完成页面验证' : '需要核对原会话'}</p>
-                  <p className="mt-1 break-all font-mono text-[10px] text-muted-foreground">
+                  {gaojixingRecoveryCase.artifactRef ? <p className="mt-1 break-all font-mono text-[10px] text-muted-foreground">
                     {gaojixingRecoveryCase.artifactRef}
-                  </p>
+                  </p> : null}
                   <label htmlFor="doubao-recovery-chat-url" className="mt-3 block text-xs font-medium">验证后的豆包会话链接（可选）</label>
                   <Input id="doubao-recovery-chat-url" type="url" className="mt-1" placeholder="https://www.doubao.com/chat/…" value={recoveryChatUrl}
                     disabled={isResumingGaojixing} aria-invalid={invalidRecoveryChatUrl} aria-describedby="doubao-recovery-url-help"

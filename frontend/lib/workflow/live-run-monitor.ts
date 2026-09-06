@@ -18,7 +18,7 @@ export type GaojixingRecoveryCase = {
   status: "waiting_verification" | "waiting_reconciliation"
   action?: string
   kind?: string
-  artifactRef: string
+  artifactRef: string | null
 }
 
 function record(value: unknown): Record<string, unknown> | null {
@@ -72,7 +72,7 @@ export function extractGaojixingRecoveryCase(
         ?? opaqueArtifactRef(recoveryCase?.artifactRef)
         ?? evidence.map((item) => opaqueArtifactRef(record(item)?.artifactRef)).find(Boolean)
         ?? null
-      if (!artifactRef) return null
+      if (!artifactRef && status === "waiting_verification") return null
       return {
         status,
         ...(typeof recoveryCase?.action === "string" ? { action: recoveryCase.action } : {}),
