@@ -18,6 +18,7 @@ SEEDED_WITH_MANIFEST = {
     "ecommerce/taobao-product-reviews",
     "ecommerce/taobao-shop-catalog",
     "search-research/google-search-serp",
+    "video-platforms/kuaishou-search",
 }
 
 

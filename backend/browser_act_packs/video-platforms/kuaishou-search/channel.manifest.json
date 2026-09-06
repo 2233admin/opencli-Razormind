@@ -1,0 +1,15 @@
+{
+  "domain": "video-platforms",
+  "capability": "kuaishou-search",
+  "param_schema": [
+    {"name": "query", "required": true},
+    {"name": "max_results", "required": false, "default": "10"}
+  ],
+  "steps": [
+    {"op": "navigate", "url_template": "https://www.kuaishou.com/search/video?searchKey={query}"},
+    {"op": "wait", "wait_mode": "stable"},
+    {"op": "eval_script", "script": "scripts/extract-search.py", "args": ["--max-results", "{max_results}"]}
+  ],
+  "pagination": {"mode": "none"},
+  "success": {"min_count": 1, "required_field": "url"}
+}
