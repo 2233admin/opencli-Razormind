@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { createCipheriv, createHash, randomBytes } from 'node:crypto'
+import { signedEvent } from './openalice-workspace-support/feishu-event.mjs'
 
 const TOKEN = process.env.OPENALICE_CONNECTOR_E2E_TOKEN ?? 'openalice-e2e-token'
 const WORKSPACE_ID = process.env.OPENALICE_CONNECTOR_E2E_WORKSPACE ?? 'openalice-e2e-workspace'
@@ -19,28 +19,6 @@ async function apiJson(page, pathname, options = {}) {
 
 function installationPath() {
   return `/api/v1/workspaces/${encodeURIComponent(WORKSPACE_ID)}/connector-installations`
-}
-
-// Exercise the mounted callback and real pinned SDK with local dummy keys.
-// No request reaches Feishu and no browser response is intercepted.
-function signedEvent(encryptKey, payload) {
-  const iv = randomBytes(16)
-  const key = createHash('sha256').update(encryptKey).digest()
-  const cipher = createCipheriv('aes-256-cbc', key, iv)
-  const encrypted = Buffer.concat([iv, cipher.update(JSON.stringify(payload), 'utf8'), cipher.final()])
-  const body = JSON.stringify({ encrypt: encrypted.toString('base64') })
-  const timestamp = Math.floor(Date.now() / 1000).toString()
-  const nonce = randomBytes(12).toString('hex')
-  const signature = createHash('sha256').update(timestamp + nonce + encryptKey + body).digest('hex')
-  return {
-    data: body,
-    headers: {
-      'Content-Type': 'application/json',
-      'x-lark-request-timestamp': timestamp,
-      'x-lark-request-nonce': nonce,
-      'x-lark-signature': signature,
-    },
-  }
 }
 
 test('installs a real workspace connector, reads health and binding status, and stays scoped', async ({ page }) => {

@@ -12,6 +12,7 @@ from pathlib import Path
 def configure_environment(db_path: Path) -> None:
     from cryptography.fernet import Fernet
 
+    connector_enabled = os.environ.get("OPENALICE_CONNECTOR_P2_E2E") == "1"
     os.environ.update(
         {
             "DATABASE_URL": f"sqlite+aiosqlite:///{db_path.resolve().as_posix()}",
@@ -19,6 +20,8 @@ def configure_environment(db_path: Path) -> None:
             "BOOTSTRAP_ADMIN_TOKEN": "openalice-e2e-token",
             "SECRET_KEY": "openalice-e2e-secret-key-012345678901234567890123",
             "CREDENTIAL_ENCRYPTION_KEY": Fernet.generate_key().decode(),
+            "CONNECTOR_REPLY_ENABLED": str(connector_enabled).lower(),
+            "CONNECTOR_ARTIFACT_DELIVERY_ENABLED": str(connector_enabled).lower(),
             "WORKFLOW_PLUGINS": "",
             "TASK_EXECUTOR": "local",
         }
@@ -61,14 +64,22 @@ def main() -> None:
         sys.path.insert(0, str(root))
     configure_environment(args.db)
 
-    from tests.fixtures.openalice_workspace.seed import seed_database
+    from tests.fixtures.openalice_workspace.seed import WORKSPACE_ID, seed_database
 
     args.db.parent.mkdir(parents=True, exist_ok=True)
-    asyncio.run(seed_database(args.db))
+    connector_delivery = os.environ.get("OPENALICE_CONNECTOR_P2_E2E") == "1"
+    studio_workspace_id = "openalice-e2e-studio" if connector_delivery else WORKSPACE_ID
+    asyncio.run(seed_database(args.db, studio_workspace_id=studio_workspace_id))
     if os.environ.get("OPENALICE_CONNECTOR_E2E") == "1":
         from tests.fixtures.openalice_workspace.connectors import seed_connector_scopes
 
         asyncio.run(seed_connector_scopes(args.db))
+    if connector_delivery:
+        from tests.fixtures.openalice_workspace.connector_delivery import (
+            seed_delivery_installation,
+        )
+
+        asyncio.run(seed_delivery_installation(args.db))
 
     from backend.api.v1 import chat
 
@@ -76,11 +87,19 @@ def main() -> None:
 
     import uvicorn
 
+    application = "backend.main:app"
+    if connector_delivery:
+        from backend.main import app
+        from tests.fixtures.openalice_workspace.connector_delivery import configure_delivery_app
+
+        configure_delivery_app(app)
+        application = app
+
     uvicorn.run(
-        "backend.main:app",
+        application,
         host="127.0.0.1",
         port=args.port,
-        lifespan="off",
+        lifespan="on" if connector_delivery else "off",
         log_level="warning",
     )
 

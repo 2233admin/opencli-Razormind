@@ -52,7 +52,9 @@ def _hash(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
-def _projection(*, workflow_id: str, run_id: str, batch_id: str, updated_at: datetime) -> dict[str, Any]:
+def _projection(
+    *, workflow_id: str, run_id: str, batch_id: str, updated_at: datetime
+) -> dict[str, Any]:
     timestamp = updated_at.isoformat()
     return {
         "workflowId": workflow_id,
@@ -85,7 +87,9 @@ def _projection(*, workflow_id: str, run_id: str, batch_id: str, updated_at: dat
     }
 
 
-async def seed_database(db_path: str | Path) -> dict[str, str]:
+async def seed_database(
+    db_path: str | Path, *, studio_workspace_id: str = WORKSPACE_ID
+) -> dict[str, str]:
     """Create tables and persist the fixed workspace into *db_path*.
 
     Imports are delayed so the standalone backend runner can set DATABASE_URL,
@@ -145,7 +149,7 @@ async def seed_database(db_path: str | Path) -> dict[str, str]:
             slug="openalice-e2e-workspace",
         )
         studio_workspace = StudioWorkspace(
-            id=WORKSPACE_ID,
+            id=studio_workspace_id,
             name="OpenAlice E2E Workspace",
             slug="openalice-e2e-studio",
         )
@@ -170,7 +174,7 @@ async def seed_database(db_path: str | Path) -> dict[str, str]:
 
         project_alpha = StudioProject(
             id=PROJECT_ALPHA,
-            workspace_id=WORKSPACE_ID,
+            workspace_id=studio_workspace_id,
             name="Alpha persisted project",
             slug="openalice-alpha",
             description="Two real persisted runs for scoping checks.",
@@ -179,7 +183,7 @@ async def seed_database(db_path: str | Path) -> dict[str, str]:
         )
         project_beta = StudioProject(
             id=PROJECT_BETA,
-            workspace_id=WORKSPACE_ID,
+            workspace_id=studio_workspace_id,
             name="Beta isolated project",
             slug="openalice-beta",
             description="A second project used to prove project scoping.",
@@ -320,7 +324,11 @@ async def seed_database(db_path: str | Path) -> dict[str, str]:
                     "content": "# Alpha run one\n\nAlpha report body",
                     "summary": "Persisted Alpha run one output",
                 },
-                {"source": "openalice-e2e", "run_id": RUN_ALPHA_ONE, "conversation_id": CONVERSATION_ALPHA_ACTIVE},
+                {
+                    "source": "openalice-e2e",
+                    "run_id": RUN_ALPHA_ONE,
+                    "conversation_id": CONVERSATION_ALPHA_ACTIVE,
+                },
                 BASE_TIME,
             ),
             (
@@ -332,7 +340,11 @@ async def seed_database(db_path: str | Path) -> dict[str, str]:
                     "media_type": "text/markdown",
                     "content": "# Alpha run two\n\nClosed conversation output",
                 },
-                {"source": "openalice-e2e", "run_id": RUN_ALPHA_TWO, "conversation_id": CONVERSATION_ALPHA_CLOSED},
+                {
+                    "source": "openalice-e2e",
+                    "run_id": RUN_ALPHA_TWO,
+                    "conversation_id": CONVERSATION_ALPHA_CLOSED,
+                },
                 BASE_TIME + timedelta(minutes=2),
             ),
             (
@@ -419,9 +431,11 @@ async def seed_database(db_path: str | Path) -> dict[str, str]:
                 "Alpha run two 已关闭",
             ),
         ]
-        for conversation_id, title, status, project_id, workflow_id, run_id, created_at, reply in conversation_rows:
+        for (
+            conversation_id, title, status, project_id, workflow_id, run_id, created_at, reply
+        ) in conversation_rows:
             binding = {
-                "studio_workspace_id": WORKSPACE_ID,
+                "studio_workspace_id": studio_workspace_id,
                 "project_id": project_id,
                 "workflow_id": workflow_id,
                 "run_id": run_id,
