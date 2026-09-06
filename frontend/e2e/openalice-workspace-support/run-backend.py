@@ -24,6 +24,10 @@ def configure_environment(db_path: Path) -> None:
             "CONNECTOR_ARTIFACT_DELIVERY_ENABLED": str(connector_enabled).lower(),
             "WORKFLOW_PLUGINS": "",
             "TASK_EXECUTOR": "local",
+            "AGENT_CONVERSATION_EXECUTION_MODE": (
+                "local_single_process" if os.environ.get("OPENALICE_CHAT_E2E") == "1"
+                else os.environ.get("AGENT_CONVERSATION_EXECUTION_MODE", "disabled")
+            ),
         }
     )
 
@@ -47,9 +51,47 @@ async def deterministic_chat(
     from backend.schemas.common import ApiResponse
 
     latest = body.messages[-1].content if body.messages else ""
+    if os.environ.get("OPENALICE_CHAT_E2E") == "1":
+        await chat._emit_activity("tool.started", "读取会话资料", "测试模型边界正在处理本轮输入")
+        if "[slow]" in latest:
+            # Slow only the model seam to permit a real browser disconnect.
+            await asyncio.sleep(6)
+        await chat._emit_activity("tool.completed", "资料读取完成", "本轮工具处理完成")
+        return ApiResponse.ok(chat.ChatReply(
+            type="message",
+            content=f"E2E reply ({len(body.messages)} messages, {body.model_id}): {latest}",
+        ))
     return ApiResponse.ok(
         chat.ChatReply(type="message", content=f"Deterministic E2E reply: {latest}")
     )
+
+
+async def seed_chat_target() -> None:
+    """Seed only the isolated SQLite acceptance DB with a selectable provider."""
+    from backend.database import AsyncSessionLocal
+    from backend.models.provider import ModelProvider
+    from backend.models.provider_model import ProviderModel
+
+    async with AsyncSessionLocal() as session:
+        provider = ModelProvider(
+            name="Deterministic chat provider",
+            provider_type="openai",
+            base_url="http://deterministic.invalid/v1",
+            api_key=None,
+            default_model="deterministic-chat",
+            enabled=True,
+        )
+        session.add(provider)
+        await session.flush()
+        session.add(ProviderModel(
+            provider_id=provider.id,
+            model_id="deterministic-chat",
+            model_type="llm",
+            capabilities={"tools": True},
+            source="manual",
+            enabled=True,
+        ))
+        await session.commit()
 
 
 def main() -> None:
@@ -68,8 +110,14 @@ def main() -> None:
 
     args.db.parent.mkdir(parents=True, exist_ok=True)
     connector_delivery = os.environ.get("OPENALICE_CONNECTOR_P2_E2E") == "1"
-    studio_workspace_id = "openalice-e2e-studio" if connector_delivery else WORKSPACE_ID
+    studio_workspace_id = (
+        "openalice-e2e-studio"
+        if connector_delivery or os.environ.get("OPENALICE_CHAT_E2E") == "1"
+        else WORKSPACE_ID
+    )
     asyncio.run(seed_database(args.db, studio_workspace_id=studio_workspace_id))
+    if os.environ.get("OPENALICE_CHAT_E2E") == "1":
+        asyncio.run(seed_chat_target())
     if os.environ.get("OPENALICE_CONNECTOR_E2E") == "1":
         from tests.fixtures.openalice_workspace.connectors import seed_connector_scopes
 

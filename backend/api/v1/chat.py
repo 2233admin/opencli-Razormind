@@ -37,6 +37,7 @@ from backend.llm.base import LlmAdapterError, classify_retryable
 from backend.llm.resolver import ResolverError, resolver
 from backend.models.agent_run import AgentRun, AgentRunEvent, AgentSession
 from backend.models.provider import ModelProvider
+from backend.models.provider_model import ProviderModel
 from backend.schemas import workflow as workflow_schemas
 from backend.schemas.common import ApiResponse
 from backend.security.identity import RequestIdentity, get_request_identity
@@ -456,6 +457,7 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     messages: list[ChatMessage]
     provider_id: str | None = None
+    model_id: str | None = None
     session_id: str | None = None
     workspace_id: str | None = None
     context: dict[str, Any] | None = None
@@ -529,6 +531,8 @@ async def _create_durable_run(body: ChatRequest, identity: RequestIdentity | Non
             request_payload={
                 "messages": [message.model_dump() for message in body.messages],
                 "context": body.context or {},
+                "provider_id": body.provider_id,
+                "model_id": body.model_id,
             },
         )
         session.add(run)
@@ -1084,7 +1088,7 @@ async def _chat_single_provider(
     """
     provider = await _pick_provider(db, provider_id)
     client = await _build_client(provider)
-    model = provider.default_model or "gpt-4o-mini"
+    model = await _resolve_provider_model(db, provider, body.model_id)
     result = await _chat_with_client(
         client,
         model,
@@ -1097,6 +1101,35 @@ async def _chat_single_provider(
     return ApiResponse.ok(result.reply)
 
 
+async def _resolve_provider_model(
+    db: AsyncSession,
+    provider: ModelProvider,
+    requested_model_id: str | None,
+) -> str:
+    """Validate an explicit model against the selected provider's enabled catalog.
+
+    The provider default remains a compatibility fallback for existing callers,
+    including installations that have not synchronized a model catalog yet.
+    """
+
+    if requested_model_id is None:
+        return provider.default_model or "gpt-4o-mini"
+    model = await db.scalar(
+        select(ProviderModel).where(
+            ProviderModel.provider_id == provider.id,
+            ProviderModel.model_id == requested_model_id,
+            ProviderModel.model_type == "llm",
+            ProviderModel.enabled.is_(True),
+        )
+    )
+    if model is None:
+        raise HTTPException(
+            status_code=400,
+            detail="指定的模型不属于所选 provider 或未启用",
+        )
+    return model.model_id
+
+
 async def run_chat_request(
     db: AsyncSession,
     body: ChatRequest,
@@ -1106,6 +1139,8 @@ async def run_chat_request(
     proposal_provenance: ProposalProvenance | None = None,
 ) -> ApiResponse:
     """Execute the existing chat provider/tool loop for persistent sessions."""
+    if body.model_id and not body.provider_id:
+        raise HTTPException(status_code=400, detail="显式模型必须绑定到 provider")
     if body.provider_id or not await resolver.has_candidates(db, "chat"):
         return await _chat_single_provider(
             db,

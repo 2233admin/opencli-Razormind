@@ -45,7 +45,8 @@ rootClient.interceptors.request.use(attachAuthHeaders)
 
 // Plan IR issue 07: a 422 from the Plans API carries a node-anchored error
 // LIST in `detail` (backend.plan_ir.validation.PlanValidationError.to_dict()
-// shape), not a string. Every other endpoint's `detail` is a string or absent.
+// shape), not a string. Conversation errors can instead carry a dictionary
+// with a public message and recovery code.
 // Stringifying `detail` unconditionally (the old behavior) turned that list
 // into a useless comma-joined blob for every caller and threw away the
 // node_id/edge_id anchors the canvas needs to render errors in place — so
@@ -70,15 +71,18 @@ const normalizeApiError = (err: unknown) => {
     }
     const detail = err.response?.data?.detail
     const detailIsList = Array.isArray(detail)
+    const detailMessage = detail && typeof detail === 'object' && !detailIsList
+      ? (typeof detail.message === 'string' ? detail.message : undefined)
+      : detail
     const message =
-      err.response?.data?.error || (detailIsList ? undefined : detail) || err.message || 'Unknown error'
+      err.response?.data?.error || (detailIsList ? undefined : detailMessage) || err.message || 'Unknown error'
     const normalized = new Error(message) as Error & {
       code?: string
       detail?: unknown
       fleetTransportCredentialAttached?: boolean
       status?: number
     }
-    if (detailIsList) normalized.detail = detail
+    if (detailIsList || (detail && typeof detail === 'object')) normalized.detail = detail
     if (typeof responseCode === 'string') normalized.code = responseCode
     normalized.fleetTransportCredentialAttached = fleetTransportCredentialAttached
     normalized.status = err.response?.status

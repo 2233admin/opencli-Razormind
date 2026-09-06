@@ -43,7 +43,6 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 
 
-
 def _read_chrome_endpoints() -> list[str]:
     """Read AGENT_POOL_ENDPOINTS from the .env file directly.
 
@@ -115,6 +114,21 @@ async def lifespan(app: FastAPI):
     mcp_lifespan = mcp_http_app.router.lifespan_context(mcp_http_app)
     await mcp_lifespan.__aenter__()
     await run_migrations()
+    from backend.services import agent_conversation_run_service
+
+    conversation_background_enabled = (
+        agent_conversation_run_service.validate_background_execution_settings(
+            app.state.connector_settings
+        )
+    )
+    if conversation_background_enabled:
+        from backend.database import AsyncSessionLocal
+
+        async with AsyncSessionLocal() as conversation_db:
+            recovered_conversations = await agent_conversation_run_service.recover_interrupted_runs(
+                conversation_db
+            )
+        logger.info("Marked %d stale Agent conversation runs interrupted", recovered_conversations)
     await app.state.workflow_plugins.start()
     # Re-apply logging config: alembic resets root logger level to WARNING during migrations
     # and uvicorn's dictConfig disables pre-existing loggers
@@ -254,6 +268,7 @@ async def lifespan(app: FastAPI):
             yield
     finally:
         # Also clean up existing workers if connector startup/recovery fails.
+        await agent_conversation_run_service.shutdown_background_runs()
         acquisition_sweeper_stop.set()
         await acquisition_sweeper
         await cycle_task.stop()

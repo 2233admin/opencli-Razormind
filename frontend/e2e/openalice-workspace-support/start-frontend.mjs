@@ -9,6 +9,7 @@ const nextBin = path.join(frontendRoot, 'node_modules', 'next', 'dist', 'bin', '
 const standaloneServer = path.join(frontendRoot, '.next', 'standalone', 'server.js')
 const backendUrl = process.env.BACKEND_URL ?? 'http://127.0.0.1:8048'
 const frontendPort = process.env.OPENALICE_FRONTEND_PORT ?? '8049'
+const nextDistDir = process.env.OPENCLI_NEXT_DIST_DIR ?? '.next-alice-chat-e2e'
 
 let command
 let args
@@ -33,6 +34,7 @@ const child = spawn(command, args, {
     BACKEND_URL: backendUrl,
     HOSTNAME: '127.0.0.1',
     PORT: frontendPort,
+    OPENCLI_NEXT_DIST_DIR: nextDistDir,
   },
   stdio: 'inherit',
 })

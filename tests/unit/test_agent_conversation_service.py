@@ -2,13 +2,19 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import delete, select
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from backend.api.v1.chat import ApiResponse, ChatReply, Proposal
 from backend.llm.base import LlmAdapterError
 from backend.models import (
+    AgentConversation,
     AgentConversationTurn,
+    AgentRunEvent,
+    ModelProvider,
     Project,
+    StudioProject,
+    StudioWorkspace,
     User,
     Workspace,
     WorkspaceMembership,
@@ -21,7 +27,13 @@ from backend.services import agent_conversation_service as service
 async def _identity_and_workspace(db_session, subject: str = "agent@example.test"):
     user = User(subject=subject)
     workspace = Workspace(name="Workspace", slug=subject.split("@")[0])
-    db_session.add_all([user, workspace])
+    provider = ModelProvider(
+        name=f"{subject} provider",
+        provider_type="openai",
+        default_model="test-model",
+        enabled=True,
+    )
+    db_session.add_all([user, workspace, provider])
     await db_session.flush()
     db_session.add(
         WorkspaceMembership(
@@ -35,7 +47,7 @@ async def _identity_and_workspace(db_session, subject: str = "agent@example.test
 
 
 @pytest.mark.asyncio
-async def test_bounded_history_drops_old_pairs_but_keeps_current_message():
+async def test_bounded_history_rejects_overflow_instead_of_truncating():
     turns = [
         SimpleNamespace(
             user_content="u" * 2_000,
@@ -44,11 +56,8 @@ async def test_bounded_history_drops_old_pairs_but_keeps_current_message():
         for _ in range(20)
     ]
 
-    messages = service.bounded_history(turns, "current" * 3_000)
-
-    assert messages[-1] == {"role": "user", "content": "current" * 3_000}
-    assert sum(len(message["content"]) for message in messages) <= service.MAX_HISTORY_CHARS
-    assert len(messages) % 2 == 1
+    with pytest.raises(service.AgentConversationError, match="start a new session"):
+        service.bounded_history(turns, "current" * 3_000)
 
 
 @pytest.mark.asyncio
@@ -67,9 +76,7 @@ async def test_context_binding_rejects_cross_workspace_project(db_session):
     await db_session.commit()
 
     with pytest.raises(service.AgentConversationError):
-        await service.validate_context_binding(
-            db_session, workspace.id, {"project_id": project.id}
-        )
+        await service.validate_context_binding(db_session, workspace.id, {"project_id": project.id})
 
 
 @pytest.mark.asyncio
@@ -94,11 +101,14 @@ async def test_unsafe_content_is_rejected_before_persistence(db_session):
             chat_runner=lambda *args, **kwargs: None,
         )
     assert exc_info.value.status_code == 400
-    assert await db_session.scalar(
-        select(AgentConversationTurn).where(
-            AgentConversationTurn.conversation_id == conversation.id
+    assert (
+        await db_session.scalar(
+            select(AgentConversationTurn).where(
+                AgentConversationTurn.conversation_id == conversation.id
+            )
         )
-    ) is None
+        is None
+    )
 
 
 @pytest.mark.asyncio
@@ -230,9 +240,7 @@ async def test_proposal_must_be_bound_to_conversation_workspace(db_session):
     identity, workspace, _ = await _identity_and_workspace(
         db_session, "proposal-bound@example.test"
     )
-    _, other_workspace, _ = await _identity_and_workspace(
-        db_session, "proposal-other@example.test"
-    )
+    _, other_workspace, _ = await _identity_and_workspace(db_session, "proposal-other@example.test")
     conversation = await service.create_conversation(
         db_session,
         identity,
@@ -301,3 +309,130 @@ async def test_close_conversation_uses_row_lock_before_turn_insertion(db_session
 
     assert captured["workspace_id"] == workspace.id
     assert closed.status == "closed"
+
+
+@pytest.mark.asyncio
+async def test_finalize_rechecks_membership_before_persisting_reply(db_session):
+    identity, workspace, _ = await _identity_and_workspace(db_session, "finalize-auth@example.test")
+    conversation = await service.create_conversation(
+        db_session,
+        identity,
+        workspace_id=workspace.id,
+        title=None,
+        context=None,
+    )
+    session_factory = async_sessionmaker(bind=db_session.bind, expire_on_commit=False)
+
+    async def revoke_during_model_wait(*args, **kwargs):
+        activity_sink = service.chat._activity_sink.get()
+        await activity_sink(
+            {
+                "type": "run.completed",
+                "label": "premature",
+                "detail": "must be discarded",
+                "state": "completed",
+            }
+        )
+        async with session_factory() as other_db:
+            await other_db.execute(
+                delete(WorkspaceMembership).where(WorkspaceMembership.workspace_id == workspace.id)
+            )
+            await other_db.commit()
+        return ApiResponse.ok(ChatReply(type="message", content="must not persist"))
+
+    with pytest.raises(HTTPException) as exc_info:
+        await service.send_message(
+            db_session,
+            identity,
+            conversation.id,
+            request_id="finalize-auth",
+            content="wait then reply",
+            context=None,
+            chat_runner=revoke_during_model_wait,
+        )
+
+    assert exc_info.value.status_code == 403
+    turn = await db_session.scalar(
+        select(AgentConversationTurn).where(AgentConversationTurn.request_id == "finalize-auth")
+    )
+    assert turn.status == "failed"
+    assert turn.active_slot is None
+    assert turn.error_code == "authorization_changed"
+    assert turn.response is None
+    event_types = list(
+        await db_session.scalars(
+            select(AgentRunEvent.event_type).where(AgentRunEvent.run_id == turn.agent_run_id)
+        )
+    )
+    assert "run.completed" not in event_types
+    assert event_types[-1] == "run.failed"
+
+
+@pytest.mark.asyncio
+async def test_project_sessions_are_opt_in_and_reauthorized_per_candidate(db_session):
+    identity, workspace, user = await _identity_and_workspace(
+        db_session, "studio-list@example.test"
+    )
+    identity = RequestIdentity(
+        subject=identity.subject,
+        auth_method="local",
+        is_platform_admin=True,
+    )
+    studio = StudioWorkspace(name="Studio", slug="studio-list")
+    db_session.add(studio)
+    await db_session.flush()
+    project = StudioProject(
+        workspace_id=studio.id,
+        name="Project",
+        slug="project",
+        app_type="agent",
+        created_by_user_id=user.id,
+    )
+    db_session.add(project)
+    await db_session.flush()
+    plain = AgentConversation(
+        workspace_id=workspace.id,
+        created_by_user_id=user.id,
+        context_binding={},
+        execution_binding={},
+        status="active",
+    )
+    valid_project = AgentConversation(
+        workspace_id=workspace.id,
+        created_by_user_id=user.id,
+        context_binding={
+            "studio_workspace_id": studio.id,
+            "project_id": project.id,
+        },
+        execution_binding={},
+        status="active",
+    )
+    invalid_project = AgentConversation(
+        workspace_id=workspace.id,
+        created_by_user_id=user.id,
+        context_binding={
+            "studio_workspace_id": studio.id,
+            "project_id": "missing-project",
+        },
+        execution_binding={},
+        status="active",
+    )
+    db_session.add_all((plain, valid_project, invalid_project))
+    await db_session.commit()
+
+    default_rows = await service.list_conversations(
+        db_session,
+        identity,
+        workspace_id=workspace.id,
+        limit=10,
+    )
+    included_rows = await service.list_conversations(
+        db_session,
+        identity,
+        workspace_id=workspace.id,
+        limit=10,
+        include_project_sessions=True,
+    )
+
+    assert {row.id for row in default_rows} == {plain.id}
+    assert {row.id for row in included_rows} == {plain.id, valid_project.id}

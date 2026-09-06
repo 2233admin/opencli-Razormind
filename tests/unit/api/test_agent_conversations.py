@@ -2,18 +2,25 @@ import pytest
 from fastapi import HTTPException
 from sqlalchemy import select
 
-from backend.api.v1 import agent_conversations
 from backend.api.v1.chat import ChatReply
 from backend.models.agent_conversation import AgentConversationTurn
 from backend.models.identity import User, Workspace, WorkspaceMembership, WorkspaceRole
+from backend.models.provider import ModelProvider
 from backend.schemas.common import ApiResponse
 from backend.security.identity import RequestIdentity, get_request_identity
 from backend.services import agent_conversation_service as conversation_service
 
+
 async def _seed_member(db_session, subject: str, slug: str):
     user = User(subject=subject)
     workspace = Workspace(name=slug, slug=slug)
-    db_session.add_all((user, workspace))
+    provider = ModelProvider(
+        name=f"{slug} provider",
+        provider_type="openai",
+        default_model="test-model",
+        enabled=True,
+    )
+    db_session.add_all((user, workspace, provider))
     await db_session.flush()
     db_session.add(
         WorkspaceMembership(workspace_id=workspace.id, user_id=user.id, role=WorkspaceRole.ADMIN)
@@ -96,3 +103,44 @@ async def test_cross_workspace_read_is_denied_and_model_failure_is_durable(
     assert turn is not None
     assert turn.status == "failed"
     assert turn.error_code == "model_error"
+
+
+@pytest.mark.asyncio
+async def test_workspace_member_cannot_take_over_another_users_conversation(client, db_session):
+    workspace = await _seed_member(db_session, "creator", "shared-workspace")
+    other = User(subject="other-member")
+    db_session.add(other)
+    await db_session.flush()
+    db_session.add(
+        WorkspaceMembership(
+            workspace_id=workspace.id,
+            user_id=other.id,
+            role=WorkspaceRole.ADMIN,
+        )
+    )
+    await db_session.commit()
+    subject = "creator"
+
+    async def identity_override():
+        return RequestIdentity(subject=subject)
+
+    from backend.main import app
+
+    app.dependency_overrides[get_request_identity] = identity_override
+    created = await client.post("/api/v1/chat/sessions", json={"workspace_id": workspace.id})
+    subject = "other-member"
+    message = await client.post(
+        f"/api/v1/chat/sessions/{created.json()['data']['id']}/messages",
+        json={"request_id": "take-over", "content": "do not attach me"},
+    )
+    closed = await client.post(f"/api/v1/chat/sessions/{created.json()['data']['id']}/close")
+    assert message.status_code == 403
+    assert closed.status_code == 403
+    assert (
+        await db_session.scalar(
+            select(AgentConversationTurn).where(
+                AgentConversationTurn.conversation_id == created.json()["data"]["id"]
+            )
+        )
+        is None
+    )

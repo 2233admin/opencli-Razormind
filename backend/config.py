@@ -72,6 +72,7 @@ class Settings(BaseSettings):
         if len(normalized) < 32 or normalized in public_defaults:
             raise ValueError("SECRET_KEY must be at least 32 characters and not a public default")
         return normalized
+
     # Fernet key used to encrypt provider credentials at rest. Keep this
     # stable after providers have been saved, or their stored API keys cannot
     # be decrypted on the next process start.
@@ -81,6 +82,7 @@ class Settings(BaseSettings):
     # have started; storing an installation alone never enables execution.
     connector_reply_enabled: bool = False
     connector_artifact_delivery_enabled: bool = False
+    agent_conversation_execution_mode: Literal["disabled", "local_single_process"] = "disabled"
 
     # Database
     database_url: str = "sqlite+aiosqlite:///./opencli_admin.db"
@@ -109,9 +111,7 @@ class Settings(BaseSettings):
     def workflow_plugin_ids(self) -> tuple[str, ...]:
         return tuple(
             dict.fromkeys(
-                plugin.strip()
-                for plugin in self.workflow_plugins.split(",")
-                if plugin.strip()
+                plugin.strip() for plugin in self.workflow_plugins.split(",") if plugin.strip()
             )
         )
 
@@ -143,10 +143,6 @@ class Settings(BaseSettings):
     controlled_receiver_receipt_keys_json: str = "{}"
     controlled_receiver_inbound_keys_json: str = "{}"
     controlled_receiver_max_clock_skew_seconds: int = 300
-
-
-
-
 
     # Redis / Celery — only required when task_executor="celery"
     redis_url: str = "redis://localhost:6379/0"

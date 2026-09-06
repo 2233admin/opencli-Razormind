@@ -12,10 +12,12 @@ class AgentConversationStatus(StrEnum):
 
 
 class AgentConversationTurnStatus(StrEnum):
+    QUEUED = "queued"
     RUNNING = "running"
     COMPLETED = "completed"
     PROPOSAL = "proposal"
     FAILED = "failed"
+    INTERRUPTED = "interrupted"
 
 
 class AgentConversation(TimestampMixin):
@@ -43,6 +45,15 @@ class AgentConversation(TimestampMixin):
     context_binding: Mapped[dict] = mapped_column(
         JSON, nullable=False, default=dict, server_default="{}"
     )
+    execution_binding: Mapped[dict] = mapped_column(
+        JSON, nullable=False, default=dict, server_default="{}"
+    )
+    agent_session_id: Mapped[str | None] = mapped_column(
+        ForeignKey("agent_sessions.id", ondelete="SET NULL"),
+        nullable=True,
+        unique=True,
+        index=True,
+    )
     revision: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
 
 
@@ -56,7 +67,7 @@ class AgentConversationTurn(TimestampMixin):
             "conversation_id", "request_id", name="uq_agent_conversation_turn_request"
         ),
         CheckConstraint(
-            "status IN ('running', 'completed', 'proposal', 'failed')",
+            "status IN ('queued', 'running', 'completed', 'proposal', 'failed', 'interrupted')",
             name="ck_agent_conversation_turns_status",
         ),
         CheckConstraint("sequence > 0", name="ck_agent_conversation_turns_sequence_positive"),
@@ -76,6 +87,13 @@ class AgentConversationTurn(TimestampMixin):
     )
     sequence: Mapped[int] = mapped_column(Integer, nullable=False)
     request_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    active_slot: Mapped[str | None] = mapped_column(String(36), nullable=True, unique=True)
+    agent_run_id: Mapped[str | None] = mapped_column(
+        ForeignKey("agent_runs.id", ondelete="SET NULL"),
+        nullable=True,
+        unique=True,
+        index=True,
+    )
     user_content: Mapped[str] = mapped_column(Text, nullable=False)
     response: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     context_binding: Mapped[dict] = mapped_column(

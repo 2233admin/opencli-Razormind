@@ -19,7 +19,8 @@ const pythonCandidates = [
 ].filter(Boolean)
 const python = pythonCandidates.find((candidate) => candidate === 'python' || existsSync(candidate)) ?? 'python'
 const runner = path.join(frontendRoot, 'e2e', 'openalice-workspace-support', 'run-backend.py')
-const child = spawn(python, [runner, '--db', dbPath, '--port', '8048'], {
+const port = process.env.OPENALICE_BACKEND_PORT ?? '8048'
+const child = spawn(python, [runner, '--db', dbPath, '--port', port], {
   cwd: repositoryRoot,
   env: {
     ...process.env,

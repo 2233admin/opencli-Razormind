@@ -2,7 +2,7 @@ import { apiClient } from './client'
 import type { ApiResponse } from './types'
 
 export type AgentConversationStatus = 'active' | 'closed'
-export type AgentConversationTurnStatus = 'running' | 'completed' | 'proposal' | 'failed'
+export type AgentConversationTurnStatus = 'queued' | 'running' | 'completed' | 'proposal' | 'failed' | 'interrupted'
 
 export type AgentConversationRequestContext = {
   project_id?: string | null
@@ -16,6 +16,32 @@ export type AgentConversationContext = AgentConversationRequestContext & {
   /** Server-stamped marker for a durable session opened from Studio. */
   readonly studio_workspace_id?: string | null
 }
+
+export type AgentExecutionTarget = {
+  id: string
+  kind: 'provider' | 'native'
+  label: string
+  agent: { id?: string; type: string; name: string }
+  runtime: { node_id: string; name: string; capabilities: string[]; resume_by_id: boolean } | null
+  provider: { id: string; name: string; provider_type: string } | null
+  models: Array<{ id: string; label: string }>
+  default_model_id: string | null
+  readiness: { status: 'ready' | 'unverified' | 'blocked'; reason_code: string | null; reason: string | null }
+  setup_url: '/providers' | '/nodes' | '/operations-agents'
+  agent_id?: string | null
+}
+
+export type AgentExecutionTargets = {
+  workspace_id: string
+  targets: AgentExecutionTarget[]
+  background_execution?: { status: 'ready' | 'blocked'; reason_code: string | null; reason: string | null }
+}
+
+export type AgentExecutionBinding = {
+  target_id?: string | null
+  provider_id?: string | null
+  model_id?: string | null
+} | null
 
 export type AgentConversationProposal = {
   tool: string
@@ -43,6 +69,7 @@ export type AgentConversation = {
   revision: number
   created_at: string
   updated_at: string
+  execution_binding?: AgentExecutionBinding
 }
 
 export type AgentConversationTurn = {
@@ -60,6 +87,7 @@ export type AgentConversationTurn = {
   error_message?: string | null
   created_at?: string
   updated_at?: string
+  agent_run_id?: string | null
 }
 
 export type AgentConversationDetail = AgentConversation & {
@@ -70,12 +98,15 @@ export type CreateAgentConversationInput = {
   workspace_id?: string | null
   title?: string | null
   context: AgentConversationRequestContext
+  execution_target_id?: string | null
+  model_id?: string | null
 }
 
 export type SendAgentConversationMessageInput = {
   request_id: string
   content: string
-  context: AgentConversationRequestContext
+  context?: AgentConversationRequestContext
+  execution_mode?: 'synchronous' | 'background'
 }
 
 export type AgentConversationListFilters = {
@@ -87,18 +118,28 @@ export type AgentConversationListFilters = {
 export type AgentConversationMessageResult = {
   conversation_id: string
   turn: AgentConversationTurn
+  run?: { id: string; status: string; continuation: { mode: 'history_replay' | 'history_compacted' | 'runtime_resume'; resumed: boolean } } | null
+}
+
+export type AgentConversationEventsResult = {
+  run: { id: string; status: string }
+  events: Array<{ sequence: number; type: string; payload: Record<string, unknown>; created_at: string }>
+  next_sequence: number
+  terminal: boolean
 }
 
 export const listAgentConversations = (
   workspaceId: string,
   limit = 20,
   filters?: AgentConversationListFilters,
+  includeProjectSessions = false,
 ) =>
   apiClient
     .get<ApiResponse<AgentConversation[]>>('/chat/sessions', {
       params: {
         workspace_id: workspaceId,
         limit,
+        ...(includeProjectSessions ? { include_project_sessions: true } : {}),
         ...(filters?.project_id ? { project_id: filters.project_id } : {}),
         ...(filters?.workflow_id ? { workflow_id: filters.workflow_id } : {}),
         ...(filters?.run_id ? { run_id: filters.run_id } : {}),
@@ -109,6 +150,11 @@ export const listAgentConversations = (
 export const createAgentConversation = (input: CreateAgentConversationInput) =>
   apiClient
     .post<ApiResponse<AgentConversation>>('/chat/sessions', input)
+    .then((response) => response.data.data)
+
+export const listAgentExecutionTargets = (workspaceId: string, context?: AgentConversationRequestContext) =>
+  apiClient
+    .get<ApiResponse<AgentExecutionTargets>>('/chat/execution-targets', { params: { workspace_id: workspaceId, ...context } })
     .then((response) => response.data.data)
 
 export const getAgentConversation = (conversationId: string, afterSequence = 0, limit = 50) =>
@@ -132,4 +178,21 @@ export const sendAgentConversationMessage = (
 export const closeAgentConversation = (conversationId: string) =>
   apiClient
     .post<ApiResponse<AgentConversation>>(`/chat/sessions/${conversationId}/close`)
+    .then((response) => response.data.data)
+
+export const reopenAgentConversation = (conversationId: string) =>
+  apiClient
+    .post<ApiResponse<AgentConversation>>(`/chat/sessions/${conversationId}/reopen`)
+    .then((response) => response.data.data)
+
+export const listAgentConversationEvents = (
+  conversationId: string,
+  turnId: string,
+  afterSequence = 0,
+  limit = 100,
+) =>
+  apiClient
+    .get<ApiResponse<AgentConversationEventsResult>>(`/chat/sessions/${conversationId}/turns/${turnId}/events`, {
+      params: { after_sequence: afterSequence, limit },
+    })
     .then((response) => response.data.data)

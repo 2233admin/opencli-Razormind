@@ -45,6 +45,13 @@ test('Dock restores proposal turns and preserves Agent Control confirmation', as
   assert.match(source, /待确认操作/)
 })
 
+test('Ask Alice restores persisted tool records instead of inventing execution logs', async () => {
+  const source = await read('components/shell/agent-conversation-surface.tsx')
+  assert.match(source, /turn\.tool_trace\.length > 0/)
+  assert.match(source, /setToolTraces\(restored\.toolTraces\)/)
+  assert.match(source, /已执行 \{trace\.entries\.length\} 项工具操作/)
+})
+
 test('Dock bridges only a trusted, scoped Studio workspace into durable sessions', async () => {
   const source = await sourcePromise
   const api = await apiPromise
