@@ -5,9 +5,9 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend import ws_agent_manager
 from backend.models.edge_node import EdgeNode
 from backend.schemas.operations_agent import AgentContractV2, AgentRuntimeBindingV2
-from backend import ws_agent_manager
 
 
 class RuntimeSelectionError(RuntimeError):
@@ -72,9 +72,16 @@ async def select_agent_runtime(
         if not isinstance(manifests, dict):
             continue
         for runtime, advertised in manifests.items():
-            if not isinstance(runtime, str) or not isinstance(advertised, list):
+            if (
+                not isinstance(runtime, str)
+                or not runtime.strip()
+                or runtime != runtime.strip()
+                or not isinstance(advertised, list)
+            ):
                 continue
-            capabilities = sorted({item for item in advertised if isinstance(item, str)})
+            capabilities = sorted(
+                {item for item in advertised if isinstance(item, str) and item.strip()}
+            )
             if not required.issubset(capabilities):
                 continue
             candidates.append(

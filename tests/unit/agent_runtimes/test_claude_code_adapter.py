@@ -2,6 +2,7 @@
 
 import sys
 from typing import Any
+from unittest.mock import AsyncMock
 
 from backend.agent_runtimes.base import AgentTask
 from backend.agent_runtimes.claude_code_adapter import ClaudeCodeRuntimeAdapter
@@ -88,6 +89,47 @@ async def test_event_normalization_and_terminal_result(tmp_path):
         "done",
     ]
     assert events[-1]["result"]["text"] == "hello"
+
+
+async def test_readiness_reports_capability_id_and_version(tmp_path, monkeypatch):
+    adapter = ClaudeCodeRuntimeAdapter()
+    monkeypatch.setattr(adapter, "_detect_version", AsyncMock(return_value="2.1.231"))
+
+    readiness = await adapter.readiness(
+        _config("unused", cwd=str(tmp_path), project_root=str(tmp_path))
+    )
+
+    assert readiness.status == "ready"
+    assert readiness.capability_id == "runtime.claude-code"
+    assert readiness.binary_present is True
+    assert readiness.version == "2.1.231"
+
+
+async def test_readiness_blocks_when_version_probe_fails(tmp_path, monkeypatch):
+    adapter = ClaudeCodeRuntimeAdapter()
+    monkeypatch.setattr(adapter, "_detect_version", AsyncMock(return_value=None))
+
+    readiness = await adapter.readiness(
+        _config("unused", cwd=str(tmp_path), project_root=str(tmp_path))
+    )
+
+    assert readiness.status == "blocked"
+    assert readiness.capability_id == "runtime.claude-code"
+    assert readiness.reason_code == "version_probe_failed"
+    assert readiness.reason == "Claude Code binary did not complete a compatible version probe"
+
+
+async def test_readiness_rejects_version_output_from_unsuccessful_process(tmp_path):
+    adapter = ClaudeCodeRuntimeAdapter()
+    for exit_code, expected in [(1, "blocked"), (0, "ready")]:
+        fake = _write_fake(
+            tmp_path, f'print("2.1.231 (Claude Code)"); raise SystemExit({exit_code})'
+        )
+        readiness = await adapter.readiness(
+            _config(fake, cwd=str(tmp_path), project_root=str(tmp_path))
+        )
+        assert readiness.status == expected
+        assert readiness.reason_code == ("version_probe_failed" if exit_code else None)
 
 
 def test_claude_code_registered():

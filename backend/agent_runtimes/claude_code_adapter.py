@@ -38,6 +38,7 @@ _MAX_TIMEOUT_SECONDS = 3600
 _VERSION_TIMEOUT_SECONDS = 5
 _KILL_GRACE_SECONDS = 10
 _STDERR_TAIL_BYTES = 2048
+_CAPABILITY_ID = "runtime.claude-code"
 _PERMISSION_MODES = frozenset({"observe_only", "suggest_changes", "approval_required", "full_auto"})
 _CLAUDE_PERMISSION_MODES = {
     "observe_only": "plan",
@@ -116,6 +117,7 @@ class ClaudeCodeRuntimeAdapter(RuntimeAdapter):
         if errors:
             return RuntimeReadiness(
                 runtime=self.runtime_type,
+                capability_id=_CAPABILITY_ID,
                 status="blocked",
                 binary_present=False,
                 reason_code="invalid_config",
@@ -127,6 +129,7 @@ class ClaudeCodeRuntimeAdapter(RuntimeAdapter):
         if resolved_binary is None:
             return RuntimeReadiness(
                 runtime=self.runtime_type,
+                capability_id=_CAPABILITY_ID,
                 status="blocked",
                 binary_present=False,
                 reason_code="missing_binary",
@@ -137,6 +140,7 @@ class ClaudeCodeRuntimeAdapter(RuntimeAdapter):
         except ValueError as exc:
             return RuntimeReadiness(
                 runtime=self.runtime_type,
+                capability_id=_CAPABILITY_ID,
                 status="blocked",
                 binary_present=True,
                 permitted_project_root=self._display_path(config.get("project_root")),
@@ -145,8 +149,20 @@ class ClaudeCodeRuntimeAdapter(RuntimeAdapter):
                 reason=str(exc),
             )
         version = await self._detect_version(resolved_binary, config.get("args") or [])
+        if version is None:
+            return RuntimeReadiness(
+                runtime=self.runtime_type,
+                capability_id=_CAPABILITY_ID,
+                status="blocked",
+                binary_present=True,
+                permitted_project_root=str(project_root),
+                working_directory=str(cwd),
+                reason_code="version_probe_failed",
+                reason="Claude Code binary did not complete a compatible version probe",
+            )
         return RuntimeReadiness(
             runtime=self.runtime_type,
+            capability_id=_CAPABILITY_ID,
             status="ready",
             binary_present=True,
             version=version,
@@ -424,6 +440,8 @@ class ClaudeCodeRuntimeAdapter(RuntimeAdapter):
                 proc.kill()
                 await proc.wait()
             raise
+        if proc.returncode != 0:
+            return None
         text = stdout.decode(errors="replace") if stdout else ""
         match = _VERSION_RE.search(text)
         return match.group(1) if match else None

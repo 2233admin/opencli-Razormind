@@ -11,6 +11,7 @@ from collections.abc import Callable
 from typing import Any, Protocol
 
 from fastapi import HTTPException, status
+from pydantic import ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -26,7 +27,6 @@ from backend.models.agent_conversation import (
     AgentConversationTurnStatus,
 )
 from backend.models.agent_run import AgentRun, AgentSession
-from backend.models.edge_node import EdgeNode
 from backend.models.identity import Workspace as GovernedWorkspace
 from backend.models.operations_agent import (
     OperationsAgentIdentity,
@@ -39,13 +39,17 @@ from backend.models.studio import StudioProject, StudioWorkflow
 from backend.models.workflow import Project as GovernedProject
 from backend.models.workflow import Workflow as GovernedWorkflow
 from backend.models.workflow_run import WorkflowRun
-from backend.schemas.operations_agent import agent_runtime_binding_from_model_configuration
+from backend.schemas.operations_agent import (
+    agent_contract_from_model_configuration,
+    agent_runtime_binding_from_model_configuration,
+)
 from backend.security.identity import RequestIdentity
 from backend.security.workspace_rbac import (
     WorkspacePermission,
     require_permission,
 )
 from backend.services import agent_conversation_run_service as run_service
+from backend.services.agent_runtime_selection import RuntimeSelectionError, select_agent_runtime
 from backend.services.studio_agent_session_access import (
     AgentSessionWorkspaceScope,
     resolve_agent_session_workspace,
@@ -431,8 +435,6 @@ async def list_execution_targets(
             }
         )
 
-    from backend import ws_agent_manager
-
     agents = list(
         await db.scalars(
             select(OperationsAgentIdentity)
@@ -457,35 +459,42 @@ async def list_execution_targets(
             runtime_binding = agent_runtime_binding_from_model_configuration(
                 version.model_configuration
             )
-        except Exception:
-            runtime_binding = None
-        if runtime_binding is None:
-            continue
-        node = await db.scalar(select(EdgeNode).where(EdgeNode.url == runtime_binding.agent_url))
-        advertised = (
-            (node.runtime_capabilities or {}).get(runtime_binding.runtime, []) if node else []
-        )
-        capabilities = sorted({item for item in advertised if isinstance(item, str) and item})
-        node_connected = bool(
-            node
-            and node.status == "online"
-            and node.protocol == "ws"
-            and ws_agent_manager.is_connected(node.url)
-        )
-        reason_code = (
-            "native_session_contract_unavailable" if node_connected else "runtime_node_unavailable"
-        )
+            contract = agent_contract_from_model_configuration(version.model_configuration)
+        except (ValidationError, AttributeError, TypeError):
+            runtime_binding, contract = None, None
+        selection = None
+        reason_code = "runtime_binding_invalid"
+        reason = "请在 Agent 配置中补全并发布执行配置。"
+        setup_url = "/operations-agents"
+        if runtime_binding is not None and contract is not None:
+            # V2 describes selection preferences, not a fixed agent_url/runtime.
+            # Use the same capability selector as dispatch; a preference is not
+            # proof that a matching node is connected or supports the contract.
+            try:
+                selection = await select_agent_runtime(
+                    db, contract=contract, binding=runtime_binding
+                )
+            except RuntimeSelectionError:
+                reason_code = "runtime_node_unavailable"
+                reason = "没有满足此 Agent 能力要求的在线运行节点，请检查节点连接与已安装能力。"
+                setup_url = "/nodes"
+            else:
+                reason_code = "native_session_contract_unavailable"
+                reason = "此页面的原生会话接入尚未完成；目前可配置 API 模型开始会话。"
+                setup_url = "/providers"
+        runtime_name = selection["runtime"] if selection else None
+        capabilities = selection["capabilities"] if selection else []
         targets.append(
             {
                 "id": f"native:{agent.id}",
                 "kind": "native",
-                "label": f"{agent.name} · {runtime_binding.runtime}",
+                "label": f"{agent.name} · {runtime_name}" if runtime_name else agent.name,
                 "agent": {"type": "operations_agent", "name": agent.name},
                 "runtime": {
                     "agent_id": agent.id,
-                    "name": runtime_binding.runtime,
+                    "name": runtime_name,
                     "capabilities": capabilities,
-                    "resume_by_id": "resumable" in capabilities,
+                    "resume_by_id": False,
                 },
                 "provider": None,
                 "models": [],
@@ -493,16 +502,9 @@ async def list_execution_targets(
                 "readiness": {
                     "status": "blocked",
                     "reason_code": reason_code,
-                    "reason": (
-                        "The published Agent binding is not connected."
-                        if not node_connected
-                        else (
-                            "The Agent binding lacks trusted authentication, isolation, "
-                            "and resumable-session readiness evidence."
-                        )
-                    ),
+                    "reason": reason,
                 },
-                "setup_url": "/operations-agents",
+                "setup_url": setup_url,
             }
         )
     return scope.workspace_id, targets

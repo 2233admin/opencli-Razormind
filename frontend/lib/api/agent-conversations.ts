@@ -22,7 +22,7 @@ export type AgentExecutionTarget = {
   kind: 'provider' | 'native'
   label: string
   agent: { id?: string; type: string; name: string }
-  runtime: { node_id: string; name: string; capabilities: string[]; resume_by_id: boolean } | null
+  runtime: { agent_id: string; name: string | null; capabilities: string[]; resume_by_id: boolean } | null
   provider: { id: string; name: string; provider_type: string } | null
   models: Array<{ id: string; label: string }>
   default_model_id: string | null
