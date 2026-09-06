@@ -213,7 +213,7 @@ export async function revokeConnectorArtifactGrant(
   return response.data.data
 }
 
-const terminalDeliveryStatuses = new Set(['sent', 'failed', 'indeterminate', 'retryable_failed'])
+const terminalDeliveryStatuses = new Set(['sent', 'failed', 'indeterminate'])
 
 export function useConnectorReplyGrants(
   workspaceId: string | null,

@@ -54,7 +54,7 @@ const DELIVERY_LABELS: Record<string, string> = {
   connecting: '连接中',
   sending: '发送中',
   sent: '已发送',
-  retryable_failed: '需要处理',
+  retryable_failed: '等待重试',
   failed: '发送失败',
   indeterminate: '状态未知',
 }
@@ -291,7 +291,8 @@ function ArtifactGrantAction({
       </div>
       {!grant.activation_delivery_status || grant.activation_delivery_status !== 'sent' ? <p className="mt-2 text-[11px] text-muted-foreground">激活消息送达后，才能发送当前报告的领取指令。</p> : null}
       {current && current.status === 'active' && deliveryStatus === 'indeterminate' ? <p className="mt-2 text-[11px] text-destructive">投递结果未知，系统不会自动重发；请先在飞书中核对结果。</p> : null}
-      {current && current.status === 'active' && (deliveryStatus === 'failed' || deliveryStatus === 'retryable_failed') ? <p className="mt-2 text-[11px] text-destructive">投递没有成功；页面不会自动重发，请撤销后重新授权。</p> : null}
+      {current && current.status === 'active' && deliveryStatus === 'failed' ? <p className="mt-2 text-[11px] text-destructive">投递没有成功；页面不会自动重发，请撤销后重新授权。</p> : null}
+      {current && current.status === 'active' && deliveryStatus === 'retryable_failed' ? <p className="mt-2 text-[11px] text-muted-foreground">连接暂时失败，系统会自动重试；可稍后刷新状态。</p> : null}
     </div>
   )
 }
