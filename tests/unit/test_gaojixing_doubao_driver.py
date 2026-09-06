@@ -27,6 +27,7 @@ from backend.workflow.gaojixing_doubao_driver import (
     _command_deadline_seconds,
     _default_endpoint_lease,
     _page_modules,
+    _read_target_state,
     _write_target_state,
 )
 
@@ -73,13 +74,17 @@ async def _endpoint_lease():
 def _target(
     target_id: str = "owned-page",
     url: str = "https://www.doubao.com/chat/1234567890",
+    opener_id: str | None = None,
 ) -> dict:
-    return {
+    target = {
         "id": target_id,
         "type": "page",
         "url": url,
         "webSocketDebuggerUrl": f"ws://agent-1:19222/devtools/page/{target_id}",
     }
+    if opener_id is not None:
+        target["openerId"] = opener_id
+    return target
 
 
 class _TargetProbe:
@@ -236,6 +241,9 @@ async def test_collect_uses_the_matched_page_answer_not_opencli_command_output(t
     assert result["answer"] == "页面中核验过的完整回答。"
     assert page_calls[0]["answer"] == ""
     assert page_calls[0]["allow_submit"] is False
+    assert _read_target_state(
+        tmp_path, question_id="G0001", question="第一道新题"
+    ) == ("owned-page", "https://www.doubao.com/chat/1234567890")
     assert commands.endpoints == [
         "ws://agent-1:19222/devtools/page/owned-page",
         "ws://agent-1:19222/devtools/page/owned-page",
@@ -430,6 +438,7 @@ async def test_inspect_current_never_submits_and_returns_none_on_question_mismat
         question_id="G0001",
         question="另一道历史题",
         target_id="historic-page",
+        conversation_url="https://www.doubao.com/chat/9999999999",
     )
 
     async def mismatch(**_kwargs):
@@ -452,7 +461,7 @@ async def test_inspect_current_never_submits_and_returns_none_on_question_mismat
 async def test_collect_follows_one_uniquely_created_target_after_new(tmp_path):
     old = _target("old-page", "https://www.doubao.com/chat/1234567890")
     created_url = "https://www.doubao.com/chat/local_owned"
-    created = _target("created-page", created_url)
+    created = _target("created-page", created_url, opener_id="old-page")
     commands = _CommandProbe()
     targets = _TargetProbe([old], [old, created])
 
@@ -482,7 +491,11 @@ async def test_collect_fails_closed_when_new_target_cannot_be_uniquely_owned(tmp
     created_url = "https://www.doubao.com/chat/local_owned"
     targets = _TargetProbe(
         [old],
-        [old, _target("created-a", created_url), _target("created-b", created_url)],
+        [
+            old,
+            _target("created-a", created_url, opener_id="old-page"),
+            _target("created-b", created_url, opener_id="old-page"),
+        ],
     )
     commands = _CommandProbe()
     driver = OpenCLIDoubaoEvidenceDriver(
@@ -491,6 +504,25 @@ async def test_collect_fails_closed_when_new_target_cannot_be_uniquely_owned(tmp
         command_runner=commands,
         page_capture=lambda **_kwargs: None,
         target_lister=targets,
+    )
+
+    with pytest.raises(DoubaoDriverUnavailableError, match="doubao-target-ambiguous"):
+        await driver.collect(question_id="G0001", question="第一道新题")
+
+    assert [command[1] for command in commands.commands] == ["new"]
+
+
+@pytest.mark.asyncio
+async def test_collect_rejects_one_unrelated_new_doubao_target(tmp_path):
+    old = _target("old-page", "https://www.doubao.com/chat/1234567890")
+    unrelated = _target("unrelated-page", "https://www.doubao.com/chat/local_other")
+    commands = _CommandProbe()
+    driver = OpenCLIDoubaoEvidenceDriver(
+        project_root=tmp_path,
+        endpoint_lease=_endpoint_lease,
+        command_runner=commands,
+        page_capture=lambda **_kwargs: None,
+        target_lister=_TargetProbe([old], [old, unrelated]),
     )
 
     with pytest.raises(DoubaoDriverUnavailableError, match="doubao-target-ambiguous"):
@@ -535,6 +567,7 @@ async def test_inspect_current_uses_only_the_durable_question_target(tmp_path):
         question_id="G0001",
         question=question,
         target_id="owned-page",
+        conversation_url="https://www.doubao.com/chat/1234567890",
     )
     commands = _CommandProbe()
     page_calls = []
@@ -569,6 +602,7 @@ async def test_inspect_current_does_not_fall_back_to_a_historic_question_page(tm
         question_id="G0001",
         question=question,
         target_id="owned-page-that-closed",
+        conversation_url="https://www.doubao.com/chat/1234567890",
     )
     commands = _CommandProbe()
     driver = OpenCLIDoubaoEvidenceDriver(
@@ -579,6 +613,53 @@ async def test_inspect_current_does_not_fall_back_to_a_historic_question_page(tm
         target_lister=_TargetProbe(
             [_target("historic-page", "https://www.doubao.com/chat/9999999999")]
         ),
+    )
+
+    assert await driver.inspect_current(question_id="G0001", question=question) is None
+    assert commands.commands == []
+
+
+@pytest.mark.asyncio
+async def test_inspect_current_rejects_same_target_after_historic_navigation(tmp_path):
+    question = "第一道新题"
+    _write_target_state(
+        tmp_path,
+        question_id="G0001",
+        question=question,
+        target_id="owned-page",
+        conversation_url="https://www.doubao.com/chat/1234567890",
+    )
+    commands = _CommandProbe(status_url="https://www.doubao.com/chat/9999999999")
+    driver = OpenCLIDoubaoEvidenceDriver(
+        project_root=tmp_path,
+        endpoint_lease=_endpoint_lease,
+        command_runner=commands,
+        page_capture=lambda **_kwargs: pytest.fail("historic page must not be captured"),
+        target_lister=_TargetProbe(
+            [_target("owned-page", "https://www.doubao.com/chat/9999999999")]
+        ),
+    )
+
+    assert await driver.inspect_current(question_id="G0001", question=question) is None
+    assert commands.commands == []
+
+
+@pytest.mark.asyncio
+async def test_inspect_current_requires_post_submit_formal_url_proof(tmp_path):
+    question = "第一道新题"
+    _write_target_state(
+        tmp_path,
+        question_id="G0001",
+        question=question,
+        target_id="owned-page",
+    )
+    commands = _CommandProbe()
+    driver = OpenCLIDoubaoEvidenceDriver(
+        project_root=tmp_path,
+        endpoint_lease=_endpoint_lease,
+        command_runner=commands,
+        page_capture=lambda **_kwargs: pytest.fail("unproven page must not be captured"),
+        target_lister=_TargetProbe(),
     )
 
     assert await driver.inspect_current(question_id="G0001", question=question) is None

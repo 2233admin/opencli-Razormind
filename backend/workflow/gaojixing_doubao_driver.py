@@ -63,7 +63,7 @@ TargetLister = Callable[[str], Awaitable[list[dict[str, Any]]]]
 
 _OPENCLI_RUNTIME_PADDING_SECONDS = 30
 _SUBPROCESS_SHUTDOWN_GRACE_SECONDS = 5
-_TARGET_STATE_VERSION = 1
+_TARGET_STATE_VERSION = 2
 
 
 class DoubaoDriverUnavailableError(RuntimeError):
@@ -255,6 +255,13 @@ class OpenCLIDoubaoEvidenceDriver:
                 raise DoubaoDriverUnavailableError("doubao-status-failed")
             if chat_url is None:
                 raise DoubaoDriverUnavailableError("formal-chat-url-missing")
+            _write_target_state(
+                self._target_state_root,
+                question_id=question_id,
+                question=question,
+                target_id=_target_id(owned_target),
+                conversation_url=chat_url,
+            )
             capture = await _maybe_await(
                 self._page_capture(
                     endpoint=endpoint,
@@ -280,16 +287,20 @@ class OpenCLIDoubaoEvidenceDriver:
         """Read the current conversation; never create a chat or submit a question."""
 
         async with self._endpoint_lease() as endpoint:
-            target_id = _read_target_state(
+            target_state = _read_target_state(
                 self._target_state_root,
                 question_id=question_id,
                 question=question,
             )
-            if target_id is None:
+            if target_state is None:
                 return None
+            target_id, expected_chat_url = target_state
             targets = await self._target_lister(endpoint)
             matches = [row for row in targets if _target_id(row) == target_id]
-            if len(matches) != 1:
+            if (
+                len(matches) != 1
+                or str(matches[0].get("url") or "").strip() != expected_chat_url
+            ):
                 return None
             target_endpoint = _target_websocket_url(matches[0])
             status_code, status_rows, _stderr = await self._command_runner(
@@ -298,7 +309,7 @@ class OpenCLIDoubaoEvidenceDriver:
             if status_code:
                 return None
             chat_url = _chat_url(status_rows)
-            if chat_url is None:
+            if chat_url != expected_chat_url:
                 return None
             return await _maybe_await(
                 self._page_capture(
@@ -516,11 +527,15 @@ def _resolve_owned_doubao_target(
     after = _doubao_page_targets(after_targets)
     created = [row for row in after if _target_id(row) not in before_ids]
     if created:
-        # The lease serializes managed work on this browser. A single new
-        # Doubao page appearing across the exact-page ``new`` call is the only
-        # target transition we can causally own. Any second candidate is
-        # ambiguous and must stop before the question is submitted.
-        if len(created) != 1:
+        # The lease serializes managed work, but it cannot exclude a human or
+        # another process using the browser. Only a single new Doubao target
+        # whose CDP opener is the exact starting page is causally attributable
+        # to this ``new`` call.
+        if (
+            len(created) != 1
+            or str(created[0].get("openerId") or "").strip()
+            != _target_id(starting_target)
+        ):
             raise DoubaoDriverUnavailableError("doubao-target-ambiguous")
         return created[0]
 
@@ -553,8 +568,15 @@ def _target_state_path(root: Path, question_id: str) -> Path:
 
 
 def _write_target_state(
-    root: Path, *, question_id: str, question: str, target_id: str
+    root: Path,
+    *,
+    question_id: str,
+    question: str,
+    target_id: str,
+    conversation_url: str | None = None,
 ) -> None:
+    if conversation_url is not None and not _FORMAL_CHAT_URL.fullmatch(conversation_url):
+        raise DoubaoDriverUnavailableError("formal-chat-url-missing")
     state_path = _target_state_path(root, question_id)
     state_path.parent.mkdir(parents=True, exist_ok=True)
     temporary_path = state_path.with_suffix(f".{uuid4().hex}.tmp")
@@ -563,6 +585,8 @@ def _write_target_state(
         "questionId": question_id,
         "questionSha256": hashlib.sha256(question.encode("utf-8")).hexdigest(),
         "targetId": target_id,
+        "phase": "submitted-formal" if conversation_url else "target-owned",
+        "conversationUrl": conversation_url,
     }
     temporary_path.write_text(
         json.dumps(payload, sort_keys=True, separators=(",", ":")),
@@ -571,7 +595,9 @@ def _write_target_state(
     os.replace(temporary_path, state_path)
 
 
-def _read_target_state(root: Path, *, question_id: str, question: str) -> str | None:
+def _read_target_state(
+    root: Path, *, question_id: str, question: str
+) -> tuple[str, str] | None:
     state_path = _target_state_path(root, question_id)
     try:
         payload = json.loads(state_path.read_text(encoding="utf-8"))
@@ -583,10 +609,14 @@ def _read_target_state(root: Path, *, question_id: str, question: str) -> str | 
         or payload.get("version") != _TARGET_STATE_VERSION
         or payload.get("questionId") != question_id
         or payload.get("questionSha256") != expected_hash
+        or payload.get("phase") != "submitted-formal"
     ):
         return None
     target_id = str(payload.get("targetId") or "").strip()
-    return target_id or None
+    conversation_url = str(payload.get("conversationUrl") or "").strip()
+    if not target_id or not _FORMAL_CHAT_URL.fullmatch(conversation_url):
+        return None
+    return target_id, conversation_url
 
 
 def _chat_url(
