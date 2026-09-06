@@ -40,27 +40,17 @@ jobs:
           echo "candidate=$release_version-candidate-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
           echo "PUBLIC_RELEASE_VERSION=$release_version" >> "$GITHUB_ENV"
 
-      - name: Install contract dependency
-        run: python -m pip install PyYAML==6.0.3
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Install contract dependencies
+        run: uv sync --locked --extra dev
 
       - name: Verify public release contract
         shell: bash
         run: |
-          python - <<'PY'
-          import runpy
-
-          namespace = runpy.run_path("tests/unit/test_public_release_contract.py")
-          tests = sorted(
-              (name, value)
-              for name, value in namespace.items()
-              if name.startswith("test_") and callable(value)
-          )
-          if not tests:
-              raise SystemExit("No public release contract tests were discovered.")
-          for name, contract_test in tests:
-              contract_test()
-              print(f"passed: {name}")
-          PY
+          # Keep this gate independent of application fixtures and coverage.
+          uv run --locked --extra dev pytest tests/unit/test_public_release_contract.py --noconftest --no-cov -q
 
   images:
     name: ${{ matrix.name }}

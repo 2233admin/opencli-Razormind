@@ -1,10 +1,16 @@
 import json
 import os
 import re
+import shutil
+import subprocess
+import sys
 import tomllib
 from pathlib import Path
 
+import pytest
 import yaml
+
+from backend.security.local_auth import load_password_hash, verify_password
 
 ROOT = Path(__file__).resolve().parents[2]
 PUBLIC_RELEASE_VERSION = os.environ.get("PUBLIC_RELEASE_VERSION", "0.4.1")
@@ -33,7 +39,12 @@ def source_docker_recipes(readme: str) -> list[str]:
     return [
         block
         for block in re.findall(r"~~~bash\n(.*?)\n~~~", readme, re.DOTALL)
-        if "# 仅首次执行以下初始化步骤" in block
+        if re.search(
+            r"^[ \t]*(?:IMAGE_TAG=\S+[ \t]+)?docker compose\b[^\n]*docker-compose\.build\.yml"
+            r"[ \t]+up(?:[ \t]+--?[\w-]+)*[ \t]*$",
+            block,
+            re.MULTILINE,
+        )
     ]
 
 
@@ -121,59 +132,111 @@ def test_public_artifacts_resolve_to_the_tagged_release_contract() -> None:
         assert all(url in readme for url in installer_urls)
 
 
-def test_source_docker_recipes_initialize_local_admin_before_starting_services() -> None:
+def bash_executable() -> str:
+    candidates = [
+        r"C:\Program Files\Git\bin\bash.exe",
+        r"C:\Program Files\Git\usr\bin\bash.exe",
+        shutil.which("bash"),
+    ]
+    for candidate in candidates:
+        if candidate and Path(candidate).is_file():
+            return candidate
+    pytest.skip("A native Bash executable is unavailable.")
+
+
+def run_source_recipe(
+    recipe: str, sandbox: Path, *, initializer_fails: bool = False
+) -> subprocess.CompletedProcess[str]:
+    sandbox.mkdir()
+    state_directory = sandbox / "data"
+    state_directory.mkdir()
+    if initializer_fails:
+        # Exercise a real durable-state write failure, not a Docker mock error.
+        (state_directory / "local-admin-password.hash").mkdir()
+    # Only host setup and Docker are stubbed: password generation, validation,
+    # persistence, permissions, pipelines, and failure handling run in real Bash.
+    harness = r"""
+git() { return 0; }
+cd() { return 0; }
+cp() { return 0; }
+docker() {
+  printf '%s\n' "$@" >> docker-argv
+  [ "$1" = compose ] || return 90
+  shift
+  while [ "$1" = -f ]; do shift 2; done
+  case "$1" in
+    build) printf 'build\n' >> lifecycle ;;
+    run)
+      printf 'initialize\n' >> lifecycle
+      cat > initializer-stdin
+      shift
+      while [[ "$1" = -* ]]; do shift; done
+      [ "$1" = api ] && [ "$2" = python ] && [ "$3" = -c ] || return 92
+      "$RECIPE_PYTHON" -c \
+        'import sys
+exec(compile(sys.argv[1].replace("/data/", "data/"), "<README initializer>", "exec"))' \
+        "$4" < initializer-stdin || return $?
+      printf 'initialized\n' >> lifecycle
+      ;;
+    up) printf 'up\n' >> lifecycle ;;
+    *) return 91 ;;
+  esac
+}
+"""
+    return subprocess.run(
+        [bash_executable(), "-c", harness + recipe],
+        cwd=sandbox,
+        env={**os.environ, "RECIPE_PYTHON": sys.executable, "PYTHONPATH": str(ROOT)},
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+
+
+def test_source_recipe_selection_excludes_service_only_examples() -> None:
+    prefix = "docker compose -f docker-compose.yml -f docker-compose.build.yml"
+    browser_only = f"{prefix} build agent-1\n{prefix} up -d --no-build agent-1"
+    # Deliberately missing initialization: classification must not hide the bug.
+    incomplete_install = f"{prefix} build api frontend agent-1\n{prefix} up -d --no-build --wait"
+    readme = f"~~~bash\n{browser_only}\n~~~\n~~~bash\n{incomplete_install}\n~~~"
+    assert source_docker_recipes(readme) == [incomplete_install]
+    assert source_docker_recipes(f"~~~bash\n{prefix} up\n~~~") == [f"{prefix} up"]
+
+
+@pytest.mark.parametrize("initializer_fails", [False, True], ids=["success", "init-failure"])
+def test_source_docker_recipes_initialize_local_admin_before_starting_services(
+    tmp_path: Path, initializer_fails: bool
+) -> None:
     recipes = source_docker_recipes(source("README.md"))
-    assert len(recipes) == 2
+    assert recipes, "README must contain a complete source installation recipe"
+    for index, recipe in enumerate(recipes):
+        sandbox = tmp_path / str(index)
+        result = run_source_recipe(recipe, sandbox, initializer_fails=initializer_fails)
+        lifecycle = (sandbox / "lifecycle").read_text().splitlines()
+        if initializer_fails:
+            assert result.returncode != 0
+            assert lifecycle == ["build", "initialize"]
+        else:
+            assert result.returncode == 0, result.stderr
+            assert lifecycle == ["build", "initialize", "initialized", "up"]
+        password = (sandbox / ".local-admin-password").read_text().strip()
+        assert re.fullmatch(r"[0-9a-fA-F]{48}", password)
+        assert (sandbox / "initializer-stdin").read_text() == password
+        if not initializer_fails:
+            state_path = sandbox / "data" / "local-admin-password.hash"
+            assert verify_password(password, load_password_hash("", str(state_path)))
+        assert password not in (sandbox / "docker-argv").read_text()
+        assert password not in result.stdout + result.stderr
+        if os.name != "nt":
+            assert (sandbox / ".local-admin-password").stat().st_mode & 0o777 == 0o600
+
+
+def test_local_credentials_are_excluded_from_source_and_build_context() -> None:
     assert "/.local-admin-password" in source(".gitignore").splitlines()
     dockerignore = source(".dockerignore").splitlines()
     assert ".local-admin-password" in dockerignore
     assert ".opencli-restart-recovery-state*" in dockerignore
-
-    compose_prefix = (
-        "IMAGE_TAG=source docker compose -f docker-compose.yml -f docker-compose.build.yml"
-    )
-    build = f"{compose_prefix} build api frontend agent-1"
-    run_initializer = f"{compose_prefix} run --rm -T --no-deps api python -c"
-    start = f"{compose_prefix} up -d --no-build --wait"
-    build_guard = f"if ! {build}; then"
-    init_guard = f"if ! printf '%s' \"$local_admin_password\" | {run_initializer} " + "\\"
-    for recipe in recipes:
-        assert "# 仅首次执行以下初始化步骤" in recipe
-        assert recipe.count(compose_prefix) == 3
-        assert "local_admin_password_file=.local-admin-password" in recipe
-        assert "abort_local_admin_password()" in recipe
-        assert "  exit 1\n}" in recipe
-        assert "return 1 2>/dev/null || exit 1" not in recipe
-        assert 'if ! local_admin_password="$(cat "$local_admin_password_file")"; then' in recipe
-        assert 'if ! local_admin_password="$(openssl rand -hex 24)"; then' in recipe
-        assert "grep -Eq '^[0-9A-Fa-f]{48}$'" in recipe
-        assert "validate_local_admin_password" in recipe
-        assert 'if [ -s "$local_admin_password_file" ]; then' in recipe
-        assert "password must be exactly 48 hexadecimal characters" in recipe
-        assert build_guard in recipe
-        assert init_guard in recipe
-        assert (
-            'if ! printf \'%s\\n\' "$local_admin_password" > "$local_admin_password_file"; then'
-        ) in recipe
-        assert 'if ! chmod 600 "$local_admin_password_file"; then' in recipe
-        assert "initialize_password_hash 只写入一次 /data/local-admin-password.hash 及其" in recipe
-        assert "/data/local-admin-password.hash.initialized marker" in recipe
-        assert "printf '%s' \"$local_admin_password\" |" in recipe
-        assert recipe.index(build) < recipe.index(run_initializer) < recipe.index(start)
-        assert recipe.index("validate_local_admin_password\n") < recipe.index(
-            "printf '%s\\n' \"$local_admin_password\" >"
-        )
-        assert (
-            "docker compose -f docker-compose.yml -f docker-compose.build.yml up --build"
-            not in recipe
-        )
-        assert "hash_password(sys.stdin.read().strip())" in recipe
-        assert '"/data/local-admin-password.hash"' in recipe
-        initializer_line = next(
-            line for line in recipe.splitlines() if "run --rm -T --no-deps api python -c" in line
-        )
-        compose_command = initializer_line[initializer_line.index("docker compose") :]
-        assert "local_admin_password" not in compose_command
 
 
 def test_installers_report_boot_recovery_without_mutating_host_services_or_logging_tokens() -> None:
