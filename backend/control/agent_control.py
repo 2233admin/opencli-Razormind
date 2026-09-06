@@ -18,7 +18,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import HTTPException, status
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -95,8 +95,12 @@ class RecordedActionProposal:
 
 @dataclass(frozen=True)
 class ActionContext:
+    # Governed Workspace used for membership and proposal storage.
     workspace_id: str
     actor_user_id: str
+    # Studio Workspace containing the project/workflow resource. This differs
+    # from ``workspace_id`` only for the trusted local Studio bridge.
+    resource_workspace_id: str | None = None
     identity: RequestIdentity | None = None
     action_execution_id: str | None = None
     conversation_id: str | None = None
@@ -437,6 +441,10 @@ def _require_action_context(context: ActionContext | None) -> ActionContext:
     return context
 
 
+def _resource_workspace_id(context: ActionContext) -> str:
+    return context.resource_workspace_id or context.workspace_id
+
+
 def _validation_error(detail: str, exc: ValidationError) -> HTTPException:
     first = exc.errors(include_url=False)[0]
     location = ".".join(str(part) for part in first.get("loc", ()))
@@ -461,6 +469,7 @@ async def _prepare_create_project(
     context: ActionContext | None = None,
 ) -> ActionPreview:
     action_context = _require_action_context(context)
+    resource_workspace_id = _resource_workspace_id(action_context)
     workflow_args = args.get("workflow")
     validated_graph = None
     if isinstance(workflow_args, dict) and "graph" in workflow_args:
@@ -473,10 +482,10 @@ async def _prepare_create_project(
     governed_workspace = await db.get(Workspace, action_context.workspace_id)
     if governed_workspace is None or not governed_workspace.active:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Workspace not found")
-    studio_workspace = await db.get(StudioWorkspace, action_context.workspace_id)
+    studio_workspace = await db.get(StudioWorkspace, resource_workspace_id)
     existing = await db.scalar(
         select(StudioProject.id).where(
-            StudioProject.workspace_id == action_context.workspace_id,
+            StudioProject.workspace_id == resource_workspace_id,
             StudioProject.slug == body.project.slug,
         )
     )
@@ -495,10 +504,10 @@ async def _prepare_create_project(
             f"primary workflow: {body.workflow.name}; published: false"
         ),
         target_kind="studio_project_slot",
-        target_id=f"{action_context.workspace_id}:{body.project.slug}",
+        target_id=f"{resource_workspace_id}:{body.project.slug}",
         target_resource_version=_resource_version(
             "studio_project_slot",
-            f"{action_context.workspace_id}:{body.project.slug}",
+            f"{resource_workspace_id}:{body.project.slug}",
             (studio_workspace or governed_workspace).updated_at,
             {
                 "studio_workspace_linked": studio_workspace is not None,
@@ -520,7 +529,7 @@ async def _execute_create_project(
         raise _validation_error("Invalid Project bootstrap", exc) from exc
     created = await create_project_bundle(
         db,
-        workspace_id=context.workspace_id,
+        workspace_id=_resource_workspace_id(context),
         body=body,
         actor_user_id=context.actor_user_id,
     )
@@ -538,6 +547,7 @@ async def _prepare_update_workflow_draft(
     context: ActionContext | None = None,
 ) -> ActionPreview:
     action_context = _require_action_context(context)
+    resource_workspace_id = _resource_workspace_id(action_context)
     project_id = args.get("project_id")
     workflow_id = args.get("workflow_id")
     if not isinstance(project_id, str) or not project_id.strip():
@@ -554,7 +564,7 @@ async def _prepare_update_workflow_draft(
 
     workflow = await get_workflow(
         db,
-        action_context.workspace_id,
+        resource_workspace_id,
         project_id,
         workflow_id,
     )
@@ -609,13 +619,14 @@ async def _execute_update_workflow_draft(
         raise _validation_error("Invalid Workflow draft update", exc) from exc
     row = await update_workflow_draft(
         db,
-        workspace_id=context.workspace_id,
+        workspace_id=_resource_workspace_id(context),
         project_id=str(args["project_id"]),
         workflow_id=str(args["workflow_id"]),
         body=body,
         actor_user_id=context.actor_user_id,
     )
     return {
+        "studio_workspace_id": _resource_workspace_id(context),
         "project_id": str(args["project_id"]),
         "workflow_id": row.workflow_id,
         "draft_revision": row.revision,
@@ -643,6 +654,14 @@ class _RunManagedDoubaoQuestionArgs(BaseModel):
     expected_published_version: int = Field(ge=1)
     question: str = Field(min_length=1, max_length=1_000)
 
+    @field_validator("question")
+    @classmethod
+    def normalize_question(cls, value: str) -> str:
+        normalized = value.replace("\u00a0", " ").strip()
+        if not normalized:
+            raise ValueError("question must not be blank")
+        return normalized
+
 
 async def _prepare_validate_workflow_draft(
     db: AsyncSession,
@@ -650,13 +669,14 @@ async def _prepare_validate_workflow_draft(
     context: ActionContext | None = None,
 ) -> ActionPreview:
     action_context = _require_action_context(context)
+    resource_workspace_id = _resource_workspace_id(action_context)
     try:
         body = _ValidateWorkflowArgs.model_validate(args)
     except ValidationError as exc:
         raise _validation_error("Invalid Workflow validation", exc) from exc
     workflow = await get_workflow(
         db,
-        action_context.workspace_id,
+        resource_workspace_id,
         body.project_id,
         body.workflow_id,
     )
@@ -692,12 +712,13 @@ async def _execute_validate_workflow_draft(
     body = _ValidateWorkflowArgs.model_validate(args)
     row = await validate_workflow_draft(
         db,
-        workspace_id=context.workspace_id,
+        workspace_id=_resource_workspace_id(context),
         project_id=body.project_id,
         workflow_id=body.workflow_id,
         expected_revision=body.expected_revision,
     )
     return {
+        "studio_workspace_id": _resource_workspace_id(context),
         "project_id": body.project_id,
         "workflow_id": body.workflow_id,
         "draft_revision": row.draft_revision,
@@ -715,13 +736,14 @@ async def _prepare_publish_workflow(
     context: ActionContext | None = None,
 ) -> ActionPreview:
     action_context = _require_action_context(context)
+    resource_workspace_id = _resource_workspace_id(action_context)
     try:
         body = _PublishWorkflowArgs.model_validate(args)
     except ValidationError as exc:
         raise _validation_error("Invalid Workflow publication", exc) from exc
     workflow = await get_workflow(
         db,
-        action_context.workspace_id,
+        resource_workspace_id,
         body.project_id,
         body.workflow_id,
     )
@@ -784,7 +806,7 @@ async def _execute_publish_workflow(
     body = _PublishWorkflowArgs.model_validate(args)
     row = await publish_workflow_version(
         db,
-        workspace_id=context.workspace_id,
+        workspace_id=_resource_workspace_id(context),
         project_id=body.project_id,
         workflow_id=body.workflow_id,
         body=VersionCreate.model_validate(
@@ -799,6 +821,7 @@ async def _execute_publish_workflow(
         enforce_current_version=True,
     )
     return {
+        "studio_workspace_id": _resource_workspace_id(context),
         "project_id": body.project_id,
         "workflow_id": body.workflow_id,
         "draft_revision": row.draft_revision,
@@ -813,13 +836,14 @@ async def _prepare_run_managed_doubao_question(
     context: ActionContext | None = None,
 ) -> ActionPreview:
     action_context = _require_action_context(context)
+    resource_workspace_id = _resource_workspace_id(action_context)
     try:
         body = _RunManagedDoubaoQuestionArgs.model_validate(args)
     except ValidationError as exc:
         raise _validation_error("Invalid managed Doubao question", exc) from exc
     version = await require_managed_doubao_version(
         db,
-        workspace_id=action_context.workspace_id,
+        studio_workspace_id=resource_workspace_id,
         project_id=body.project_id,
         workflow_id=body.workflow_id,
         expected_published_version=body.expected_published_version,
@@ -866,7 +890,8 @@ async def _execute_run_managed_doubao_question(
         )
     run, projection = await start_managed_doubao_question(
         db,
-        workspace_id=context.workspace_id,
+        governed_workspace_id=context.workspace_id,
+        studio_workspace_id=_resource_workspace_id(context),
         project_id=body.project_id,
         workflow_id=body.workflow_id,
         expected_published_version=body.expected_published_version,
@@ -877,12 +902,11 @@ async def _execute_run_managed_doubao_question(
         action_execution_id=context.action_execution_id,
     )
     job = await db.scalar(
-        select(GaojixingCollectionRun).where(
-            GaojixingCollectionRun.workflow_run_id == run.id
-        )
+        select(GaojixingCollectionRun).where(GaojixingCollectionRun.workflow_run_id == run.id)
     )
     projection_status = getattr(projection, "status", None)
     return {
+        "studio_workspace_id": _resource_workspace_id(context),
         "project_id": body.project_id,
         "workflow_id": body.workflow_id,
         "published_version": body.expected_published_version,
@@ -1033,7 +1057,7 @@ class AgentControlService:
         workspace_id: str,
         actor_user_id: str,
         provenance: ProposalProvenance,
-    ) -> None:
+    ) -> AgentConversation:
         conversation = await db.scalar(
             select(AgentConversation).where(
                 AgentConversation.id == provenance.conversation_id,
@@ -1060,6 +1084,29 @@ class AgentControlService:
                 status.HTTP_409_CONFLICT,
                 "Agent proposal provenance does not match the active conversation turn",
             )
+        return conversation
+
+    async def resolve_resource_workspace_id(
+        self,
+        db: AsyncSession,
+        *,
+        workspace_id: str,
+        identity: RequestIdentity,
+        provenance: ProposalProvenance | None,
+    ) -> str:
+        """Resolve a Studio resource scope only from server-stamped provenance."""
+
+        access = await get_workspace_access(db, workspace_id, identity)
+        if provenance is None:
+            return workspace_id
+        await self._validate_provenance(
+            db,
+            workspace_id=workspace_id,
+            actor_user_id=access.user_id,
+            provenance=provenance,
+        )
+        studio_workspace_id = provenance.context.get("studio_workspace_id")
+        return studio_workspace_id or workspace_id
 
     async def create_proposal(
         self,
@@ -1075,12 +1122,7 @@ class AgentControlService:
         action = self.registry.get(action_name)
         access = await get_workspace_access(db, workspace_id, identity)
         require_permission(access, action.permission)
-        action_context = ActionContext(
-            workspace_id=workspace_id,
-            actor_user_id=access.user_id,
-            identity=identity,
-        )
-        preview = await action.prepare(db, args, action_context)
+        resource_workspace_id = workspace_id
         if provenance is not None:
             await self._validate_provenance(
                 db,
@@ -1088,6 +1130,14 @@ class AgentControlService:
                 actor_user_id=access.user_id,
                 provenance=provenance,
             )
+            resource_workspace_id = provenance.context.get("studio_workspace_id") or workspace_id
+        action_context = ActionContext(
+            workspace_id=workspace_id,
+            actor_user_id=access.user_id,
+            resource_workspace_id=resource_workspace_id,
+            identity=identity,
+        )
+        preview = await action.prepare(db, args, action_context)
         proposal_version = f"agent-control-proposal/v1:{uuid.uuid4()}"
         now = datetime.now(UTC)
         evidence: dict[str, Any] = {
@@ -1109,6 +1159,7 @@ class AgentControlService:
                 },
                 "required_permission": action.permission.value,
                 "origin": origin,
+                "resource_workspace_id": resource_workspace_id,
                 "context": dict(provenance.context) if provenance is not None else {},
             },
             "confirmation": {
@@ -1213,6 +1264,7 @@ class AgentControlService:
 
         origin_conversation: AgentConversation | None = None
         origin_turn: AgentConversationTurn | None = None
+        resource_workspace_id = workspace_id
         conversation_id = evidence.get("conversation_id")
         if conversation_id is not None:
             provenance = control.get("provenance")
@@ -1270,12 +1322,55 @@ class AgentControlService:
                     status.HTTP_409_CONFLICT,
                     "Agent proposal turn does not match the confirmed proposal",
                 )
+            recorded_context = control.get("context")
+            conversation_context = dict(origin_conversation.context_binding or {})
+            if (
+                not isinstance(recorded_context, dict)
+                or dict(origin_turn.context_binding or {}) != recorded_context
+                or conversation_context != recorded_context
+            ):
+                raise HTTPException(
+                    status.HTTP_409_CONFLICT,
+                    "Agent proposal conversation context changed",
+                )
+            from backend.services.agent_conversation_service import validate_context_binding
+            from backend.services.studio_agent_session_access import (
+                resolve_stored_agent_session_workspace,
+            )
+
+            scope = await resolve_stored_agent_session_workspace(
+                db,
+                identity,
+                workspace_id=origin_conversation.workspace_id,
+                context_binding=conversation_context,
+            )
+            validated_context = await validate_context_binding(
+                db,
+                scope.workspace_id,
+                conversation_context,
+                studio_workspace_id=scope.studio_workspace_id,
+                allow_stored_studio_workspace=True,
+            )
+            if validated_context != conversation_context:
+                raise HTTPException(
+                    status.HTTP_409_CONFLICT,
+                    "Agent proposal conversation context is no longer valid",
+                )
+            resource_workspace_id = scope.studio_workspace_id or workspace_id
+
+        recorded_resource_workspace_id = control.get("resource_workspace_id", workspace_id)
+        if recorded_resource_workspace_id != resource_workspace_id:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "Agent proposal resource Workspace changed",
+            )
 
         action = self.registry.get(action_name)
         require_permission(access, action.permission)
         action_context = ActionContext(
             workspace_id=workspace_id,
             actor_user_id=access.user_id,
+            resource_workspace_id=resource_workspace_id,
             identity=identity,
             action_execution_id=work_item.id,
             conversation_id=origin_conversation.id if origin_conversation is not None else None,

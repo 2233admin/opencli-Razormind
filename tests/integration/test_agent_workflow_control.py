@@ -18,7 +18,11 @@ from backend.models.agent_conversation import (
 )
 from backend.models.identity import User, Workspace, WorkspaceMembership, WorkspaceRole
 from backend.models.operations_work_item import OperationsWorkItem
-from backend.models.studio import StudioWorkflowValidationRun, StudioWorkflowVersion
+from backend.models.studio import (
+    StudioWorkflowValidationRun,
+    StudioWorkflowVersion,
+    StudioWorkspace,
+)
 from backend.models.workflow_run import WorkflowRun
 from backend.security.identity import RequestIdentity
 from backend.services import agent_project_service
@@ -100,6 +104,25 @@ def test_runtime_readiness_requires_an_explicit_login_field():
     assert _login_state([{"Login": "Unknown"}]) == "unknown"
     assert _login_state([{"Login": False}]) == "not_ready"
     assert _login_state([{"Url": "https://www.doubao.com/chat/1"}]) == "missing"
+
+
+def test_model_tool_declarations_share_one_registry_and_publish_reason_contract():
+    names = {tool["function"]["name"] for tool in chat.TOOLS}
+    assert all(f"- {name}(" in chat.XML_TOOL_TEXT for name in names)
+    publication = next(
+        tool["function"] for tool in chat.TOOLS if tool["function"]["name"] == "publish_workflow"
+    )
+    assert publication["parameters"]["properties"]["reason"] == {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 500,
+    }
+    managed_run = next(
+        tool["function"]
+        for tool in chat.TOOLS
+        if tool["function"]["name"] == "run_managed_doubao_question"
+    )
+    assert "Login=Unknown" in managed_run["description"]
 
 
 async def _local_admin(db_session):
@@ -233,6 +256,8 @@ async def test_tool_catalog_is_registry_backed_and_permission_projected(db_sessi
     response = await chat.list_chat_tools(workspace.id, identity, db_session)
     rows = {row["name"]: row for row in response.data["tools"]}
 
+    assert response.data["workspace_id"] == workspace.id
+    assert "studio_workspace_id" not in response.data
     assert set(rows) == {tool["function"]["name"] for tool in chat.TOOLS}
     for name in (
         "validate_workflow_draft",
@@ -263,10 +288,114 @@ async def test_tool_catalog_is_registry_backed_and_permission_projected(db_sessi
     viewer_rows = {row["name"]: row for row in viewer_response.data["tools"]}
     assert viewer_rows["list_projects"]["available"] is True
     assert viewer_rows["publish_workflow"]["available"] is False
-    assert viewer_rows["publish_workflow"]["reason"].startswith(
-        "workspace_permission_required:"
-    )
+    assert viewer_rows["publish_workflow"]["reason"].startswith("workspace_permission_required:")
     assert user.id != viewer.id
+
+
+@pytest.mark.asyncio
+async def test_studio_catalog_reads_and_confirmed_actions_keep_distinct_scopes(db_session):
+    identity, user, governed = await _local_admin(db_session)
+    studio = StudioWorkspace(name="Agent Studio", slug="agent-studio-tools")
+    db_session.add(studio)
+    await db_session.flush()
+    created = await agent_project_service.create_project_bundle(
+        db_session,
+        workspace_id=studio.id,
+        body=ProjectBootstrapCreate.model_validate(
+            {
+                "project": {"name": "独立 Studio", "slug": "distinct-studio"},
+                "workflow": {"name": "受管采集", "graph": _managed_graph()},
+            }
+        ),
+        actor_user_id=user.id,
+    )
+
+    response = await chat.list_chat_tools(
+        studio.id,
+        identity,
+        db_session,
+        project_id=created.project.id,
+        workflow_id=created.workflow.id,
+    )
+    assert response.data["version"] == "chat-tools/v1"
+    assert response.data["workspace_id"] == governed.id
+    assert response.data["studio_workspace_id"] == studio.id
+    assert {row["name"] for row in response.data["tools"]} == {
+        tool["function"]["name"] for tool in chat.TOOLS
+    }
+
+    conversation = AgentConversation(
+        workspace_id=governed.id,
+        created_by_user_id=user.id,
+        title="独立 Studio 会话",
+        status="active",
+        context_binding={
+            "surface": "agent-dock",
+            "studio_workspace_id": studio.id,
+            "project_id": created.project.id,
+            "workflow_id": created.workflow.id,
+        },
+    )
+    db_session.add(conversation)
+    await db_session.flush()
+    turn = AgentConversationTurn(
+        conversation_id=conversation.id,
+        workspace_id=governed.id,
+        sequence=1,
+        request_id="distinct-studio-read",
+        user_content="读取当前工作流",
+        context_binding=dict(conversation.context_binding),
+        tool_trace=[],
+        status=AgentConversationTurnStatus.RUNNING.value,
+    )
+    db_session.add(turn)
+    await db_session.flush()
+    provenance = ProposalProvenance(
+        conversation_id=conversation.id,
+        turn_id=turn.id,
+        context=dict(turn.context_binding),
+    )
+    drafts = await chat._run_read_tool(
+        db_session,
+        "get_workflow_draft",
+        {"project_id": created.project.id, "workflow_id": created.workflow.id},
+        identity=identity,
+        workspace_id=governed.id,
+        proposal_provenance=provenance,
+    )
+    assert drafts["workflow_id"] == created.workflow.id
+    turn.status = AgentConversationTurnStatus.COMPLETED.value
+    await db_session.flush()
+
+    proposal = await _propose_from_conversation(
+        db_session,
+        identity=identity,
+        conversation=conversation,
+        action_name="validate_workflow_draft",
+        args={
+            "project_id": created.project.id,
+            "workflow_id": created.workflow.id,
+            "expected_revision": 1,
+        },
+    )
+    result = await _confirm(db_session, identity, governed.id, proposal)
+    assert result["workspace_id"] == governed.id
+    assert result["studio_workspace_id"] == studio.id
+    assert result["workflow_id"] == created.workflow.id
+
+    with pytest.raises(HTTPException) as oidc_denied:
+        await chat.list_chat_tools(
+            studio.id,
+            RequestIdentity(
+                subject=identity.subject,
+                auth_method="oidc",
+                is_platform_admin=True,
+            ),
+            db_session,
+            project_id=created.project.id,
+            workflow_id=created.workflow.id,
+        )
+    assert oidc_denied.value.status_code == 403
 
 
 @pytest.mark.asyncio
@@ -429,6 +558,58 @@ async def test_confirmed_validation_publish_and_single_question_run_preserve_ori
         await db_session.scalar(select(func.count(WorkflowRun.id)).where(WorkflowRun.id == run.id))
         == 1
     )
+
+    second_proposal = await _propose_from_conversation(
+        db_session,
+        identity=identity,
+        conversation=conversation,
+        action_name="run_managed_doubao_question",
+        args={
+            "project_id": created.project.id,
+            "workflow_id": created.workflow.id,
+            "expected_published_version": 1,
+            "question": "高吉星第二个公开信息问题是什么？",
+        },
+    )
+    second_result = await _confirm(db_session, identity, workspace.id, second_proposal)
+    second_run = await db_session.get(WorkflowRun, second_result["run_id"])
+    assert second_run is not None
+    assert second_run.id != run.id
+    assert second_run.request["_serverConversationOrigin"] == {
+        "conversation_id": conversation.id,
+        "conversation_revision": 1,
+        "governed_workspace_id": workspace.id,
+        "studio_workspace_id": workspace.id,
+        "project_id": created.project.id,
+        "workflow_id": created.workflow.id,
+        "user_id": user.id,
+    }
+    assert conversation.context_binding["run_id"] == second_run.id
+    assert await db_session.scalar(select(func.count(WorkflowRun.id))) == 2
+
+    # A run id in the mutable conversation binding is accepted only when that
+    # run carries the exact server-stamped origin for this conversation.
+    run.request = {
+        key: value for key, value in run.request.items() if key != "_serverConversationOrigin"
+    }
+    conversation.context_binding = {**conversation.context_binding, "run_id": run.id}
+    await db_session.flush()
+    untrusted_prior = await _propose_from_conversation(
+        db_session,
+        identity=identity,
+        conversation=conversation,
+        action_name="run_managed_doubao_question",
+        args={
+            "project_id": created.project.id,
+            "workflow_id": created.workflow.id,
+            "expected_published_version": 1,
+            "question": "不可信历史运行不能授权第三次运行",
+        },
+    )
+    with pytest.raises(HTTPException) as rejected_prior:
+        await _confirm(db_session, identity, workspace.id, untrusted_prior)
+    assert rejected_prior.value.status_code == 409
+    assert await db_session.scalar(select(func.count(WorkflowRun.id))) == 2
     clear_after_commit_callbacks(db_session)
 
 
@@ -496,6 +677,23 @@ async def test_managed_run_preflight_failure_creates_no_proposal_staging_or_run(
     assert await db_session.scalar(select(OperationsWorkItem.id)) is None
     version.graph = allowed_graph
     await db_session.flush()
+
+    with pytest.raises(HTTPException) as blank_question:
+        await agent_control_service.create_proposal(
+            db_session,
+            workspace_id=workspace.id,
+            identity=identity,
+            action_name="run_managed_doubao_question",
+            args={
+                "project_id": created.project.id,
+                "workflow_id": created.workflow.id,
+                "expected_published_version": version.version,
+                "question": " \u00a0 ",
+            },
+            origin="chat",
+        )
+    assert blank_question.value.status_code == 422
+    assert await db_session.scalar(select(OperationsWorkItem.id)) is None
 
     async def not_logged_in() -> None:
         raise HTTPException(409, "Managed Doubao runtime is not ready: doubao-login-required")

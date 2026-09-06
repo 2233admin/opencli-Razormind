@@ -4,6 +4,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.models.agent_conversation import AgentConversation, AgentConversationStatus
+from backend.models.workflow_run import WorkflowRun
 from backend.security.identity import RequestIdentity
 from backend.security.workspace_rbac import WorkspacePermission, require_permission
 from backend.services.studio_agent_session_access import resolve_stored_agent_session_workspace
@@ -18,12 +19,18 @@ async def resolve_workflow_conversation_origin(
     studio_workspace_id: str,
     project_id: str,
     workflow_id: str,
+    governed_workspace_id: str | None = None,
 ) -> WorkflowConversationOrigin:
     """Reauthorize a persisted session and bind its exact Studio context."""
 
     conversation = await db.get(AgentConversation, conversation_id)
     if conversation is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Agent conversation not found")
+    if governed_workspace_id is not None and conversation.workspace_id != governed_workspace_id:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Agent conversation is not bound to this governed Workspace",
+        )
     scope = await resolve_stored_agent_session_workspace(
         db,
         identity,
@@ -41,12 +48,34 @@ async def resolve_workflow_conversation_origin(
         or binding.get("studio_workspace_id") != studio_workspace_id
         or binding.get("project_id") != project_id
         or binding.get("workflow_id") != workflow_id
-        or binding.get("run_id") is not None
     ):
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             "Agent conversation is not bound to this workflow draft",
         )
+    prior_run_id = binding.get("run_id")
+    if prior_run_id is not None:
+        prior_run = await db.get(WorkflowRun, prior_run_id)
+        stored_origin = (
+            prior_run.request.get("_serverConversationOrigin")
+            if prior_run is not None and isinstance(prior_run.request, dict)
+            else None
+        )
+        if (
+            prior_run is None
+            or prior_run.workflow_id != workflow_id
+            or not isinstance(stored_origin, dict)
+            or stored_origin.get("conversation_id") != conversation.id
+            or stored_origin.get("governed_workspace_id") != conversation.workspace_id
+            or stored_origin.get("studio_workspace_id") != studio_workspace_id
+            or stored_origin.get("project_id") != project_id
+            or stored_origin.get("workflow_id") != workflow_id
+            or stored_origin.get("user_id") != scope.access.user_id
+        ):
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "Agent conversation prior run is not attributable to this workflow",
+            )
     return WorkflowConversationOrigin(
         conversation_id=conversation.id,
         conversation_revision=conversation.revision,

@@ -134,7 +134,8 @@ SYSTEM_PROMPT = """你是 opencli-admin 的全局操作助手。用户可能位�
 - 用户要把草稿变成可运行版本时，先 validate_workflow_draft，再 publish_workflow；
   每一步都是独立的待确认提案，必须使用当前 revision 和 validation id。
 - 用户明确要求运行豆包采集时，只能用 run_managed_doubao_question 运行一个不超过
-  1000 字的问题，并绑定当前已发布版本。这是待确认提案；运行前会重新检查真实登录状态。
+  1000 字的问题，并绑定当前已发布版本。这是待确认提案；运行前会重新检查豆包会话
+  可用性。OpenCLI 报告 Login=Unknown 时保留该不确定性，不宣称已经登录。
 - 不要编造 id; 先用 list_* 拿到真实 id 再做写操作。
 - 用中文简洁回答。"""
 
@@ -379,7 +380,7 @@ TOOLS: list[dict[str, Any]] = [
                         "type": ["integer", "null"],
                         "minimum": 1,
                     },
-                    "reason": {"type": ["string", "null"]},
+                    "reason": {"type": "string", "minLength": 1, "maxLength": 500},
                 },
                 "required": [
                     "project_id",
@@ -399,7 +400,8 @@ TOOLS: list[dict[str, Any]] = [
             "name": "run_managed_doubao_question",
             "description": (
                 "使用当前已发布且受管的高吉星豆包工作流运行一个真实问题。"
-                "写操作，需确认；确认时重新检查权限、版本和豆包登录状态。"
+                "写操作，需确认；确认时重新检查权限、版本和豆包会话可用性。"
+                "如果 OpenCLI 返回 Login=Unknown，结果仍保留该不确定性。"
             ),
             "parameters": {
                 "type": "object",
@@ -733,6 +735,7 @@ async def _run_read_tool(
     *,
     identity: RequestIdentity | None = None,
     workspace_id: str | None = None,
+    proposal_provenance: ProposalProvenance | None = None,
 ) -> Any:
     if name == "list_sources":
         sources, _ = await source_service.list_sources(db, page=1, limit=100)
@@ -785,10 +788,16 @@ async def _run_read_tool(
         )
         access = await get_workspace_access(db, resolved_workspace_id, scoped_identity)
         require_permission(access, WorkspacePermission.READ)
+        resource_workspace_id = await agent_control_service.resolve_resource_workspace_id(
+            db,
+            workspace_id=resolved_workspace_id,
+            identity=scoped_identity,
+            provenance=proposal_provenance,
+        )
         if name == "list_projects":
             projects = await agent_project_service.list_projects(
                 db,
-                workspace_id=resolved_workspace_id,
+                workspace_id=resource_workspace_id,
             )
             return [
                 {
@@ -808,7 +817,7 @@ async def _run_read_tool(
         if name == "list_workflows":
             workflows = await agent_project_service.list_workflows(
                 db,
-                workspace_id=resolved_workspace_id,
+                workspace_id=resource_workspace_id,
                 project_id=project_id,
             )
             return [
@@ -826,7 +835,7 @@ async def _run_read_tool(
             raise HTTPException(status_code=422, detail="workflow_id is required")
         draft = await agent_project_service.get_workflow_draft(
             db,
-            workspace_id=resolved_workspace_id,
+            workspace_id=resource_workspace_id,
             project_id=project_id,
             workflow_id=workflow_id,
         )
@@ -1030,6 +1039,7 @@ async def _chat_with_client(
                 args,
                 identity=identity,
                 workspace_id=body.workspace_id or _workspace_id(body.context),
+                proposal_provenance=proposal_provenance,
             )
             tool_trace.append(
                 {
@@ -1124,15 +1134,43 @@ async def run_chat_request(
     return await resolver.resolve_with_fallback(db, "chat", operation)
 
 
-@router.get("/tools", response_model=ApiResponse[dict[str, list[dict[str, Any]]]])
+@router.get("/tools", response_model=ApiResponse[dict[str, Any]])
 async def list_chat_tools(
     workspace_id: str,
     identity: RequestIdentity = Depends(get_request_identity),
     db: AsyncSession = Depends(get_db),
+    *,
+    project_id: str | None = None,
+    workflow_id: str | None = None,
+    run_id: str | None = None,
 ) -> ApiResponse:
     """Project the model tool registry through the caller's Workspace access."""
 
-    access = await get_workspace_access(db, workspace_id, identity)
+    from backend.services.agent_conversation_service import validate_context_binding
+    from backend.services.studio_agent_session_access import resolve_agent_session_workspace
+
+    context = {
+        key: value
+        for key, value in {
+            "project_id": project_id,
+            "workflow_id": workflow_id,
+            "run_id": run_id,
+        }.items()
+        if value is not None
+    }
+    scope = await resolve_agent_session_workspace(
+        db,
+        identity,
+        workspace_id,
+        context=context,
+    )
+    await validate_context_binding(
+        db,
+        scope.workspace_id,
+        context,
+        studio_workspace_id=scope.studio_workspace_id,
+    )
+    access = scope.access
     tools: list[dict[str, Any]] = []
     for tool in TOOLS:
         function = tool["function"]
@@ -1151,7 +1189,14 @@ async def list_chat_tools(
         if not available:
             item["reason"] = f"workspace_permission_required:{permission.value}"
         tools.append(item)
-    return ApiResponse.ok({"tools": tools})
+    catalog: dict[str, Any] = {
+        "version": "chat-tools/v1",
+        "workspace_id": scope.workspace_id,
+        "tools": tools,
+    }
+    if scope.studio_workspace_id is not None:
+        catalog["studio_workspace_id"] = scope.studio_workspace_id
+    return ApiResponse.ok(catalog)
 
 
 @router.post("", response_model=ApiResponse[ChatReply])
@@ -1390,24 +1435,26 @@ async def confirm(
 # (XML_TOOL_TEXT) and parse the XML ourselves via the imported helpers.
 _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
 
-XML_TOOL_TEXT = (
-    "\n\n你是采集网络操作 agent。可用工具:\n"
-    "- list_sources(): 列出所有数据源 (id/name/enabled)。\n"
-    "- list_schedules(): 列出定时调度 (id/name/cron_expression/enabled)。\n"
-    "- list_tasks(): 列出最近采集任务 (id/source_id/status)。\n"
-    "- toggle_source(source_id, enabled): 启用/停用数据源 (写)。\n"
-    "- trigger_task(source_id): 立即触发一次采集 (写)。\n"
-    "- update_schedule(schedule_id, cron_expression?, enabled?): 改调度 cron 或启停 (写)。\n"
-    "- list_providers(): 列出模型提供商 (id/name/default_model/enabled)。\n"
-    "- update_provider(provider_id, default_model?, enabled?): 配置 AI 富化阶段的模型提供商, 改模型或启停 (写)。\n"  # noqa: E501
-    "- list_projects(): 列出当前 Workspace 的 Studio 项目。\n"
-    "- list_workflows(project_id): 列出项目工作流。\n"
-    "- get_workflow_draft(project_id, workflow_id): 读取草稿 graph 和 revision。\n"
-    "- create_project(project, workflow): 创建项目、主工作流和 revision=1 草稿 (写，需确认，不发布)。\n"  # noqa: E501
-    "- update_workflow_draft(project_id, workflow_id, revision, graph): 更新草稿 (写，需确认，不发布)。\n"  # noqa: E501
-    '需要调用工具时, 严格输出 XML: <tool_use name="工具名" id="toolu_1">{json 参数}</tool_use>\n'
-    "先用 list_* 拿到真实 id 再做写操作。不要用 markdown 代码块。"
-)
+
+def _build_xml_tool_text() -> str:
+    lines = ["\n\n你是采集网络操作 agent。可用工具:"]
+    for tool in TOOLS:
+        function = tool["function"]
+        properties = function.get("parameters", {}).get("properties", {})
+        required = set(function.get("parameters", {}).get("required", []))
+        signature = ", ".join(name if name in required else f"{name}?" for name in properties)
+        lines.append(f"- {function['name']}({signature}): {function['description']}")
+    lines.extend(
+        [
+            "需要调用工具时, 严格输出 XML: "
+            '<tool_use name="工具名" id="toolu_1">{json 参数}</tool_use>',
+            "先用 list_* 拿到真实 id 再做写操作。不要用 markdown 代码块。",
+        ]
+    )
+    return "\n".join(lines)
+
+
+XML_TOOL_TEXT = _build_xml_tool_text()
 
 
 async def _chat_xml(
@@ -1491,6 +1538,7 @@ async def _chat_xml(
                 args,
                 identity=identity,
                 workspace_id=body.workspace_id or _workspace_id(body.context),
+                proposal_provenance=proposal_provenance,
             )
             tool_trace.append(
                 {"name": name, "kind": "read", "status": "completed", "argument_keys": sorted(args)}

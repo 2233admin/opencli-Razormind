@@ -73,7 +73,7 @@ def _login_state(rows: list[dict[str, Any]]) -> str:
 
 
 async def preflight_managed_doubao_runtime() -> None:
-    """Run the driver's read-only status probe and reject unusable login states."""
+    """Probe session availability while preserving an indeterminate login state."""
 
     settings = get_settings()
     captured_status: list[dict[str, Any]] = []
@@ -102,7 +102,7 @@ async def preflight_managed_doubao_runtime() -> None:
 async def require_managed_doubao_version(
     db: AsyncSession,
     *,
-    workspace_id: str,
+    studio_workspace_id: str,
     project_id: str,
     workflow_id: str,
     expected_published_version: int,
@@ -112,7 +112,7 @@ async def require_managed_doubao_version(
 
     version = await get_published_workflow_version(
         db,
-        workspace_id=workspace_id,
+        workspace_id=studio_workspace_id,
         project_id=project_id,
         workflow_id=workflow_id,
     )
@@ -151,7 +151,8 @@ async def require_managed_doubao_version(
 async def start_managed_doubao_question(
     db: AsyncSession,
     *,
-    workspace_id: str,
+    governed_workspace_id: str,
+    studio_workspace_id: str,
     project_id: str,
     workflow_id: str,
     expected_published_version: int,
@@ -172,7 +173,7 @@ async def start_managed_doubao_question(
     normalized_question = _validated_question(question)
     version = await require_managed_doubao_version(
         db,
-        workspace_id=workspace_id,
+        studio_workspace_id=studio_workspace_id,
         project_id=project_id,
         workflow_id=workflow_id,
         expected_published_version=expected_published_version,
@@ -182,13 +183,14 @@ async def start_managed_doubao_question(
         db,
         identity,
         conversation_id=conversation_id,
-        studio_workspace_id=workspace_id,
+        studio_workspace_id=studio_workspace_id,
         project_id=project_id,
         workflow_id=workflow_id,
+        governed_workspace_id=governed_workspace_id,
     )
     idempotency_key = f"agent-control:{action_execution_id}"
     run_id = published_run_id(
-        workspace_id=workspace_id,
+        workspace_id=studio_workspace_id,
         project_id=project_id,
         workflow_id=workflow_id,
         version_id=version.id,
@@ -203,7 +205,7 @@ async def start_managed_doubao_question(
     try:
         response = await start_published_version_run(
             db=db,
-            workspace_id=workspace_id,
+            workspace_id=studio_workspace_id,
             project_id=project_id,
             workflow_id=workflow_id,
             version=version,
