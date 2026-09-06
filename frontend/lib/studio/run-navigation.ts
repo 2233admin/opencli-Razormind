@@ -28,6 +28,7 @@ export function parseRunNavigation(search: URLSearchParams): RunNavigationContex
     workflow: search.get('workflow')?.trim() || undefined,
     run: search.get('run')?.trim() || undefined,
     trace: search.get('trace')?.trim() || undefined,
+    ...(search.get('conversation')?.trim() ? { conversation: search.get('conversation')!.trim() } : {}),
   }
 }
 
@@ -70,6 +71,7 @@ export function buildProjectNavigationUrl(
   if (hasMatchingRunScope(current, context)) {
     context.run = current.run
     context.trace = current.trace
+    context.conversation = current.conversation
   }
 
   const query = buildNavigationSearch(context).toString()
@@ -106,7 +108,7 @@ export function shouldDiscardTraceHistoryEntry(currentHref: string, entry: Trace
 
 function buildNavigationSearch(context: RunNavigationContext) {
   const query = new URLSearchParams()
-  for (const key of ['workspace', 'project', 'workflow', 'run', 'trace'] as const) {
+  for (const key of ['workspace', 'project', 'workflow', 'run', 'trace', 'conversation'] as const) {
     const value = context[key]?.trim()
     if (value) query.set(key, value)
   }

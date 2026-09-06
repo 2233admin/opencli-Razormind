@@ -18,11 +18,13 @@ test('project tabs retain a run only within its exact workspace, project, and wo
     workflow: 'workflow-a',
     run: 'run-a',
     trace: 'trace-a',
+    conversation: 'conversation-a',
   }
 
   const matching = new URL(buildProjectNavigationUrl('evidence', { workspace: 'workspace-a', project: 'project-a', workflow: 'workflow-a' }, current), 'https://example.test')
   assert.equal(matching.searchParams.get('run'), 'run-a')
   assert.equal(matching.searchParams.get('trace'), 'trace-a')
+  assert.equal(matching.searchParams.get('conversation'), 'conversation-a')
 
   for (const scope of [
     { workspace: 'workspace-b', project: 'project-a', workflow: 'workflow-a' },
@@ -32,7 +34,15 @@ test('project tabs retain a run only within its exact workspace, project, and wo
     const href = new URL(buildProjectNavigationUrl('data', scope, current), 'https://example.test')
     assert.equal(href.searchParams.has('run'), false)
     assert.equal(href.searchParams.has('trace'), false)
+    assert.equal(href.searchParams.has('conversation'), false)
   }
+})
+
+test('a confirmed run link preserves the exact originating conversation', () => {
+  const context = { workspace: 'studio-a', project: 'project-a', workflow: 'workflow-a', run: 'run-a', conversation: 'conversation-a' }
+  const url = new URL(buildRunUrl('operations', context), 'https://example.test')
+  assert.equal(url.searchParams.get('conversation'), context.conversation)
+  assert.equal(parseRunNavigation(url.searchParams).conversation, context.conversation)
 })
 
 test('run URLs encode scope and closing a trace retains its project context', () => {
