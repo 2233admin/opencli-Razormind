@@ -26,6 +26,9 @@ from urllib.parse import urlsplit
 from uuid import uuid4
 
 _FORMAL_CHAT_URL = re.compile(r"^https://www\.doubao\.com/chat/\d+$")
+_MANAGED_NEW_CHAT_URL = re.compile(
+    r"^https://www\.doubao\.com/chat(?:/local_[A-Za-z0-9_-]+)?$"
+)
 _PLACEHOLDER_ANSWERS = {
     "已生成代码",
     "已生成图片",
@@ -191,11 +194,15 @@ class OpenCLIDoubaoEvidenceDriver:
                 starting_target=starting_target,
             )
             target_endpoint = _target_websocket_url(owned_target)
+            initial_chat_url = str(owned_target.get("url") or "").strip()
+            if not _MANAGED_NEW_CHAT_URL.fullmatch(initial_chat_url):
+                raise DoubaoDriverUnavailableError("doubao-new-session-unproven")
             _write_target_state(
                 self._target_state_root,
                 question_id=question_id,
                 question=question,
                 target_id=_target_id(owned_target),
+                initial_chat_url=initial_chat_url,
             )
 
             ask_code, _ask_rows, _ask_stderr = await self._command_runner(
@@ -261,6 +268,7 @@ class OpenCLIDoubaoEvidenceDriver:
                 question=question,
                 target_id=_target_id(owned_target),
                 conversation_url=chat_url,
+                initial_chat_url=initial_chat_url,
             )
             capture = await _maybe_await(
                 self._page_capture(
@@ -294,12 +302,22 @@ class OpenCLIDoubaoEvidenceDriver:
             )
             if target_state is None:
                 return None
-            target_id, expected_chat_url = target_state
+            target_id = str(target_state["target_id"])
+            expected_chat_url = target_state.get("conversation_url")
             targets = await self._target_lister(endpoint)
             matches = [row for row in targets if _target_id(row) == target_id]
-            if (
-                len(matches) != 1
-                or str(matches[0].get("url") or "").strip() != expected_chat_url
+            if len(matches) != 1:
+                return None
+            current_url = str(matches[0].get("url") or "").strip()
+            if target_state["phase"] == "submitted-formal":
+                if current_url != expected_chat_url:
+                    return None
+            elif (
+                target_state["phase"] != "target-owned"
+                or not _verification_artifact_exists(
+                    self._target_state_root, question_id=question_id
+                )
+                or not _FORMAL_CHAT_URL.fullmatch(current_url)
             ):
                 return None
             target_endpoint = _target_websocket_url(matches[0])
@@ -309,9 +327,11 @@ class OpenCLIDoubaoEvidenceDriver:
             if status_code:
                 return None
             chat_url = _chat_url(status_rows)
-            if chat_url != expected_chat_url:
+            if chat_url != current_url or (
+                expected_chat_url is not None and chat_url != expected_chat_url
+            ):
                 return None
-            return await _maybe_await(
+            capture = await _maybe_await(
                 self._page_capture(
                     endpoint=endpoint,
                     project_root=self._project_root,
@@ -320,8 +340,45 @@ class OpenCLIDoubaoEvidenceDriver:
                     answer="",
                     chat_url=chat_url,
                     allow_submit=False,
+                    require_existing_page=True,
                 )
             )
+            if target_state["phase"] == "submitted-formal":
+                return capture
+            if not _completed_recovery_capture(
+                capture,
+                question_id=question_id,
+                question=question,
+                chat_url=chat_url,
+            ):
+                return capture if _verification_capture(capture) else None
+
+            # Capture can take long enough for a human or another process to
+            # navigate the page. Recheck the exact target and URL before
+            # upgrading the journal; recovery never sends the question again.
+            confirmed_targets = await self._target_lister(endpoint)
+            confirmed = [
+                row
+                for row in confirmed_targets
+                if _target_id(row) == target_id
+                and str(row.get("url") or "").strip() == chat_url
+            ]
+            if len(confirmed) != 1:
+                return None
+            final_code, final_rows, _final_stderr = await self._command_runner(
+                _status_command(), _target_websocket_url(confirmed[0])
+            )
+            if final_code or _chat_url(final_rows) != chat_url:
+                return None
+            _write_target_state(
+                self._target_state_root,
+                question_id=question_id,
+                question=question,
+                target_id=target_id,
+                conversation_url=chat_url,
+                initial_chat_url=target_state.get("initial_chat_url"),
+            )
+            return capture
 
 
 def build_opencli_doubao_evidence_driver(
@@ -574,9 +631,14 @@ def _write_target_state(
     question: str,
     target_id: str,
     conversation_url: str | None = None,
+    initial_chat_url: str | None = None,
 ) -> None:
     if conversation_url is not None and not _FORMAL_CHAT_URL.fullmatch(conversation_url):
         raise DoubaoDriverUnavailableError("formal-chat-url-missing")
+    if initial_chat_url is not None and not _MANAGED_NEW_CHAT_URL.fullmatch(
+        initial_chat_url
+    ):
+        raise DoubaoDriverUnavailableError("doubao-new-session-unproven")
     state_path = _target_state_path(root, question_id)
     state_path.parent.mkdir(parents=True, exist_ok=True)
     temporary_path = state_path.with_suffix(f".{uuid4().hex}.tmp")
@@ -587,6 +649,7 @@ def _write_target_state(
         "targetId": target_id,
         "phase": "submitted-formal" if conversation_url else "target-owned",
         "conversationUrl": conversation_url,
+        "initialChatUrl": initial_chat_url,
     }
     temporary_path.write_text(
         json.dumps(payload, sort_keys=True, separators=(",", ":")),
@@ -597,7 +660,7 @@ def _write_target_state(
 
 def _read_target_state(
     root: Path, *, question_id: str, question: str
-) -> tuple[str, str] | None:
+) -> dict[str, str | None] | None:
     state_path = _target_state_path(root, question_id)
     try:
         payload = json.loads(state_path.read_text(encoding="utf-8"))
@@ -609,14 +672,79 @@ def _read_target_state(
         or payload.get("version") != _TARGET_STATE_VERSION
         or payload.get("questionId") != question_id
         or payload.get("questionSha256") != expected_hash
-        or payload.get("phase") != "submitted-formal"
+        or payload.get("phase") not in {"target-owned", "submitted-formal"}
     ):
         return None
     target_id = str(payload.get("targetId") or "").strip()
     conversation_url = str(payload.get("conversationUrl") or "").strip()
-    if not target_id or not _FORMAL_CHAT_URL.fullmatch(conversation_url):
+    initial_chat_url = str(payload.get("initialChatUrl") or "").strip() or None
+    if not target_id:
         return None
-    return target_id, conversation_url
+    if payload["phase"] == "submitted-formal" and not _FORMAL_CHAT_URL.fullmatch(
+        conversation_url
+    ):
+        return None
+    if initial_chat_url is not None and not _MANAGED_NEW_CHAT_URL.fullmatch(
+        initial_chat_url
+    ):
+        return None
+    return {
+        "target_id": target_id,
+        "phase": str(payload["phase"]),
+        "conversation_url": conversation_url or None,
+        "initial_chat_url": initial_chat_url,
+    }
+
+
+def _verification_artifact_exists(root: Path, *, question_id: str) -> bool:
+    if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{0,63}", question_id):
+        return False
+    state_path = _target_state_path(root, question_id)
+    try:
+        state_mtime_ns = state_path.stat().st_mtime_ns
+    except OSError:
+        return False
+    verification_root = root / "verification" / question_id
+    for pattern in (
+        "*_verification-captcha.png",
+        "*_verification-login.png",
+        "*_verification-access.png",
+    ):
+        for path in verification_root.glob(pattern):
+            try:
+                content = path.read_bytes()
+                expected_prefix = hashlib.sha256(content).hexdigest()[:20]
+                if (
+                    path.name.startswith(f"{expected_prefix}_verification-")
+                    and path.stat().st_mtime_ns >= state_mtime_ns
+                ):
+                    return True
+            except OSError:
+                continue
+    return False
+
+
+def _completed_recovery_capture(
+    capture: dict[str, Any] | None,
+    *,
+    question_id: str,
+    question: str,
+    chat_url: str,
+) -> bool:
+    return bool(
+        isinstance(capture, dict)
+        and capture.get("status") == "completed"
+        and capture.get("id") == question_id
+        and capture.get("question") == question
+        and capture.get("chat_url") == chat_url
+    )
+
+
+def _verification_capture(capture: dict[str, Any] | None) -> bool:
+    return bool(
+        isinstance(capture, dict)
+        and capture.get("status") == "verification_required"
+    )
 
 
 def _chat_url(
@@ -657,6 +785,7 @@ async def _capture_page_evidence(
     answer: str,
     chat_url: str,
     allow_submit: bool,
+    require_existing_page: bool = False,
 ) -> dict[str, Any] | None:
     if allow_submit:
         raise DoubaoDriverUnavailableError("page-capture-submit-forbidden")
@@ -681,6 +810,8 @@ async def _capture_page_evidence(
             None,
         )
         if page is None:
+            if require_existing_page:
+                return None
             page = await context.new_page()
             await page.goto(chat_url, wait_until="domcontentloaded", timeout=30_000)
         baseline = await page.evaluate(_BASELINE_PAGE_JS)

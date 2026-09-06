@@ -1,3 +1,4 @@
+import hashlib
 import inspect
 import sys
 import types
@@ -89,13 +90,29 @@ def _target(
 
 class _TargetProbe:
     def __init__(self, *responses: list[dict]) -> None:
-        self.responses = list(responses) or [[_target()]]
+        self.responses = list(responses) or [
+            [_target()],
+            [_target(url="https://www.doubao.com/chat/local_owned")],
+        ]
         self.calls: list[str] = []
 
     async def __call__(self, endpoint: str) -> list[dict]:
         self.calls.append(endpoint)
         index = min(len(self.calls) - 1, len(self.responses) - 1)
         return self.responses[index]
+
+
+def _write_verification_artifact(root: Path, question_id: str = "G0001") -> None:
+    content = b"verified challenge artifact"
+    digest = hashlib.sha256(content).hexdigest()[:20]
+    path = (
+        root
+        / "verification"
+        / question_id
+        / f"{digest}_verification-captcha.png"
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(content)
 
 
 @pytest.mark.asyncio
@@ -243,7 +260,12 @@ async def test_collect_uses_the_matched_page_answer_not_opencli_command_output(t
     assert page_calls[0]["allow_submit"] is False
     assert _read_target_state(
         tmp_path, question_id="G0001", question="第一道新题"
-    ) == ("owned-page", "https://www.doubao.com/chat/1234567890")
+    ) == {
+        "target_id": "owned-page",
+        "phase": "submitted-formal",
+        "conversation_url": "https://www.doubao.com/chat/1234567890",
+        "initial_chat_url": "https://www.doubao.com/chat/local_owned",
+    }
     assert commands.endpoints == [
         "ws://agent-1:19222/devtools/page/owned-page",
         "ws://agent-1:19222/devtools/page/owned-page",
@@ -538,7 +560,11 @@ async def test_collect_pins_one_equal_priority_starting_tab_without_crossing(tmp
         [
             _target("history-a", "https://www.doubao.com/chat/1111111111"),
             _target("history-b", "https://www.doubao.com/chat/2222222222"),
-        ]
+        ],
+        [
+            _target("history-a", "https://www.doubao.com/chat/local_owned"),
+            _target("history-b", "https://www.doubao.com/chat/2222222222"),
+        ],
     )
     driver = OpenCLIDoubaoEvidenceDriver(
         project_root=tmp_path,
@@ -664,6 +690,173 @@ async def test_inspect_current_requires_post_submit_formal_url_proof(tmp_path):
 
     assert await driver.inspect_current(question_id="G0001", question=question) is None
     assert commands.commands == []
+
+
+@pytest.mark.asyncio
+async def test_captcha_recovery_proves_exact_turn_then_upgrades_journal(tmp_path):
+    question = "第一道新题"
+    chat_url = "https://www.doubao.com/chat/1234567890"
+    _write_target_state(
+        tmp_path, question_id="G0001", question=question, target_id="owned-page"
+    )
+    _write_verification_artifact(tmp_path)
+    commands = _CommandProbe(status_url=chat_url)
+    page_calls = []
+
+    async def capture(**kwargs):
+        page_calls.append(kwargs)
+        return _canonical_capture("G0001", question, "验证码后的完整回答")
+
+    target = _target("owned-page", chat_url)
+    driver = OpenCLIDoubaoEvidenceDriver(
+        project_root=tmp_path,
+        endpoint_lease=_endpoint_lease,
+        command_runner=commands,
+        page_capture=capture,
+        target_lister=_TargetProbe([target], [target]),
+    )
+
+    result = await driver.inspect_current(question_id="G0001", question=question)
+
+    assert result is not None and result["answer"] == "验证码后的完整回答"
+    assert [command[1] for command in commands.commands] == ["status", "status"]
+    assert all(command[1] not in {"new", "ask"} for command in commands.commands)
+    assert page_calls[0]["require_existing_page"] is True
+    assert page_calls[0]["allow_submit"] is False
+    assert _read_target_state(
+        tmp_path, question_id="G0001", question=question
+    ) == {
+        "target_id": "owned-page",
+        "phase": "submitted-formal",
+        "conversation_url": chat_url,
+        "initial_chat_url": None,
+    }
+
+
+@pytest.mark.asyncio
+async def test_captcha_recovery_rejects_a_wrong_question_capture(tmp_path):
+    question = "第一道新题"
+    chat_url = "https://www.doubao.com/chat/1234567890"
+    _write_target_state(
+        tmp_path, question_id="G0001", question=question, target_id="owned-page"
+    )
+    _write_verification_artifact(tmp_path)
+    commands = _CommandProbe(status_url=chat_url)
+    driver = OpenCLIDoubaoEvidenceDriver(
+        project_root=tmp_path,
+        endpoint_lease=_endpoint_lease,
+        command_runner=commands,
+        page_capture=lambda **_kwargs: _canonical_capture(
+            "G0001", "另一道历史题", "历史回答"
+        ),
+        target_lister=_TargetProbe([_target("owned-page", chat_url)]),
+    )
+
+    assert await driver.inspect_current(question_id="G0001", question=question) is None
+    assert [command[1] for command in commands.commands] == ["status"]
+    assert _read_target_state(
+        tmp_path, question_id="G0001", question=question
+    )["phase"] == "target-owned"
+
+
+@pytest.mark.asyncio
+async def test_captcha_recovery_rejects_ambiguous_turn_capture(tmp_path):
+    question = "第一道新题"
+    chat_url = "https://www.doubao.com/chat/1234567890"
+    _write_target_state(
+        tmp_path, question_id="G0001", question=question, target_id="owned-page"
+    )
+    _write_verification_artifact(tmp_path)
+    commands = _CommandProbe(status_url=chat_url)
+    driver = OpenCLIDoubaoEvidenceDriver(
+        project_root=tmp_path,
+        endpoint_lease=_endpoint_lease,
+        command_runner=commands,
+        page_capture=lambda **_kwargs: None,
+        target_lister=_TargetProbe([_target("owned-page", chat_url)]),
+    )
+
+    assert await driver.inspect_current(question_id="G0001", question=question) is None
+    assert [command[1] for command in commands.commands] == ["status"]
+
+
+@pytest.mark.asyncio
+async def test_captcha_recovery_rejects_page_change_during_capture(tmp_path):
+    question = "第一道新题"
+    chat_url = "https://www.doubao.com/chat/1234567890"
+    _write_target_state(
+        tmp_path, question_id="G0001", question=question, target_id="owned-page"
+    )
+    _write_verification_artifact(tmp_path)
+    commands = _CommandProbe(status_url=chat_url)
+    driver = OpenCLIDoubaoEvidenceDriver(
+        project_root=tmp_path,
+        endpoint_lease=_endpoint_lease,
+        command_runner=commands,
+        page_capture=lambda **_kwargs: _canonical_capture(
+            "G0001", question, "看似有效的回答"
+        ),
+        target_lister=_TargetProbe(
+            [_target("owned-page", chat_url)],
+            [_target("owned-page", "https://www.doubao.com/chat/9999999999")],
+        ),
+    )
+
+    assert await driver.inspect_current(question_id="G0001", question=question) is None
+    assert [command[1] for command in commands.commands] == ["status"]
+    assert _read_target_state(
+        tmp_path, question_id="G0001", question=question
+    )["phase"] == "target-owned"
+
+
+@pytest.mark.asyncio
+async def test_captcha_recovery_requires_run_scoped_verification_artifact(tmp_path):
+    question = "第一道新题"
+    chat_url = "https://www.doubao.com/chat/1234567890"
+    _write_target_state(
+        tmp_path, question_id="G0001", question=question, target_id="owned-page"
+    )
+    commands = _CommandProbe(status_url=chat_url)
+    driver = OpenCLIDoubaoEvidenceDriver(
+        project_root=tmp_path,
+        endpoint_lease=_endpoint_lease,
+        command_runner=commands,
+        page_capture=lambda **_kwargs: pytest.fail("unproven recovery must not capture"),
+        target_lister=_TargetProbe([_target("owned-page", chat_url)]),
+    )
+
+    assert await driver.inspect_current(question_id="G0001", question=question) is None
+    assert commands.commands == []
+
+
+@pytest.mark.asyncio
+async def test_captcha_recovery_keeps_waiting_while_challenge_is_visible(tmp_path):
+    question = "第一道新题"
+    chat_url = "https://www.doubao.com/chat/1234567890"
+    _write_target_state(
+        tmp_path, question_id="G0001", question=question, target_id="owned-page"
+    )
+    _write_verification_artifact(tmp_path)
+    commands = _CommandProbe(status_url=chat_url)
+    challenge = {
+        "id": "G0001",
+        "question": question,
+        "status": "verification_required",
+        "verification": {"kind": "captcha", "pageMarkerDetected": True},
+    }
+    driver = OpenCLIDoubaoEvidenceDriver(
+        project_root=tmp_path,
+        endpoint_lease=_endpoint_lease,
+        command_runner=commands,
+        page_capture=lambda **_kwargs: challenge,
+        target_lister=_TargetProbe([_target("owned-page", chat_url)]),
+    )
+
+    assert await driver.inspect_current(question_id="G0001", question=question) == challenge
+    assert [command[1] for command in commands.commands] == ["status"]
+    assert _read_target_state(
+        tmp_path, question_id="G0001", question=question
+    )["phase"] == "target-owned"
 
 
 def test_ask_parent_deadline_covers_cli_timeout_and_runtime_padding():
