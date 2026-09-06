@@ -106,7 +106,7 @@ IMAGE_TAG=source docker compose -f docker-compose.yml -f docker-compose.build.ym
 
 ## 浏览器引擎与 CloakBrowser
 
-内置浏览器默认使用 Chromium。需要切换到 CloakBrowser 时，先在未提交的 .env 中设置构建和运行配置；BROWSER_ENGINE 必须与镜像构建时的变体一致：
+内置浏览器在未设置 `BROWSER_ENGINE` 时默认使用 `chromium`；显式空值或不支持的引擎值会报错退出，不会回退。Agent 保留对已安装 Chromium 的自动检测，也识别镜像内置运行时标记 `AGENT_HAS_CHROME=true`，不只依赖系统 `chromium` 命令来判断是否启动内置浏览器。需要切换到 CloakBrowser 时，先在未提交的 .env 中设置构建和运行配置；BROWSER_ENGINE 必须与镜像构建时的变体一致：
 
 ~~~bash
 BROWSER_ENGINE=cloakbrowser
