@@ -55,6 +55,7 @@ import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
 import { Textarea } from "@/components/ui/textarea"
+import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import {
   EvidenceBatchWorkbench,
@@ -137,6 +138,7 @@ export function RunTracePanel({
   const [runInputError, setRunInputError] = useState<string | null>(null)
   const [questionBankFile, setQuestionBankFile] = useState<File | null>(null)
   const [isResumingGaojixing, setIsResumingGaojixing] = useState(false)
+  const [recoverySelection, setRecoverySelection] = useState<{ runId: string; chatUrl: string } | null>(null)
 
   const workflowRunScope = useMemo(() => {
     const workspaceId = searchParams.get("workspace")?.trim() ?? ""
@@ -171,6 +173,8 @@ export function RunTracePanel({
   const [isContinuing, setIsContinuing] = useState(false)
 
   const projection = runState.projection
+  const recoveryChatUrl = recoverySelection?.runId === projection?.runId ? recoverySelection?.chatUrl ?? "" : ""
+  const invalidRecoveryChatUrl = Boolean(recoveryChatUrl.trim() && !/^https:\/\/www\.doubao\.com\/chat\/\d+$/.test(recoveryChatUrl.trim()))
   const errors = projection?.errors ?? []
   const blockedCount = projection?.nodeStates.filter((node) => node.status === "blocked" || node.status === "failed").length ?? 0
   const batchCount = projection?.nodeStates.reduce((sum, node) => sum + node.batches.length, 0) ?? 0
@@ -303,7 +307,7 @@ export function RunTracePanel({
   }
 
   const resumeGaojixingRun = async () => {
-    if (!projection || !gaojixingRecoveryCase || !workflowRunScope) return
+    if (!projection || !gaojixingRecoveryCase || !workflowRunScope || invalidRecoveryChatUrl) return
     setIsResumingGaojixing(true)
     setRunState((current) => ({ ...current, status: "running", error: null }))
     try {
@@ -312,6 +316,7 @@ export function RunTracePanel({
       const resumed = await resumeGaojixingWorkflowRun(projection.runId, {
         authorization,
         scope: workflowRunScope,
+        ...(recoveryChatUrl.trim() ? { expectedChatUrl: recoveryChatUrl.trim() } : {}),
       })
       applyWorkflowRunProjection(resumed)
       setRunState((current) => ({
@@ -704,18 +709,24 @@ export function RunTracePanel({
               />
               {gaojixingRecoveryCase ? (
                 <div className="mt-3 rounded-md border border-amber-500/30 bg-amber-500/10 p-3">
-                  <p className="text-xs font-medium">需要完成页面验证</p>
+                  <p className="text-xs font-medium">{gaojixingRecoveryCase.status === 'waiting_verification' ? '需要完成页面验证' : '需要核对原会话'}</p>
                   <p className="mt-1 break-all font-mono text-[10px] text-muted-foreground">
                     {gaojixingRecoveryCase.artifactRef}
                   </p>
+                  <label htmlFor="doubao-recovery-chat-url" className="mt-3 block text-xs font-medium">验证后的豆包会话链接（可选）</label>
+                  <Input id="doubao-recovery-chat-url" type="url" className="mt-1" placeholder="https://www.doubao.com/chat/…" value={recoveryChatUrl}
+                    disabled={isResumingGaojixing} aria-invalid={invalidRecoveryChatUrl} aria-describedby="doubao-recovery-url-help"
+                    onChange={(event) => setRecoverySelection({ runId: projection.runId, chatUrl: event.target.value })} />
+                  <p id="doubao-recovery-url-help" className="mt-2 text-[11px] leading-5 text-muted-foreground">若无法自动确认原会话，请粘贴验证后页面的链接。确认后只读取这个会话，并把你的选择记录到本次运行。</p>
+                  {invalidRecoveryChatUrl ? <p role="alert" className="mt-1 text-xs text-destructive">请填写以数字结尾的豆包正式会话链接，临时页面链接不可用。</p> : null}
                   <Button
                     size="sm"
                     className="mt-2 w-full"
                     onClick={() => void resumeGaojixingRun()}
-                    disabled={isResumingGaojixing || !workflowRunScope}
+                    disabled={isResumingGaojixing || !workflowRunScope || invalidRecoveryChatUrl}
                   >
                     {isResumingGaojixing ? <Loader2 className="size-3.5 animate-spin" /> : <Play className="size-3.5" />}
-                    已完成验证，继续
+                    {recoveryChatUrl.trim() ? '确认此会话并继续采集' : '已完成验证，继续'}
                   </Button>
                 </div>
               ) : null}

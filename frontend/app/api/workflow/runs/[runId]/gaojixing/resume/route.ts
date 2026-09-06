@@ -9,13 +9,29 @@ export async function POST(req: Request, context: { params: Promise<{ runId: str
   const { runId } = await context.params
   try {
     const scope = readWorkflowProxyScope(new URL(req.url))
+    const body = await req.text()
+    if (body.length > 1024) return Response.json({ success: false, message: "恢复请求过大" }, { status: 413 })
+    let recoveryBody: string | undefined
+    if (body.trim()) {
+      let input: unknown
+      try { input = JSON.parse(body) } catch { return Response.json({ success: false, message: "恢复请求格式无效" }, { status: 400 }) }
+      if (!input || typeof input !== "object" || Array.isArray(input)
+        || Object.keys(input).some((key) => key !== "expectedChatUrl")
+        || !("expectedChatUrl" in input) || typeof input.expectedChatUrl !== "string"
+        || !/^https:\/\/www\.doubao\.com\/chat\/\d+$/.test(input.expectedChatUrl)) {
+        return Response.json({ success: false, message: "请填写豆包正式会话链接" }, { status: 400 })
+      }
+      recoveryBody = JSON.stringify({ expectedChatUrl: input.expectedChatUrl })
+    }
     const response = await fetch(
       `${BACKEND_URL}${backendWorkflowRunsRoot(scope)}/${encodeURIComponent(runId)}/gaojixing/resume`,
       {
         method: "POST",
         headers: {
           ...forwardedRequestAuthHeaders(req),
+          ...(recoveryBody ? { "Content-Type": "application/json" } : {}),
         },
+        ...(recoveryBody ? { body: recoveryBody } : {}),
         cache: "no-store",
       },
     )

@@ -585,15 +585,21 @@ export async function queryWorkflowRunTrace(
 
 export async function resumeGaojixingWorkflowRun(
   runId: string,
-  options: { authorization?: string | null; scope?: WorkflowRunScope } = {},
+  options: { authorization?: string | null; scope?: WorkflowRunScope; expectedChatUrl?: string } = {},
 ): Promise<WorkflowRunProjection> {
+  const expectedChatUrl = options.expectedChatUrl?.trim()
+  if (expectedChatUrl && !/^https:\/\/www\.doubao\.com\/chat\/\d+$/.test(expectedChatUrl)) {
+    throw new Error("请填写验证后的豆包正式会话链接")
+  }
   const response = await fetch(
     withWorkflowRunScope(`${workflowRunEndpoint(runId)}/gaojixing/resume`, options.scope),
     {
       method: "POST",
       headers: {
         ...(options.authorization ? { Authorization: options.authorization } : {}),
+        ...(expectedChatUrl ? { "Content-Type": "application/json" } : {}),
       },
+      ...(expectedChatUrl ? { body: JSON.stringify({ expectedChatUrl }) } : {}),
     },
   )
   return readApiResponse(response, "Gaojixing Run resume failed")
