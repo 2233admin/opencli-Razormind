@@ -75,6 +75,34 @@ def _read_chrome_endpoints() -> list[str]:
 
 
 @asynccontextmanager
+async def connector_reply_lifespan(app: FastAPI):
+    """Own connector worker cleanup, including partial startup failures."""
+
+    connector_settings: Settings = app.state.connector_settings
+    if not connector_settings.connector_reply_enabled:
+        yield
+        return
+
+    from backend.database import AsyncSessionLocal
+    from backend.services.connector_reply_worker import (
+        recover_connector_receipts,
+        start_connector_reply_worker,
+        stop_connector_reply_worker,
+    )
+
+    try:
+        await start_connector_reply_worker(
+            AsyncSessionLocal,
+            reply_enabled=connector_settings.connector_reply_enabled,
+            artifact_enabled=connector_settings.connector_artifact_delivery_enabled,
+        )
+        await recover_connector_receipts()
+        yield
+    finally:
+        await stop_connector_reply_worker()
+
+
+@asynccontextmanager
 async def lifespan(app: FastAPI):
     # ADR-0005 bind guard: refuse to serve a non-localhost bind without an
     # API auth token. Raising here aborts uvicorn startup before a single
@@ -221,17 +249,20 @@ async def lifespan(app: FastAPI):
         settings.task_executor,
         settings.collection_orchestrator,
     )
-    yield
-    # Shutdown
-    acquisition_sweeper_stop.set()
-    await acquisition_sweeper
-    await cycle_task.stop()
-    if use_admin_scheduler:
-        from backend.scheduler import stop_scheduler
+    try:
+        async with connector_reply_lifespan(app):
+            yield
+    finally:
+        # Also clean up existing workers if connector startup/recovery fails.
+        acquisition_sweeper_stop.set()
+        await acquisition_sweeper
+        await cycle_task.stop()
+        if use_admin_scheduler:
+            from backend.scheduler import stop_scheduler
 
-        stop_scheduler()
-    await app.state.workflow_plugins.stop()
-    await mcp_lifespan.__aexit__(None, None, None)
+            stop_scheduler()
+        await app.state.workflow_plugins.stop()
+        await mcp_lifespan.__aexit__(None, None, None)
 
 
 def create_app(*, app_settings: Settings | None = None) -> FastAPI:
@@ -258,6 +289,7 @@ def create_app(*, app_settings: Settings | None = None) -> FastAPI:
     # multipart parts. Fleet auth is added afterwards and remains outermost.
     app.add_middleware(QuestionBankBodyLimitMiddleware)
     active_settings = app_settings or settings
+    app.state.connector_settings = active_settings
 
     workflow_plugins = build_workflow_plugin_registry(active_settings)
     app.state.workflow_plugins = workflow_plugins
