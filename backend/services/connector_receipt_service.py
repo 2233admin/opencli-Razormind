@@ -16,9 +16,16 @@ from backend.models.connector_reply import (
     ConnectorBindingChallenge,
     ConnectorInboundReceipt,
     ConnectorInstallation,
+    ConnectorOutboundDelivery,
     ConnectorPrincipalBinding,
+    ConnectorReplyGrant,
 )
 from backend.models.identity import User, Workspace, WorkspaceMembership
+from backend.services.connector_artifact_grant_service import (
+    CLAIM_PLACEHOLDER,
+    is_artifact_claim_intent,
+    resolve_artifact_claim,
+)
 
 
 class ReceiptConflictError(RuntimeError):
@@ -60,6 +67,14 @@ def canonical_request_hash(
     return hashlib.sha256(
         json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
+
+
+def classify_intent(text: str) -> str:
+    if text.startswith("绑定 "):
+        return "binding"
+    if is_artifact_claim_intent(text):
+        return "artifact_claim"
+    return "reply"
 
 
 async def _eligible_user_for_challenge(
@@ -128,7 +143,7 @@ async def persist_verified_message(
         raise ReceiptRejectedError("unsupported_message_shape")
 
     prefix = "绑定 "
-    intent = "binding" if message.safe_content_text.startswith(prefix) else "reply"
+    intent = classify_intent(message.safe_content_text)
     digest = canonical_request_hash(installation.id, message, intent)
     existing = await db.scalar(
         select(ConnectorInboundReceipt)
@@ -145,6 +160,8 @@ async def persist_verified_message(
 
     now = datetime.now(UTC)
     binding = None
+    grant = None
+    resolution = None
     error_code = None
     receipt_status = "rejected"
     installation_error = (
@@ -220,9 +237,65 @@ async def persist_verified_message(
                 await db.flush()
                 challenge.consumed_at = now
                 receipt_status = "completed"
-    else:
+    elif intent == "reply":
         binding = await _eligible_binding(db, installation, message)
-        error_code = "reply_grant_unavailable" if binding else "principal_not_bound"
+        if binding is None:
+            error_code = "principal_not_bound"
+        elif message.reply_to_message_id is None:
+            error_code = "reply_target_required"
+        else:
+            delivery = await db.scalar(
+                select(ConnectorOutboundDelivery).where(
+                    ConnectorOutboundDelivery.installation_id == installation.id,
+                    ConnectorOutboundDelivery.provider_message_id == message.reply_to_message_id,
+                    ConnectorOutboundDelivery.chat_id == message.chat_id,
+                    ConnectorOutboundDelivery.status == "sent",
+                )
+            )
+            grant = (
+                await db.get(ConnectorReplyGrant, delivery.reply_grant_id)
+                if delivery is not None
+                else None
+            )
+            expires_at = _aware_datetime(grant.expires_at) if grant is not None else None
+            if (
+                grant is None
+                or grant.status != "active"
+                or expires_at is None
+                or expires_at <= now
+                or grant.binding_id != binding.id
+                or grant.p2p_chat_id != message.chat_id
+            ):
+                error_code = "reply_grant_unavailable"
+            else:
+                receipt_status = "received"
+                error_code = None
+    else:
+        # Every claim-looking message is redacted before persistence, including
+        # malformed, expired, and unknown claims. Association is written only
+        # after the complete digest + binding checks succeed.
+        binding = await _eligible_binding(db, installation, message)
+        if binding is None:
+            resolution = None
+            error_code = "principal_not_bound"
+        else:
+            resolution = await resolve_artifact_claim(
+                db, text=message.safe_content_text, binding=binding
+            )
+            error_code = resolution.stable_error_code
+            if error_code is None:
+                receipt_status = "received"
+
+    resolved_conversation_id = None
+    resolved_reply_grant_id = None
+    resolved_artifact_grant_id = None
+    if intent == "artifact_claim" and binding is not None and resolution is not None:
+        resolved_conversation_id = resolution.conversation_id
+        resolved_reply_grant_id = resolution.reply_grant_id
+        resolved_artifact_grant_id = resolution.artifact_grant_id
+    elif intent == "reply" and error_code is None and grant is not None:
+        resolved_conversation_id = grant.conversation_id
+        resolved_reply_grant_id = grant.id
 
     receipt = ConnectorInboundReceipt(
         installation_id=installation.id,
@@ -233,11 +306,16 @@ async def persist_verified_message(
         sender_open_id=message.sender_open_id,
         chat_id=message.chat_id,
         reply_to_message_id=message.reply_to_message_id,
-        safe_content_text=message.safe_content_text,
+        safe_content_text=(
+            CLAIM_PLACEHOLDER if intent == "artifact_claim" else message.safe_content_text
+        ),
         intent=intent,
         status=receipt_status,
         stable_error_code=error_code,
         binding_id=binding.id if binding else None,
+        conversation_id=resolved_conversation_id,
+        reply_grant_id=resolved_reply_grant_id,
+        artifact_grant_id=resolved_artifact_grant_id,
         attempt_count=1,
         processed_at=now,
     )
@@ -251,3 +329,7 @@ async def persist_verified_message(
     installation.last_ready_at = now
     installation.last_error_code = installation_error
     return receipt
+
+
+def _aware_datetime(value: datetime) -> datetime:
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value

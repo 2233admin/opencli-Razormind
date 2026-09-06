@@ -24,6 +24,7 @@ from backend.services.connector_receipt_service import (
     ReceiptConflictError,
     VerifiedFeishuMessage,
     canonical_request_hash,
+    classify_intent,
     persist_verified_message,
 )
 
@@ -181,6 +182,12 @@ async def _commit_verified(
             receipt = await persist_verified_message(db, installation_id, message)
             await db.commit()
             if receipt.id:
+                if receipt.status == "received":
+                    from backend.services.connector_reply_worker import (
+                        schedule_connector_receipt,
+                    )
+
+                    schedule_connector_receipt(receipt.id)
                 return
     except ReceiptConflictError as exc:
         if str(exc) != "concurrent_receipt_insert":
@@ -188,7 +195,7 @@ async def _commit_verified(
 
     # A concurrent transaction or a timed-out prior request may own the unique
     # message key. Resolve only the already committed immutable row.
-    expected_intent = "binding" if message.safe_content_text.startswith("绑定 ") else "reply"
+    expected_intent = classify_intent(message.safe_content_text)
     expected_hash = canonical_request_hash(installation_id, message, expected_intent)
     for _ in range(10):
         async with session_factory() as db:

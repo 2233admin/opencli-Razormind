@@ -1,6 +1,6 @@
 """Connector installation administration and strict public callback endpoint."""
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -8,15 +8,23 @@ from backend.database import get_db
 from backend.models.connector_reply import ConnectorInstallation
 from backend.schemas.common import ApiResponse
 from backend.schemas.connector_reply import (
+    ConnectorArtifactGrantCreate,
+    ConnectorArtifactGrantCreated,
+    ConnectorArtifactGrantRead,
     ConnectorBindingChallengeRead,
     ConnectorBindingRead,
     ConnectorInstallationCreate,
     ConnectorInstallationHealth,
     ConnectorInstallationRead,
     ConnectorInstallationUpdate,
+    ConnectorReplyGrantCreate,
+    ConnectorReplyGrantCreated,
+    ConnectorReplyGrantRead,
 )
 from backend.security.identity import RequestIdentity, get_request_identity
+from backend.services import connector_artifact_grant_service as artifact_grants
 from backend.services import connector_installation_service as installations
+from backend.services import connector_reply_grant_service as reply_grants
 from backend.services.feishu_connector_runtime import dispatch_feishu_callback
 
 router = APIRouter(tags=["connector-replies"])
@@ -127,6 +135,165 @@ async def revoke_connector_binding(
 ):
     return ApiResponse.ok(
         await installations.revoke_binding(db, workspace_id, binding_public_id, identity)
+    )
+
+
+@router.post(
+    "/workspaces/{workspace_id}/projects/{project_id}/connector-reply-grants",
+    response_model=ApiResponse[ConnectorReplyGrantCreated],
+    status_code=201,
+)
+async def create_connector_reply_grant(
+    workspace_id: str,
+    project_id: str,
+    body: ConnectorReplyGrantCreate,
+    identity: RequestIdentity = Depends(get_request_identity),
+    db: AsyncSession = Depends(get_db),
+):
+    return ApiResponse.ok(
+        await reply_grants.create_reply_grant(db, workspace_id, project_id, identity, body)
+    )
+
+
+@router.get(
+    "/workspaces/{workspace_id}/projects/{project_id}/connector-reply-grants",
+    response_model=ApiResponse[list[ConnectorReplyGrantRead]],
+)
+async def list_connector_reply_grants(
+    workspace_id: str,
+    project_id: str,
+    conversation_id: str = Query(min_length=1, max_length=36),
+    limit: int = Query(default=20, ge=1, le=100),
+    identity: RequestIdentity = Depends(get_request_identity),
+    db: AsyncSession = Depends(get_db),
+):
+    return ApiResponse.ok(
+        await reply_grants.list_reply_grants(
+            db, workspace_id, project_id, conversation_id, identity, limit=limit
+        )
+    )
+
+
+@router.get(
+    "/workspaces/{workspace_id}/projects/{project_id}/connector-reply-grants/{reply_grant_public_id}",
+    response_model=ApiResponse[ConnectorReplyGrantRead],
+)
+async def get_connector_reply_grant(
+    workspace_id: str,
+    project_id: str,
+    reply_grant_public_id: str,
+    identity: RequestIdentity = Depends(get_request_identity),
+    db: AsyncSession = Depends(get_db),
+):
+    return ApiResponse.ok(
+        await reply_grants.get_reply_grant(
+            db, workspace_id, project_id, reply_grant_public_id, identity
+        )
+    )
+
+
+@router.delete(
+    "/workspaces/{workspace_id}/projects/{project_id}/connector-reply-grants/{reply_grant_public_id}",
+    response_model=ApiResponse[ConnectorReplyGrantRead],
+)
+async def revoke_connector_reply_grant(
+    workspace_id: str,
+    project_id: str,
+    reply_grant_public_id: str,
+    identity: RequestIdentity = Depends(get_request_identity),
+    db: AsyncSession = Depends(get_db),
+):
+    return ApiResponse.ok(
+        await reply_grants.revoke_reply_grant(
+            db, workspace_id, project_id, reply_grant_public_id, identity
+        )
+    )
+
+
+@router.post(
+    "/workspaces/{workspace_id}/projects/{project_id}/connector-reply-grants/{reply_grant_public_id}/artifact-grants",
+    response_model=ApiResponse[ConnectorArtifactGrantCreated],
+    status_code=201,
+)
+async def create_connector_artifact_grant(
+    workspace_id: str,
+    project_id: str,
+    reply_grant_public_id: str,
+    body: ConnectorArtifactGrantCreate,
+    identity: RequestIdentity = Depends(get_request_identity),
+    db: AsyncSession = Depends(get_db),
+):
+    return ApiResponse.ok(
+        await artifact_grants.create_artifact_grant(
+            db, workspace_id, project_id, reply_grant_public_id, identity, body
+        )
+    )
+
+
+@router.get(
+    "/workspaces/{workspace_id}/projects/{project_id}/connector-reply-grants/{reply_grant_public_id}/artifact-grants",
+    response_model=ApiResponse[list[ConnectorArtifactGrantRead]],
+)
+async def list_connector_artifact_grants(
+    workspace_id: str,
+    project_id: str,
+    reply_grant_public_id: str,
+    limit: int = Query(default=20, ge=1, le=100),
+    identity: RequestIdentity = Depends(get_request_identity),
+    db: AsyncSession = Depends(get_db),
+):
+    return ApiResponse.ok(
+        await artifact_grants.list_artifact_grants(
+            db, workspace_id, project_id, reply_grant_public_id, identity, limit=limit
+        )
+    )
+
+
+@router.get(
+    "/workspaces/{workspace_id}/projects/{project_id}/connector-reply-grants/{reply_grant_public_id}/artifact-grants/{artifact_grant_public_id}",
+    response_model=ApiResponse[ConnectorArtifactGrantRead],
+)
+async def get_connector_artifact_grant(
+    workspace_id: str,
+    project_id: str,
+    reply_grant_public_id: str,
+    artifact_grant_public_id: str,
+    identity: RequestIdentity = Depends(get_request_identity),
+    db: AsyncSession = Depends(get_db),
+):
+    return ApiResponse.ok(
+        await artifact_grants.get_artifact_grant(
+            db,
+            workspace_id,
+            project_id,
+            reply_grant_public_id,
+            artifact_grant_public_id,
+            identity,
+        )
+    )
+
+
+@router.delete(
+    "/workspaces/{workspace_id}/projects/{project_id}/connector-reply-grants/{reply_grant_public_id}/artifact-grants/{artifact_grant_public_id}",
+    response_model=ApiResponse[ConnectorArtifactGrantRead],
+)
+async def revoke_connector_artifact_grant(
+    workspace_id: str,
+    project_id: str,
+    reply_grant_public_id: str,
+    artifact_grant_public_id: str,
+    identity: RequestIdentity = Depends(get_request_identity),
+    db: AsyncSession = Depends(get_db),
+):
+    return ApiResponse.ok(
+        await artifact_grants.revoke_artifact_grant(
+            db,
+            workspace_id,
+            project_id,
+            reply_grant_public_id,
+            artifact_grant_public_id,
+            identity,
+        )
     )
 
 

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Protocol
 
 from fastapi import HTTPException, status
 from sqlalchemy import func, select
@@ -406,9 +406,7 @@ async def list_conversations(
         # Studio sessions share governed storage for the FK/RBAC boundary, but
         # their project context must never leak into ordinary workspace lists.
         return [
-            conversation
-            for conversation in conversations
-            if not _is_studio_session(conversation)
+            conversation for conversation in conversations if not _is_studio_session(conversation)
         ]
     assert scope.studio_workspace_id is not None
     return [
@@ -533,6 +531,233 @@ async def _model_session(db: AsyncSession) -> AsyncSession:
     return async_sessionmaker(bind=bind, expire_on_commit=False)()
 
 
+class ConnectorConversationAccessProtocol(Protocol):
+    @property
+    def conversation_id(self) -> str: ...
+
+    @property
+    def actor_identity(self) -> RequestIdentity: ...
+
+    @property
+    def context_binding(self) -> dict[str, str]: ...
+
+    @property
+    def expected_revision(self) -> int: ...
+
+    def assert_sealed(self) -> None: ...
+
+    async def reauthorize_for_finalize(self, db: AsyncSession) -> None: ...
+
+    async def advance_revision_cursor(self, db: AsyncSession, *, next_revision: int) -> bool: ...
+
+
+async def _mark_connector_turn_failed(
+    db: AsyncSession, turn_id: str, *, code: str, message: str
+) -> None:
+    await db.rollback()
+    async with db.begin():
+        turn = await db.scalar(
+            select(AgentConversationTurn)
+            .where(AgentConversationTurn.id == turn_id)
+            .with_for_update()
+        )
+        if turn is not None and turn.status == AgentConversationTurnStatus.RUNNING.value:
+            turn.status = AgentConversationTurnStatus.FAILED.value
+            turn.error_code = code
+            turn.error_message = _redact_error(message)
+
+
+async def send_connector_message(
+    db: AsyncSession,
+    access: ConnectorConversationAccessProtocol,
+    *,
+    request_id: str,
+    content: str,
+    chat_runner: Callable[..., Any] | None = None,
+    execution_fence_lost: Callable[[], bool] | None = None,
+) -> tuple[AgentConversation, AgentConversationTurn]:
+    """Run one connector turn using a sealed, freshly authorized capability."""
+
+    access.assert_sealed()
+    if not request_id.strip() or len(request_id) > 64:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY, "request_id must be 1..64 characters"
+        )
+    try:
+        _reject_unsafe_content(content)
+    except AgentConversationError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+    conversation = await db.scalar(
+        select(AgentConversation)
+        .where(AgentConversation.id == access.conversation_id)
+        .with_for_update()
+    )
+    if conversation is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Agent conversation not found")
+    if conversation.status != AgentConversationStatus.ACTIVE.value:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Agent conversation is closed")
+    if conversation.revision != access.expected_revision:
+        raise HTTPException(status.HTTP_409_CONFLICT, "conversation_revision_changed")
+    try:
+        studio_workspace_id = access.context_binding.get("studio_workspace_id")
+        binding = await validate_context_binding(
+            db,
+            conversation.workspace_id,
+            access.context_binding,
+            studio_workspace_id=studio_workspace_id,
+            allow_stored_studio_workspace=True,
+        )
+        _ensure_studio_context_continuity(conversation.context_binding, binding)
+        if binding != conversation.context_binding:
+            raise AgentConversationError("Connector conversation context changed")
+    except AgentConversationError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+
+    existing = await db.scalar(
+        select(AgentConversationTurn).where(
+            AgentConversationTurn.conversation_id == conversation.id,
+            AgentConversationTurn.request_id == request_id,
+        )
+    )
+    if existing is not None:
+        if existing.status == AgentConversationTurnStatus.RUNNING.value:
+            raise HTTPException(status.HTTP_409_CONFLICT, "conversation turn is already running")
+        if existing.status == AgentConversationTurnStatus.FAILED.value:
+            raise HTTPException(status.HTTP_409_CONFLICT, "conversation turn previously failed")
+        return conversation, existing
+    history_rows = list(
+        await db.scalars(
+            select(AgentConversationTurn)
+            .where(
+                AgentConversationTurn.conversation_id == conversation.id,
+                AgentConversationTurn.status.in_(
+                    (
+                        AgentConversationTurnStatus.COMPLETED.value,
+                        AgentConversationTurnStatus.PROPOSAL.value,
+                    )
+                ),
+            )
+            .order_by(AgentConversationTurn.sequence.desc())
+            .limit(MAX_HISTORY_TURNS)
+        )
+    )
+    history_rows.reverse()
+    turn, raced = await _insert_running_turn(db, conversation, request_id, content, binding)
+    if raced is not None:
+        if raced.status in {
+            AgentConversationTurnStatus.RUNNING.value,
+            AgentConversationTurnStatus.FAILED.value,
+        }:
+            raise HTTPException(status.HTTP_409_CONFLICT, "conversation turn is unavailable")
+        return conversation, raced
+    assert turn is not None
+    turn_id = turn.id
+    conversation_id = conversation.id
+    workspace_id = conversation.workspace_id
+    body = chat.ChatRequest(
+        messages=bounded_history(history_rows, content),
+        workspace_id=workspace_id,
+        context=binding,
+    )
+    # _insert_running_turn commits and refreshes. End the refresh transaction
+    # before any model network wait; finalization reloads every mutable row.
+    await db.rollback()
+    trace: list[dict[str, Any]] = []
+    model_db = await _model_session(db)
+    try:
+        runner = chat_runner or chat.run_chat_request
+        result = await runner(
+            model_db,
+            body,
+            access.actor_identity,
+            tool_trace=trace,
+            proposal_provenance=chat.ProposalProvenance(
+                conversation_id=conversation_id,
+                turn_id=turn_id,
+                context=binding,
+            ),
+        )
+        reply = result.data if isinstance(result, chat.ApiResponse) else result
+        if not isinstance(reply, chat.ChatReply):
+            raise RuntimeError("chat runner returned an invalid reply")
+        if reply.type == "proposal":
+            proposal = reply.proposal
+            if (
+                proposal is None
+                or proposal.workspace_id != workspace_id
+                or not proposal.work_item_id
+                or not proposal.proposal_version
+            ):
+                raise HTTPException(
+                    status.HTTP_409_CONFLICT,
+                    "Agent proposal is not bound to the conversation Workspace",
+                )
+        await model_db.commit()
+        if execution_fence_lost is not None and execution_fence_lost():
+            raise HTTPException(status.HTTP_409_CONFLICT, "connector_lease_lost")
+        await db.rollback()
+        async with db.begin():
+            fresh_conversation = await db.scalar(
+                select(AgentConversation)
+                .where(AgentConversation.id == conversation_id)
+                .with_for_update()
+            )
+            fresh_turn = await db.scalar(
+                select(AgentConversationTurn)
+                .where(AgentConversationTurn.id == turn_id)
+                .with_for_update()
+            )
+            if (
+                fresh_conversation is None
+                or fresh_turn is None
+                or fresh_conversation.status != AgentConversationStatus.ACTIVE.value
+                or fresh_conversation.revision != access.expected_revision
+                or fresh_conversation.context_binding != binding
+                or fresh_turn.status != AgentConversationTurnStatus.RUNNING.value
+                or (execution_fence_lost is not None and execution_fence_lost())
+            ):
+                raise HTTPException(status.HTTP_409_CONFLICT, "conversation_revision_changed")
+            await access.reauthorize_for_finalize(db)
+            next_revision = access.expected_revision + 1
+            if not await access.advance_revision_cursor(db, next_revision=next_revision):
+                raise HTTPException(status.HTTP_409_CONFLICT, "connector_lease_lost")
+            fresh_turn.response = _safe_response(reply)
+            fresh_turn.tool_trace = trace
+            fresh_turn.status = (
+                AgentConversationTurnStatus.PROPOSAL.value
+                if reply.type == "proposal"
+                else AgentConversationTurnStatus.COMPLETED.value
+            )
+            fresh_conversation.revision = next_revision
+        return fresh_conversation, fresh_turn
+    except (LlmAdapterError, ResolverError) as exc:
+        await model_db.rollback()
+        await _mark_connector_turn_failed(
+            db,
+            turn_id,
+            code=(
+                "model_unavailable"
+                if isinstance(exc, LlmAdapterError) and exc.retryable
+                else "model_error"
+            ),
+            message=str(exc),
+        )
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "模型调用失败") from exc
+    except HTTPException:
+        await model_db.rollback()
+        await _mark_connector_turn_failed(
+            db, turn_id, code="connector_authorization_changed", message="connector turn rejected"
+        )
+        raise
+    except Exception as exc:
+        await model_db.rollback()
+        await _mark_connector_turn_failed(db, turn_id, code="model_error", message=str(exc))
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, "模型调用失败") from exc
+    finally:
+        await model_db.close()
+
+
 async def send_message(
     db: AsyncSession,
     identity: RequestIdentity,
@@ -553,9 +778,7 @@ async def send_message(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
 
     conversation = await db.scalar(
-        select(AgentConversation)
-        .where(AgentConversation.id == conversation_id)
-        .with_for_update()
+        select(AgentConversation).where(AgentConversation.id == conversation_id).with_for_update()
     )
     if conversation is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Agent conversation not found")

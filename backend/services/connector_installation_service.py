@@ -193,11 +193,16 @@ async def installation_health(
     except ConnectorCredentialUnavailableError:
         credentials_ready = False
     callback_ready = row.status == "active" and credentials_ready
+    from backend.services.connector_reply_worker import get_connector_reply_worker_readiness
+
+    readiness = get_connector_reply_worker_readiness()
     return ConnectorInstallationHealth(
         installation_public_id=row.public_id,
         status=row.status if credentials_ready else "blocked",
         callback_ready=callback_ready,
         binding_ready=callback_ready,
+        reply_execution_ready=callback_ready and readiness.reply_execution_ready,
+        artifact_delivery_ready=callback_ready and readiness.artifact_delivery_ready,
         last_ready_at=row.last_ready_at,
         last_error_code=(row.last_error_code if credentials_ready else "credential_unavailable"),
     )
