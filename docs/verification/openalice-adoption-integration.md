@@ -6,11 +6,21 @@
 
 运行修复固定 new/ask/status 的 CDP 页面，持久化题级目标用于只读恢复，并保留脱敏失败原因。`651a8356` 修正 Studio 与 governed workspace 的工具执行混用、XML 工具描述遗漏，以及同会话二次运行受阻；`0af523d2` 加强新页面归属和正式会话证明。root 最终集成回归 97 项通过，独立审查允许进入实际运行。真实模型尚未配置；当前 UI 提供明确配置入口，不以模拟模型冒充完成。
 
-实际 API 8031 已更新为 `local/opencli-api:alice-real-staged-20260906`（后端源版本 `0af523d2`，image config SHA-256 `e9b4f0c3b0e24d4c6fbe1050073c6aefd32278247142c60052e2c395e44ef60b`），保留现有参考项目的 BBX 采集/解析及飞书 host bridge 四个源文件。实际数据库已备份并完成加法迁移；部署前副本验证确认 111 张原有表的原有字段值与记录数量不变，新增 10 张表及 5 个可空字段。API 健康检查、SDK 导入与依赖检查通过，只重建 API 容器。
+首次实际部署将 API 8031 更新为 `local/opencli-api:alice-real-staged-20260906`（后端源版本 `0af523d2`，image config SHA-256 `e9b4f0c3b0e24d4c6fbe1050073c6aefd32278247142c60052e2c395e44ef60b`），保留现有参考项目的 BBX 采集/解析及飞书 host bridge 四个源文件。实际数据库已备份并完成加法迁移；部署前副本验证确认 111 张原有表的原有字段值与记录数量不变，新增 10 张表及 5 个可空字段。API 健康检查、SDK 导入与依赖检查通过，只重建 API 容器。当前恢复版本见下文。
 
 8047 前端现连接实际 API 8031，使用独立 `.next-alice-real` 编译目录，避免与旧 8045 开发服务争用锁。真实浏览器验证通过正常登录、Alice 主对话、16 项服务器工具目录、已保存项目和发布 v1、运行的 32 条实际事件及 375px 布局；无页面异常。先前 8046 模拟库的截图仅是历史模块证据，不代表目前 8047 的数据来源。
 
-第二次实际单题运行 `fda616a7-c00c-5a15-afb2-83bd55825f6e` 已将题目提交至豆包，因真实图片验证码进入 `waiting_verification`。运行在项目内持久化，关联通过产品 API 创建的会话 `9d9be91a-5168-46bd-9f8f-ef083486098d`；该会话尚无真实 LLM 回合，不能当作 Agent 自然语言调度证据。验证码截图 SHA-256 为 `822688d48f53e6ef04e8287a5bb3d2aa5c9e929315174b21791b55b6154f10cd`，截图和 CDP 唯一目标均匹配本次原题。用户随后报告已在 noVNC 完成人工验证；正在按[恢复补齐合同](https://github.com/2233admin/opencli-Razormind/issues/116#issuecomment-5557231891)补充原页只读恢复，禁止重新 new/ask。当前没有完整新采集结果，pipeline 尚不能验收成功。
+第二次实际单题运行 `fda616a7-c00c-5a15-afb2-83bd55825f6e` 已将题目提交至豆包，曾因真实图片验证码进入 `waiting_verification`。用户完成人工验证后，root 于 2026-09-06 14:38:23（北京时间）从实际 8047 产品 UI 提交一次显式原会话恢复，202 接受；14:38:47 同一运行完成。没有重新提问。运行关联通过产品 API 创建的会话 `9d9be91a-5168-46bd-9f8f-ef083486098d`，但该会话尚无真实 LLM 回合，不能当作 Agent 自然语言调度证据。
+
+当前 API 镜像为 `local/opencli-api:alice-captcha-recovery-20260906`，后端源版本 `ef8ee718`，image config SHA-256 `07b5703f6dd512c8bb17dd23e055d811179158e11183bc6cd0f97981eadbd134`；前端整合版本 `dd9c89aa`。恢复复用已有解析/采集、权限和请求认证，没有新增依赖或数据库迁移。旧的仅凭验证码截图自动恢复方案被独立审查拒绝，未部署；最终按[显式恢复合同](https://github.com/2233admin/opencli-Razormind/issues/116#issuecomment-5557325588)实现认证操作者、正式 URL、服务端 scope/run/job/题目哈希/目标审计，driver 只读取既有页面，不升级旧 journal。真实审计记录只有一条。
+
+本次真实 pipeline 验收证据：运行 `completed`、57 条事件、6 个执行节点均完成且无错误；采集 job `2d651164-4642-4b67-bbc2-640fe5f20150` 为 `succeeded`；结构化证据认证 `certified`、零 violations，项目内追加记录恰为一条：`54351179-ed59-45d5-a9f8-ca6ec0c9f38f`。这是普通 Records 交付，项目产物（IntelligenceArtifact）列表仍为空，不能混称为生成了独立报告。问题为“宝宝补充DHA时，应该如何查看产品配料表？”，原回答 1158 字，正式来源 `https://www.doubao.com/chat/38440436182332418`，保存 5 张回答截图与原始 JSON；原始 JSON SHA-256 `5a7614486ab80b62cdd55c6fdce774df0072f99a6b416a078beefc8c657a0638`，证据摘要 `0058f8f14b6b64afd7a8279721f61aeb496bcaed28ccea954ddeb6b4a4b91bbb`。原始文件及截图存在、哈希吻合。认证仅覆盖结构、路径和哈希，不代表医学内容、视觉内容或 OCR 真实性已认证。
+
+独立恢复前后 CDP 快照确认同一 target、URL、User `54611914273905154` 和 Assistant `54611914273914370`；均为唯一 1 问 1 答、1158 字、无新 turn。真实 8047 数据工作台按本次 Run 显示一条记录，详情可读正文、来源和完整归档字段。Alice 主对话与 16 项对话工具、28 项工作流能力已可见；模型连接仍待用户选择/配置，因此父目标的自然语言 Agent 验收仍未完成。
+
+本轮验证：root 后端 64 项、前端请求与恢复 20 项、相关 ResearchGraph/证据工作台 10 项、完整 TypeScript、定向 ESLint、镜像依赖/导入及部署配置保留检查通过；独立 reviewer 复跑后端 64 和前端 20 并给出联合 GO。真实浏览器额外发现并修正原 Run 深链未加载、登录身份遗漏以及 Studio trace envelope 未解析；正常登录、恢复表单、URL 校验、刷新恢复原 Run 已通过，测试阶段无 start/resume POST，随后真实 UI 只点击一次恢复。扩大源码回归曾出现 54/65 通过，失败属于默认 Python 缺 sqlalchemy 及此前组件抽取后的旧源码断言，不能把本轮定向检查表述为全仓通过。
+
+路由记录：Sol 负责驱动和后端恢复边界，root 负责前端接线、整合、部署与真实运行，独立 Sol reviewer 负责验收。浏览器发现的认证/响应契约遗漏退回修正后复测；复用现有模块，没有再次派发整套实现。
 
 运行详情 `de59f483` 复用既有恢复状态解析，直接展示页面验证/原会话核对提示及本次工作流入口。实际采集浏览器入口是 `http://127.0.0.1:6080/vnc.html?autoconnect=true&resize=scale`；6080 根路径只显示目录列表。
 
