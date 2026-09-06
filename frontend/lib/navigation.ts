@@ -3,6 +3,7 @@ import {
   Blocks,
   Database,
   LayoutDashboard,
+  MessageSquare,
   PanelsTopLeft,
   Settings2,
   ShieldAlert,
@@ -32,6 +33,7 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     label: '工作台',
     items: [
+      { href: '/chat', label: 'Ask Alice', icon: MessageSquare },
       { href: '/dashboard', label: '概览', icon: LayoutDashboard },
       {
         href: '/inbox?tab=pending',
@@ -94,6 +96,7 @@ export const NAV_GROUPS: NavGroup[] = [
 
 /** Labels for every route (incl. tab siblings) used by breadcrumbs. */
 export const ROUTE_LABELS: Record<string, string> = {
+  '/chat': 'Ask Alice',
   '/dashboard': '概览',
   '/inbox': '任务与通知',
   '/studio': '项目',

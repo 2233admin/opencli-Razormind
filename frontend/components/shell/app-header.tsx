@@ -98,13 +98,13 @@ export function AppHeader({
           onClick={onOpenAgent}
         >
           <Bot />
-          <span>Agent</span>
+          <span>Ask Alice</span>
         </Button>
         <Button
           variant="ghost"
           size="icon"
           className="sm:hidden"
-          aria-label="打开全局 Agent"
+          aria-label="打开 Ask Alice 主对话"
           onClick={onOpenAgent}
         >
           <Bot />

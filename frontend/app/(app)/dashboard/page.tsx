@@ -38,6 +38,8 @@ import { notificationChannelLabel } from '@/lib/notification-channels'
 import { cn } from '@/lib/utils'
 import { AgentTaskRow, ToolChip } from '@/components/agent-native/agent-primitives'
 import type { AgentTaskStatus } from '@/components/agent-native/agent-primitives'
+import { AgentToolReference } from '@/components/agent/agent-tool-reference'
+import { AgentConversationSurface } from '@/components/shell/agent-conversation-surface'
 import { MatrixClock } from '@/components/monitor/matrix-clock'
 import { FailureFeed, TaskStream } from '@/components/monitor/task-stream'
 import { ThroughputChart } from '@/components/monitor/throughput-chart'
@@ -648,6 +650,21 @@ export default function DashboardPage() {
         </>
       }
     >
+      <section aria-labelledby="ask-alice-title" className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(320px,390px)]">
+        <div className="min-w-0">
+          <div className="mb-3 flex items-end justify-between gap-3">
+            <div>
+              <p className="eyebrow-mono">Primary workspace / 主对话</p>
+              <h2 id="ask-alice-title" className="mt-1 text-lg font-semibold">Ask Alice</h2>
+              <p className="mt-1 text-sm text-muted-foreground">查询当前工作区，创建项目提案，并从这里继续已有会话。</p>
+            </div>
+            <Link href="/chat" className={buttonVariants({ variant: 'outline', size: 'sm' })}>完整对话 <ArrowRight aria-hidden /></Link>
+          </div>
+          <AgentConversationSurface presentation="dashboard" />
+        </div>
+        <AgentToolReference compact />
+      </section>
+
       <section className="grid items-start gap-3 lg:grid-cols-[minmax(0,1.45fr)_minmax(300px,0.75fr)]" aria-labelledby="attention-title">
         <Card
           size="sm"
