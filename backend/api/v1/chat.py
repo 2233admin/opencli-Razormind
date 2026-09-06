@@ -77,6 +77,9 @@ _PUBLIC_TOOL_LABELS = {
     "get_workflow_draft": ("读取工作流草稿", "工作流草稿"),
     "create_project": ("创建项目草稿", "项目"),
     "update_workflow_draft": ("更新工作流草稿", "工作流草稿"),
+    "validate_workflow_draft": ("验证工作流草稿", "工作流草稿"),
+    "publish_workflow": ("发布工作流版本", "工作流版本"),
+    "run_managed_doubao_question": ("运行受管豆包单题", "工作流运行"),
 }
 
 
@@ -128,6 +131,10 @@ SYSTEM_PROMPT = """你是 opencli-admin 的全局操作助手。用户可能位�
   用户要改草稿时，用 update_workflow_draft，并使用读取到的当前 revision。
 - create_project 和 update_workflow_draft 都是写操作，只生成待确认提案；
   草稿不等于已发布或可运行版本。
+- 用户要把草稿变成可运行版本时，先 validate_workflow_draft，再 publish_workflow；
+  每一步都是独立的待确认提案，必须使用当前 revision 和 validation id。
+- 用户明确要求运行豆包采集时，只能用 run_managed_doubao_question 运行一个不超过
+  1000 字的问题，并绑定当前已发布版本。这是待确认提案；运行前会重新检查真实登录状态。
 - 不要编造 id; 先用 list_* 拿到真实 id 再做写操作。
 - 用中文简洁回答。"""
 
@@ -333,6 +340,81 @@ TOOLS: list[dict[str, Any]] = [
                     "graph": _WORKFLOW_PROJECT_TOOL_SCHEMA,
                 },
                 "required": ["project_id", "workflow_id", "revision", "graph"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "validate_workflow_draft",
+            "description": (
+                "验证指定 Studio 工作流当前草稿 revision。写操作，需确认；不会发布或运行。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "project_id": {"type": "string"},
+                    "workflow_id": {"type": "string"},
+                    "expected_revision": {"type": "integer", "minimum": 1},
+                },
+                "required": ["project_id", "workflow_id", "expected_revision"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "publish_workflow",
+            "description": "发布已经通过验证的精确工作流草稿版本。写操作，需确认；不会运行。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "project_id": {"type": "string"},
+                    "workflow_id": {"type": "string"},
+                    "expected_revision": {"type": "integer", "minimum": 1},
+                    "validation_run_id": {"type": "string"},
+                    "expected_current_published_version": {
+                        "type": ["integer", "null"],
+                        "minimum": 1,
+                    },
+                    "reason": {"type": ["string", "null"]},
+                },
+                "required": [
+                    "project_id",
+                    "workflow_id",
+                    "expected_revision",
+                    "validation_run_id",
+                    "expected_current_published_version",
+                    "reason",
+                ],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "run_managed_doubao_question",
+            "description": (
+                "使用当前已发布且受管的高吉星豆包工作流运行一个真实问题。"
+                "写操作，需确认；确认时重新检查权限、版本和豆包登录状态。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "project_id": {"type": "string"},
+                    "workflow_id": {"type": "string"},
+                    "expected_published_version": {"type": "integer", "minimum": 1},
+                    "question": {"type": "string", "minLength": 1, "maxLength": 1000},
+                },
+                "required": [
+                    "project_id",
+                    "workflow_id",
+                    "expected_published_version",
+                    "question",
+                ],
                 "additionalProperties": False,
             },
         },
@@ -1040,6 +1122,36 @@ async def run_chat_request(
         return ApiResponse.ok(result.reply)
 
     return await resolver.resolve_with_fallback(db, "chat", operation)
+
+
+@router.get("/tools", response_model=ApiResponse[dict[str, list[dict[str, Any]]]])
+async def list_chat_tools(
+    workspace_id: str,
+    identity: RequestIdentity = Depends(get_request_identity),
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse:
+    """Project the model tool registry through the caller's Workspace access."""
+
+    access = await get_workspace_access(db, workspace_id, identity)
+    tools: list[dict[str, Any]] = []
+    for tool in TOOLS:
+        function = tool["function"]
+        name = function["name"]
+        action = ACTION_REGISTRY.get(name) if name in WRITE_TOOLS else None
+        permission = action.permission if action is not None else WorkspacePermission.READ
+        available = access.allows(permission)
+        item: dict[str, Any] = {
+            "name": name,
+            "label": _PUBLIC_TOOL_LABELS.get(name, (name, ""))[0],
+            "description": function["description"],
+            "kind": "proposal" if action is not None else "read",
+            "requires_confirmation": action is not None,
+            "available": available,
+        }
+        if not available:
+            item["reason"] = f"workspace_permission_required:{permission.value}"
+        tools.append(item)
+    return ApiResponse.ok({"tools": tools})
 
 
 @router.post("", response_model=ApiResponse[ChatReply])

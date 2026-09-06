@@ -18,18 +18,19 @@ from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import HTTPException, status
-from pydantic import ValidationError
+from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.api.v1.studio_helpers import canonicalize_studio_graph, get_workflow
-from backend.api.v1.studio_schemas import DraftUpdate, ProjectBootstrapCreate
+from backend.api.v1.studio_schemas import DraftUpdate, ProjectBootstrapCreate, VersionCreate
 from backend.models.agent_conversation import (
     AgentConversation,
     AgentConversationStatus,
     AgentConversationTurn,
     AgentConversationTurnStatus,
 )
+from backend.models.gaojixing_collection import GaojixingCollectionRun
 from backend.models.identity import User, Workspace, WorkspaceMembership
 from backend.models.operations_work_item import (
     OperationsWorkItem,
@@ -39,11 +40,16 @@ from backend.models.operations_work_item import (
     WorkItemType,
 )
 from backend.models.provider import ModelProvider
-from backend.models.studio import StudioProject, StudioWorkflowDraft, StudioWorkspace
+from backend.models.studio import (
+    StudioProject,
+    StudioWorkflowDraft,
+    StudioWorkflowValidationRun,
+    StudioWorkspace,
+)
 from backend.schemas import workflow as workflow_schemas
 from backend.schemas.schedule import CronScheduleUpdate
 from backend.schemas.source import DataSourceUpdate
-from backend.security.identity import RequestIdentity
+from backend.security.identity import RequestIdentity, is_platform_admin
 from backend.security.workspace_rbac import (
     WorkspaceAccess,
     WorkspacePermission,
@@ -51,9 +57,15 @@ from backend.security.workspace_rbac import (
     require_permission,
 )
 from backend.services import schedule_service, source_service, task_service
+from backend.services.agent_managed_workflow_service import (
+    require_managed_doubao_version,
+    start_managed_doubao_question,
+)
 from backend.services.agent_project_service import (
     create_project_bundle,
+    publish_workflow_version,
     update_workflow_draft,
+    validate_workflow_draft,
 )
 
 logger = logging.getLogger(__name__)
@@ -85,6 +97,10 @@ class RecordedActionProposal:
 class ActionContext:
     workspace_id: str
     actor_user_id: str
+    identity: RequestIdentity | None = None
+    action_execution_id: str | None = None
+    conversation_id: str | None = None
+    conversation_turn_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -509,6 +525,7 @@ async def _execute_create_project(
         actor_user_id=context.actor_user_id,
     )
     return {
+        "studio_workspace_id": created.project.workspace_id,
         "project_id": created.project.id,
         "workflow_id": created.workflow.id,
         "draft_revision": created.draft.revision,
@@ -605,6 +622,277 @@ async def _execute_update_workflow_draft(
     }
 
 
+class _ValidateWorkflowArgs(BaseModel):
+    project_id: str = Field(min_length=1)
+    workflow_id: str = Field(min_length=1)
+    expected_revision: int = Field(ge=1)
+
+
+class _PublishWorkflowArgs(BaseModel):
+    project_id: str = Field(min_length=1)
+    workflow_id: str = Field(min_length=1)
+    expected_revision: int = Field(ge=1)
+    validation_run_id: str = Field(min_length=1)
+    expected_current_published_version: int | None = Field(..., ge=1)
+    reason: str = Field(min_length=1, max_length=500)
+
+
+class _RunManagedDoubaoQuestionArgs(BaseModel):
+    project_id: str = Field(min_length=1)
+    workflow_id: str = Field(min_length=1)
+    expected_published_version: int = Field(ge=1)
+    question: str = Field(min_length=1, max_length=1_000)
+
+
+async def _prepare_validate_workflow_draft(
+    db: AsyncSession,
+    args: dict[str, Any],
+    context: ActionContext | None = None,
+) -> ActionPreview:
+    action_context = _require_action_context(context)
+    try:
+        body = _ValidateWorkflowArgs.model_validate(args)
+    except ValidationError as exc:
+        raise _validation_error("Invalid Workflow validation", exc) from exc
+    workflow = await get_workflow(
+        db,
+        action_context.workspace_id,
+        body.project_id,
+        body.workflow_id,
+    )
+    draft = await db.scalar(
+        select(StudioWorkflowDraft).where(StudioWorkflowDraft.workflow_id == workflow.id)
+    )
+    if draft is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Workflow draft not found")
+    if draft.revision != body.expected_revision:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Workflow draft revision conflict")
+    normalized = body.model_dump()
+    return ActionPreview(
+        action_name="validate_workflow_draft",
+        args=normalized,
+        summary=f"验证工作流草稿「{workflow.name}」",
+        diff=f"draft revision {draft.revision}: unvalidated → validation recorded",
+        target_kind="studio_workflow_draft_validation",
+        target_id=workflow.id,
+        target_resource_version=_resource_version(
+            "studio_workflow_draft_validation",
+            workflow.id,
+            draft.updated_at,
+            {"revision": draft.revision, "graph": draft.graph},
+        ),
+    )
+
+
+async def _execute_validate_workflow_draft(
+    db: AsyncSession,
+    args: dict[str, Any],
+    context: ActionContext,
+) -> dict[str, Any]:
+    body = _ValidateWorkflowArgs.model_validate(args)
+    row = await validate_workflow_draft(
+        db,
+        workspace_id=context.workspace_id,
+        project_id=body.project_id,
+        workflow_id=body.workflow_id,
+        expected_revision=body.expected_revision,
+    )
+    return {
+        "project_id": body.project_id,
+        "workflow_id": body.workflow_id,
+        "draft_revision": row.draft_revision,
+        "validation_run_id": row.id,
+        "valid": row.valid,
+        "validation_status": row.status,
+        "errors": list(row.errors or []),
+        "warnings": list(row.warnings or []),
+    }
+
+
+async def _prepare_publish_workflow(
+    db: AsyncSession,
+    args: dict[str, Any],
+    context: ActionContext | None = None,
+) -> ActionPreview:
+    action_context = _require_action_context(context)
+    try:
+        body = _PublishWorkflowArgs.model_validate(args)
+    except ValidationError as exc:
+        raise _validation_error("Invalid Workflow publication", exc) from exc
+    workflow = await get_workflow(
+        db,
+        action_context.workspace_id,
+        body.project_id,
+        body.workflow_id,
+    )
+    if workflow.current_published_version != body.expected_current_published_version:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Published workflow version changed")
+    draft = await db.scalar(
+        select(StudioWorkflowDraft).where(StudioWorkflowDraft.workflow_id == workflow.id)
+    )
+    validation = await db.scalar(
+        select(StudioWorkflowValidationRun).where(
+            StudioWorkflowValidationRun.id == body.validation_run_id,
+            StudioWorkflowValidationRun.workflow_id == workflow.id,
+        )
+    )
+    if draft is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Workflow draft not found")
+    if draft.revision != body.expected_revision:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Workflow draft revision conflict")
+    if (
+        validation is None
+        or not validation.valid
+        or validation.status != "completed"
+        or validation.draft_revision != draft.revision
+        or validation.resolved_graph is None
+    ):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Current workflow draft revision has not passed validation",
+        )
+    normalized = body.model_dump()
+    return ActionPreview(
+        action_name="publish_workflow",
+        args=normalized,
+        summary=f"发布工作流「{workflow.name}」",
+        diff=(
+            f"published version {workflow.current_published_version or 0} → "
+            f"{(workflow.current_published_version or 0) + 1}; draft revision {draft.revision}"
+        ),
+        target_kind="studio_workflow_publication",
+        target_id=workflow.id,
+        target_resource_version=_resource_version(
+            "studio_workflow_publication",
+            workflow.id,
+            validation.updated_at,
+            {
+                "draft_revision": draft.revision,
+                "validation_run_id": validation.id,
+                "validation_valid": validation.valid,
+                "current_published_version": workflow.current_published_version,
+            },
+        ),
+    )
+
+
+async def _execute_publish_workflow(
+    db: AsyncSession,
+    args: dict[str, Any],
+    context: ActionContext,
+) -> dict[str, Any]:
+    body = _PublishWorkflowArgs.model_validate(args)
+    row = await publish_workflow_version(
+        db,
+        workspace_id=context.workspace_id,
+        project_id=body.project_id,
+        workflow_id=body.workflow_id,
+        body=VersionCreate.model_validate(
+            {
+                "reason": body.reason,
+                "expectedRevision": body.expected_revision,
+                "validationRunId": body.validation_run_id,
+            }
+        ),
+        actor_user_id=context.actor_user_id,
+        expected_current_version=body.expected_current_published_version,
+        enforce_current_version=True,
+    )
+    return {
+        "project_id": body.project_id,
+        "workflow_id": body.workflow_id,
+        "draft_revision": row.draft_revision,
+        "published_version": row.version,
+        "workflow_version_id": row.id,
+    }
+
+
+async def _prepare_run_managed_doubao_question(
+    db: AsyncSession,
+    args: dict[str, Any],
+    context: ActionContext | None = None,
+) -> ActionPreview:
+    action_context = _require_action_context(context)
+    try:
+        body = _RunManagedDoubaoQuestionArgs.model_validate(args)
+    except ValidationError as exc:
+        raise _validation_error("Invalid managed Doubao question", exc) from exc
+    version = await require_managed_doubao_version(
+        db,
+        workspace_id=action_context.workspace_id,
+        project_id=body.project_id,
+        workflow_id=body.workflow_id,
+        expected_published_version=body.expected_published_version,
+        check_runtime=True,
+    )
+    question = body.question.replace("\u00a0", " ").strip()
+    normalized = {**body.model_dump(), "question": question}
+    return ActionPreview(
+        action_name="run_managed_doubao_question",
+        args=normalized,
+        summary="运行一条受管豆包真实采集",
+        diff="one confirmed question → one immutable published Workflow Run",
+        target_kind="studio_managed_doubao_run",
+        target_id=f"{version.id}:single-question",
+        target_resource_version=_resource_version(
+            "studio_managed_doubao_run",
+            f"{version.id}:single-question",
+            version.created_at,
+            {
+                "workflow_version_id": version.id,
+                "published_version": version.version,
+                "graph": version.graph,
+                "question_sha256": hashlib.sha256(question.encode()).hexdigest(),
+            },
+        ),
+    )
+
+
+async def _execute_run_managed_doubao_question(
+    db: AsyncSession,
+    args: dict[str, Any],
+    context: ActionContext,
+) -> dict[str, Any]:
+    body = _RunManagedDoubaoQuestionArgs.model_validate(args)
+    if (
+        context.identity is None
+        or context.action_execution_id is None
+        or context.conversation_id is None
+        or context.conversation_turn_id is None
+    ):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Managed Doubao runs require confirmed conversation provenance",
+        )
+    run, projection = await start_managed_doubao_question(
+        db,
+        workspace_id=context.workspace_id,
+        project_id=body.project_id,
+        workflow_id=body.workflow_id,
+        expected_published_version=body.expected_published_version,
+        question=body.question,
+        identity=context.identity,
+        actor_user_id=context.actor_user_id,
+        conversation_id=context.conversation_id,
+        action_execution_id=context.action_execution_id,
+    )
+    job = await db.scalar(
+        select(GaojixingCollectionRun).where(
+            GaojixingCollectionRun.workflow_run_id == run.id
+        )
+    )
+    projection_status = getattr(projection, "status", None)
+    return {
+        "project_id": body.project_id,
+        "workflow_id": body.workflow_id,
+        "published_version": body.expected_published_version,
+        "run_id": run.id,
+        "run_status": projection_status or run.status,
+        "collection_job_id": job.id if job is not None else None,
+        "question_count": 1,
+    }
+
+
 def _build_registry() -> AgentControlActionRegistry:
     registry = AgentControlActionRegistry()
     registry.register(
@@ -659,6 +947,33 @@ def _build_registry() -> AgentControlActionRegistry:
             severity=Severity.MEDIUM,
             prepare=_prepare_update_workflow_draft,
             execute=_execute_update_workflow_draft,
+        )
+    )
+    registry.register(
+        RegisteredAction(
+            name="validate_workflow_draft",
+            permission=WorkspacePermission.MANAGE_CONFIGURATION,
+            severity=Severity.LOW,
+            prepare=_prepare_validate_workflow_draft,
+            execute=_execute_validate_workflow_draft,
+        )
+    )
+    registry.register(
+        RegisteredAction(
+            name="publish_workflow",
+            permission=WorkspacePermission.MANAGE_CONFIGURATION,
+            severity=Severity.MEDIUM,
+            prepare=_prepare_publish_workflow,
+            execute=_execute_publish_workflow,
+        )
+    )
+    registry.register(
+        RegisteredAction(
+            name="run_managed_doubao_question",
+            permission=WorkspacePermission.RUN_OPERATIONS_AGENTS,
+            severity=Severity.MEDIUM,
+            prepare=_prepare_run_managed_doubao_question,
+            execute=_execute_run_managed_doubao_question,
         )
     )
     return registry
@@ -760,7 +1075,11 @@ class AgentControlService:
         action = self.registry.get(action_name)
         access = await get_workspace_access(db, workspace_id, identity)
         require_permission(access, action.permission)
-        action_context = ActionContext(workspace_id=workspace_id, actor_user_id=access.user_id)
+        action_context = ActionContext(
+            workspace_id=workspace_id,
+            actor_user_id=access.user_id,
+            identity=identity,
+        )
         preview = await action.prepare(db, args, action_context)
         if provenance is not None:
             await self._validate_provenance(
@@ -954,7 +1273,14 @@ class AgentControlService:
 
         action = self.registry.get(action_name)
         require_permission(access, action.permission)
-        action_context = ActionContext(workspace_id=workspace_id, actor_user_id=access.user_id)
+        action_context = ActionContext(
+            workspace_id=workspace_id,
+            actor_user_id=access.user_id,
+            identity=identity,
+            action_execution_id=work_item.id,
+            conversation_id=origin_conversation.id if origin_conversation is not None else None,
+            conversation_turn_id=origin_turn.id if origin_turn is not None else None,
+        )
         preview = await action.prepare(db, args, action_context)
         if evidence.get("target_resource_version") != preview.target_resource_version:
             raise HTTPException(
@@ -1013,6 +1339,14 @@ class AgentControlService:
             result["conversation_turn_id"] = origin_turn.id
         if origin_conversation is not None:
             binding = dict(origin_conversation.context_binding or {})
+            studio_workspace_id = action_result.get("studio_workspace_id")
+            if (
+                isinstance(studio_workspace_id, str)
+                and studio_workspace_id
+                and identity.auth_method in {"local", "bootstrap"}
+                and is_platform_admin(identity)
+            ):
+                binding["studio_workspace_id"] = studio_workspace_id
             project_id = action_result.get("project_id")
             workflow_id = action_result.get("workflow_id")
             if isinstance(project_id, str) and project_id:
@@ -1025,6 +1359,9 @@ class AgentControlService:
                 if binding.get("workflow_id") != workflow_id:
                     binding.pop("run_id", None)
                 binding["workflow_id"] = workflow_id
+            run_id = action_result.get("run_id")
+            if isinstance(run_id, str) and run_id:
+                binding["run_id"] = run_id
             if binding != origin_conversation.context_binding:
                 origin_conversation.context_binding = binding
                 origin_conversation.revision += 1
