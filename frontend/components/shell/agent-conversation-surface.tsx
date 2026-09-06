@@ -708,20 +708,21 @@ export function AgentConversationSurface({
               </select>
             </label>
           ) : null}
-          <div className="flex items-start gap-2">
-            <div className="min-w-0 flex-1">
+          <div className={presentation === 'page' ? 'mt-3 grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2' : 'flex items-start gap-2'}>
+            <div className={presentation === 'page' ? 'order-2 col-span-2 min-w-0' : 'min-w-0 flex-1'}>
               <label className="sr-only" htmlFor="agent-session-search">搜索 Agent 会话</label>
               <div className="relative">
                 <Search className="pointer-events-none absolute left-2 top-2 size-3.5 text-muted-foreground" aria-hidden />
                 <input id="agent-session-search" value={sessionSearch} onChange={(event) => setSessionSearch(event.target.value)} placeholder="搜索会话、项目或工作流" className="min-h-9 w-full rounded-xs border bg-background py-1 pl-7 pr-2 text-xs" />
               </div>
               {presentation === 'page' ? (
-                <div className="mt-1 max-h-28 space-y-1 overflow-y-auto rounded-xs border bg-background p-1" aria-label="选择 Agent 会话">
+                <div className="mt-2 max-h-[480px] space-y-1 overflow-y-auto rounded-xs border bg-background p-1" aria-label="选择 Agent 会话">
                   {visibleSessions.length === 0 ? <p className="px-2 py-1 text-xs text-muted-foreground">还没有会话，发送第一句即可开始。</p> : visibleSessions.map((session) => (
                     <button
                       key={session.id}
                       type="button"
                       onClick={() => selectSession(session.id)}
+                      title={session.title ?? undefined}
                       disabled={sending || confirming || closing}
                       className={`flex min-h-9 w-full items-center justify-between gap-2 rounded px-2 text-left text-xs hover:bg-muted disabled:opacity-50 ${session.id === sessionId ? 'bg-muted font-medium' : ''}`}
                     >
@@ -774,12 +775,12 @@ export function AgentConversationSurface({
         </div>
 
         <div className={presentation === 'page' ? 'flex min-h-0 min-w-0 flex-col' : 'flex min-h-0 flex-1 flex-col'}>
-          {presentation === 'page' ? <div className="flex min-h-14 items-center gap-2 border-b px-3">
+          {presentation === 'page' ? <div className="flex min-h-14 flex-wrap items-center gap-2 border-b px-3 py-2">
             <Button type="button" variant="ghost" size="icon-sm" onClick={() => setRailOpen((value) => !value)} aria-label="切换会话侧栏">
               {railOpen ? <PanelLeftClose aria-hidden /> : <PanelLeftOpen aria-hidden />}
             </Button>
             <div className="min-w-0 flex-1"><div className="truncate text-sm font-semibold">{selectedSession?.title || '新会话'}</div><div className="truncate text-xs text-muted-foreground">{authorizedWorkspace?.name ?? '选择 Workspace'} · {boundExecutionTarget?.label ?? selectedExecutionTarget?.label ?? '选择执行配置'}</div></div>
-            {!selectedSession ? <div className="flex items-center gap-1"><select value={executionTargetId} onChange={(event) => { const target = executionTargets.find((item) => item.id === event.target.value); setExecutionTargetId(event.target.value); setModelId(target?.default_model_id ?? target?.models[0]?.id ?? '') }} className="min-h-9 max-w-44 rounded border bg-background px-2 text-xs" aria-label="执行配置"><option value="">选择执行配置</option>{executionTargets.map((target) => <option key={target.id} value={target.id}>{target.label} · {target.readiness.status === 'ready' ? '就绪' : target.readiness.status === 'blocked' ? '不可用' : '待验证'}</option>)}</select>{selectedExecutionTarget?.models.length ? <select value={modelId} onChange={(event) => setModelId(event.target.value)} className="min-h-9 max-w-32 rounded border bg-background px-2 text-xs" aria-label="模型">{selectedExecutionTarget.models.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}</select> : null}<select value={executionMode} onChange={(event) => setExecutionMode(event.target.value as 'synchronous' | 'background')} className="min-h-9 rounded border bg-background px-2 text-xs" aria-label="执行方式"><option value="synchronous">同步</option><option value="background">后台</option></select></div> : null}
+            {!selectedSession ? <div className="flex w-full flex-wrap items-center gap-1"><select value={executionTargetId} onChange={(event) => { const target = executionTargets.find((item) => item.id === event.target.value); setExecutionTargetId(event.target.value); setModelId(target?.default_model_id ?? target?.models[0]?.id ?? '') }} className="min-h-9 max-w-44 rounded border bg-background px-2 text-xs" aria-label="执行配置"><option value="">选择执行配置</option>{executionTargets.map((target) => <option key={target.id} value={target.id}>{target.label} · {target.readiness.status === 'ready' ? '就绪' : target.readiness.status === 'blocked' ? '不可用' : '待验证'}</option>)}</select>{selectedExecutionTarget?.models.length ? <select value={modelId} onChange={(event) => setModelId(event.target.value)} className="min-h-9 max-w-32 rounded border bg-background px-2 text-xs" aria-label="模型">{selectedExecutionTarget.models.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}</select> : null}<select value={executionMode} onChange={(event) => setExecutionMode(event.target.value as 'synchronous' | 'background')} className="min-h-9 rounded border bg-background px-2 text-xs" aria-label="执行方式"><option value="synchronous">同步</option><option value="background">后台</option></select></div> : null}
           </div> : null}
         <ScrollArea className="min-h-0 flex-1">
           <div className="space-y-3 p-4" aria-live="polite">
@@ -798,6 +799,13 @@ export function AgentConversationSurface({
             {!workspaceId && !workspaceScopeError ? (
               <div className="rounded-md border border-warning/40 bg-warning/10 p-4 text-xs" role="alert">
                 当前工作区不明确。请在这里选择一个已授权工作区；不会自动跨范围打开或创建会话。
+              </div>
+            ) : null}
+            {presentation === 'page' && executionTargetsQuery.isSuccess && executionTargets.length === 0 ? (
+              <div className="rounded-md border border-warning/40 bg-warning/10 p-3 text-xs" role="status">
+                <div className="font-medium">尚未连接可用的 Agent</div>
+                <p className="mt-1 text-muted-foreground">连接模型后即可发送任务。已有会话和项目结果仍可查看。</p>
+                <Link href="/providers" className="mt-2 inline-flex min-h-9 items-center underline underline-offset-4">配置模型与连接</Link>
               </div>
             ) : null}
             {presentation !== 'page' && providersQuery.isSuccess && !modelConfigured ? (
