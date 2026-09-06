@@ -102,3 +102,7 @@ def configure_delivery_app(app: FastAPI) -> None:
         # An observer of the fake remote recipient, never a product endpoint.
         # The capture lives in this disposable process only.
         return {"data": sent[-100:]}
+
+    # create_app ends with the root MCP mount; the fixture observer must precede it.
+    # Middleware still applies, and no production route or mount is removed.
+    app.router.routes.insert(0, app.router.routes.pop())
