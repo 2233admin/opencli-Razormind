@@ -1,3 +1,5 @@
+import { workflowRequestAuthHeaders } from "./request-auth"
+
 export type WorkflowResearchGraphEntity = {
   id: string
   kind: "source" | "evidence" | "claim" | "relation"
@@ -101,7 +103,7 @@ async function read<T>(path: string, options: ResearchGraphReadOptions, fallback
   if (options.entityId) search.set("entityId", options.entityId)
   if (options.limit !== undefined) search.set("limit", String(options.limit))
   const response = await fetch(`${path}${search.size ? `?${search}` : ""}`, {
-    headers: options.authorization ? { Authorization: options.authorization } : {},
+    headers: workflowRequestAuthHeaders(options.authorization),
     cache: "no-store",
   })
   const body = await response.json() as { data?: T; error?: string; message?: string }
@@ -118,7 +120,7 @@ async function mutate(
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      ...(options.authorization ? { Authorization: options.authorization } : {}),
+      ...workflowRequestAuthHeaders(options.authorization),
     },
     body: JSON.stringify(request),
   })

@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react"
+import { useSearchParams } from "next/navigation"
 import {
   ReactFlowProvider,
   useReactFlow,
@@ -137,6 +138,10 @@ function EditorCanvas({
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [projectSettingsOpen, setProjectSettingsOpen] = useState(false)
   const [runTraceOpen, setRunTraceOpen] = useState(false)
+  const linkedRunId = useSearchParams().get("run")?.trim() || null
+  useEffect(() => {
+    if (linkedRunId) setRunTraceOpen(true)
+  }, [linkedRunId])
   const [nodeManagementOpen, setNodeManagementOpen] = useState(false)
   const [workbenchMode, setWorkbenchMode] = useState<WorkflowWorkbenchMode | null>(null)
   const [zoom, setZoom] = useState(1)

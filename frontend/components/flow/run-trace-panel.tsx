@@ -1,9 +1,9 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react"
 import { Activity, FileInput, Loader2, Play, RotateCcw } from "lucide-react"
 import { useSearchParams } from "next/navigation"
-import { getApiAuthToken } from "@/lib/api/auth-token"
+import { getIdentityAccessToken } from "@/lib/auth/session"
 import { useFlowStore } from "@/lib/flow/store"
 import { fetchWorkflowCapabilities } from "@/lib/workflow/backend-capabilities"
 import { compileWorkflowProject, type WorkflowCompileResponse } from "@/lib/workflow/backend-compile"
@@ -114,7 +114,7 @@ export function RunTracePanel({
   const applyWorkflowEvidenceBatchProjection = useFlowStore((state) => state.applyWorkflowEvidenceBatchProjection)
   const [runState, setRunState] = useState<RealRunState>({ status: "idle", projection: null, events: [], error: null })
   const extensionAuthorization = (() => {
-    const token = getApiAuthToken()
+    const token = getIdentityAccessToken()
     return token ? `Bearer ${token}` : null
   })()
   const [backendState, setBackendState] = useState<BackendPreviewState>({ status: "idle", compile: null, trace: null, native: null, error: null })
@@ -149,6 +149,8 @@ export function RunTracePanel({
       : undefined
   }, [searchParams])
   const conversationId = searchParams.get("conversation")?.trim() || null
+  const linkedRunId = searchParams.get("run")?.trim() || null
+  const linkedRunScopeKey = scope ? `${scope.workspaceId}/${scope.projectId}/${scope.workflowId}` : null
 
   useEffect(() => {
     setRunInputText(runInputTemplateText)
@@ -190,7 +192,7 @@ export function RunTracePanel({
   const isRunning = runState.status === "running"
   const isBackendRunning = backendState.status === "running"
 
-  const monitorActiveRun = async (started: WorkflowRunProjection, authorization: string | null) => {
+  const monitorActiveRun = async (started: Pick<WorkflowRunProjection, "runId">, authorization: string | null) => {
     runMonitorAbortRef.current?.abort()
     const controller = new AbortController()
     runMonitorAbortRef.current = controller
@@ -232,6 +234,20 @@ export function RunTracePanel({
     }
   }
 
+  const restoreLinkedRun = useEffectEvent((runId: string) => {
+    const token = getIdentityAccessToken()
+    setRunState({ status: "running", projection: null, events: [], error: null })
+    void monitorActiveRun({ runId }, token ? `Bearer ${token}` : null).catch((error: unknown) => {
+      setRunState((current) => ({ ...current, status: "error", error: error instanceof Error ? error.message : "无法读取本次运行" }))
+    })
+  })
+
+  useEffect(() => {
+    if (!linkedRunId || !linkedRunScopeKey) return
+    restoreLinkedRun(linkedRunId)
+    return () => runMonitorAbortRef.current?.abort()
+  }, [linkedRunId, linkedRunScopeKey])
+
   const runBackendWorkflow = async (sourceOutputs?: Record<string, Array<Record<string, unknown>>>) => {
     if (runFileInput && !questionBankFile) {
       setRunInputError("请选择本次题库")
@@ -251,7 +267,7 @@ export function RunTracePanel({
       if (scope && sourceOutputs) {
         throw new Error("已发布的 Studio workflow 不支持导入 source outputs")
       }
-      const token = getApiAuthToken()
+      const token = getIdentityAccessToken()
       const authorization = token ? `Bearer ${token}` : null
       const started = scope && !runFileInput
         ? await startWorkspaceWorkflowRun(scope, { authorization, input, conversationId })
@@ -311,7 +327,7 @@ export function RunTracePanel({
     setIsResumingGaojixing(true)
     setRunState((current) => ({ ...current, status: "running", error: null }))
     try {
-      const token = getApiAuthToken()
+      const token = getIdentityAccessToken()
       const authorization = token ? `Bearer ${token}` : null
       const resumed = await resumeGaojixingWorkflowRun(projection.runId, {
         authorization,
@@ -386,7 +402,7 @@ export function RunTracePanel({
     if (!projection) return
     setEvidenceState((current) => ({ ...current, status: "loading", selectedBatchId: batchId, detail: null, error: null }))
     try {
-      const token = getApiAuthToken()
+      const token = getIdentityAccessToken()
       const detail = scope
         ? await fetchWorkspaceWorkflowEvidenceBatchDetail(scope, projection.runId, batchId, {
             authorization: token ? `Bearer ${token}` : null,
@@ -427,7 +443,7 @@ export function RunTracePanel({
         throw new Error("sourceOutputs 必须是非空的 { nodeId: object[] } JSON")
       }
       const sourceOutputs = parsed as Record<string, Array<Record<string, unknown>>>
-      const token = getApiAuthToken()
+      const token = getIdentityAccessToken()
       const authorization = token ? `Bearer ${token}` : null
       const idempotencyKey = continuationKey || crypto.randomUUID()
       setContinuationKey(idempotencyKey)
@@ -474,7 +490,7 @@ export function RunTracePanel({
   const runBackendPreview = async () => {
     setBackendState((current) => ({ status: "running", compile: current.compile, trace: current.trace, native: current.native, error: null }))
     try {
-      const token = getApiAuthToken()
+      const token = getIdentityAccessToken()
       const authorization = token ? `Bearer ${token}` : null
       const nativePackageNodeId = findNativeIntelligenceWorkflowPackageNodeId(workflowProject)
       const [compile, nativeDependencies] = await Promise.all([
