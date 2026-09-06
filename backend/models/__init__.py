@@ -39,10 +39,13 @@ from backend.models.browser_space import (
     BrowserSpaceTaskStatus,
 )
 from backend.models.connector_reply import (
+    ConnectorArtifactGrant,
     ConnectorBindingChallenge,
     ConnectorInboundReceipt,
     ConnectorInstallation,
+    ConnectorOutboundDelivery,
     ConnectorPrincipalBinding,
+    ConnectorReplyGrant,
 )
 from backend.models.consumer_grant import ConsumerGrant
 from backend.models.control_action import ControlActionRecord
@@ -190,10 +193,13 @@ __all__ = [
     "BrowserSpaceTaskStatus",
     "CookieJarEntry",
     "ConsumerGrant",
+    "ConnectorArtifactGrant",
     "ConnectorBindingChallenge",
     "ConnectorInboundReceipt",
     "ConnectorInstallation",
+    "ConnectorOutboundDelivery",
     "ConnectorPrincipalBinding",
+    "ConnectorReplyGrant",
     "EdgeNode",
     "EdgeNodeEvent",
     "User",
