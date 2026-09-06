@@ -331,18 +331,20 @@ async def test_local_admin_can_create_reply_grant_for_studio_conversation(p2_sco
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "boundary",
+    ("boundary", "expected_status", "expected_detail"),
     (
-        "cross_user",
-        "wrong_governed_workspace",
-        "wrong_project",
-        "wrong_conversation",
-        "closed_conversation",
-        "missing_membership",
-        "missing_export",
+        ("cross_user", 404, "Connector binding not found"),
+        ("wrong_governed_workspace", 404, "Connector installation not found"),
+        ("wrong_project", 409, "Conversation context does not match project"),
+        ("wrong_conversation", 404, "Agent conversation not found"),
+        ("closed_conversation", 409, "Agent conversation is closed"),
+        ("missing_membership", 403, "Workspace membership required"),
+        ("missing_export", 403, "Workspace permission required"),
     ),
 )
-async def test_reply_grant_create_rejects_scope_and_permission_boundaries(p2_scope, boundary):
+async def test_reply_grant_create_rejects_scope_and_permission_boundaries(
+    p2_scope, boundary, expected_status, expected_detail
+):
     factory = p2_scope
     identity = _identity()
     workspace_id = "p2-governed"
@@ -426,7 +428,8 @@ async def test_reply_grant_create_rejects_scope_and_permission_boundaries(p2_sco
                 identity,
                 body,
             )
-        assert raised.value.status_code in {403, 404, 409}
+        assert raised.value.status_code == expected_status
+        assert raised.value.detail == expected_detail
         await db.rollback()
         assert await db.scalar(select(func.count()).select_from(ConnectorReplyGrant)) == 0
         assert await db.scalar(select(func.count()).select_from(ConnectorOutboundDelivery)) == 0
@@ -979,7 +982,8 @@ async def test_artifact_grant_rejects_scope_origin_and_hash_mismatches_without_s
                 _identity(),
                 body,
             )
-        assert raised.value.status_code in {404, 409}
+        assert raised.value.status_code == 409
+        assert raised.value.detail == "artifact_conversation_provenance_unavailable"
         await db.rollback()
         assert await db.scalar(select(func.count()).select_from(ConnectorArtifactGrant)) == 0
         deliveries = list(await db.scalars(select(ConnectorOutboundDelivery)))
