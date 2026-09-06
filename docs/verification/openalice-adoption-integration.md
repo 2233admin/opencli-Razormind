@@ -97,3 +97,11 @@ Sol 在connector工作树修正上述边界，并增加仅当前用户的my-bind
 - 另以正常本地登录实际检查 8047 配置页：真实角色、模拟连接、未绑定状态、停用限制、秘密不回显、375px 无溢出、无 pageerror，桌面与手机截图已检查。
 
 本轮路由：Sol 负责 P1 安全边界修复，Luna 负责配置 UI，协调者补真实 SDK 浏览器闭环、整合和预览，独立 reviewer 分别复审后端和 UI。当前 P2 执行合同在独立安全审阅；健康页面明确提示回复与产物领取尚不可用。业务数据、真实模型/飞书消息和远程主分支未改动，父目标最终独立验收仍未执行。
+
+## P2 正式派发
+
+[P2 正式合同](https://github.com/2233admin/opencli-Razormind/issues/125#issuecomment-5555789755)已由原独立 reviewer 接受；root 发布后回读 30,771 字符全文，与本地合同规范化换行后完全一致。此前要求的创建幂等、会话短事务 CAS、运行时 readiness、单密钥失败、分阶段 SDK 超时，以及 claim receipt 脱敏、generation 字段和 artifact failed 终态均已写成实施及测试约束。官方 Markdown 文档经直接 HTTP 再核对 UUID 一小时降重限制，故结果不确定的 send 禁止自动重发。
+
+Sol 已在干净的 `codex/openalice-replies-20260906`（基线 `4befc988`）开始后端实现，当前尚未交付或验收。root 在整合树 `92302911` 增加默认关闭的两个 rollout 配置，Ruff 与 diff check 通过；后续 main/model registry 接线由 root 独占。Luna 完成只读前端预检，明确复用受授权会话读取获得 governed Workspace，并补齐所需的本人 grant 状态读取/撤销合同；前端实施等待实际 API 交付。
+
+本记录只确认设计审查、正式派发和配置准备，不确认 P2 回复/产物领取已可用。预览 8046/8047 仍运行，原目录改动与业务服务/数据不变。

@@ -472,6 +472,18 @@ Issue #125 原 owned paths 不足以实现上述边界。实现任务至少需�
   路径和同步异常语义。
 - 产物由机器人在已授权会话内交付，不创建公开下载链接或长期 bearer token。
 
+## P2 接入边界补充决策
+
+P1 严格入站与配置界面已通过独立验收。P2 的[正式执行合同](https://github.com/2233admin/opencli-Razormind/issues/125#issuecomment-5555789755)经原 reviewer 复审接受，实施尚在进行。本节补充并收紧前文的恢复和交付边界，不表述为功能已上线。
+
+- grant 创建使用当前创建者和精确范围内的 request ID、规范化请求 hash 及数据库唯一约束；并发失败者 rollback 后重读胜者。每个会话只允许一个有效 reply grant，重复请求不生成多条激活消息或重复产物 offer。
+- 复用已有会话 turn 与 runner。普通 send 行为保持；connector 的模型前 running turn 可先持久化，最终 response/status、conversation revision 与本 grant cursor 在重新验证的同一短事务中提交。模型等待不持有会话锁；无法证明最终提交的过期 running turn 进入不确定状态，不自动重跑模型。
+- receipt 与 grant lease 明确 owner、generation 和过期时间。接管原子递增 generation，续租、写回和释放均以同一 owner/generation 校验，迟到 worker 不能覆盖新状态。
+- 领取命令的 receipt 仅保存固定占位和已验证服务端关联；有效、过期、无效和格式错误的领取命令均不得留下 claim 明文。claim 密文复用现有单 Fernet key；失钥使对应 artifact grant/delivery 原子失败，恢复 key 不复活旧授权。
+- SDK 的 connect、send 与 disconnect 各有独立超时和清理规则。持久化 sending 后的未知结果不自动重发。飞书[发送消息](https://open.feishu.cn/document/server-docs/im-v1/message/create.md)和[回复消息](https://open.feishu.cn/document/server-docs/im-v1/message/reply.md)仅提供 UUID 一小时内的降重保证，因此固定 UUID 不能证明任意重启后的恰好一次发送。
+- 只读和撤销接口面向当前授权用户、精确父 grant/会话/项目，供前端刷新后恢复实际投递状态；不返回 claim、provider 身份或产物正文。前端通过既有受授权会话读取获得 governed Workspace，不能用 Studio artifact.workspace_id 猜测权限映射。
+- 显式 `connector_reply_enabled` 和 `connector_artifact_delivery_enabled` 默认 false，并与实际 worker/outbound 生命周期共同决定 readiness。CI 测试结果不作为运行时状态，安装或绑定本身也不代表具备投递能力。
+
 ## 官方来源
 
 - 飞书开放平台，[Python SDK 处理事件](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/server-side-sdk/python--sdk/handle-events)：HTTP/WebSocket 事件方式、3 秒处理与重推、`EventDispatcherHandler` 加密参数。
