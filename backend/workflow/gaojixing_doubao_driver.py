@@ -11,15 +11,18 @@ is accepted under its fencing lease.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import inspect
 import json
 import os
 import re
+import urllib.request
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 _FORMAL_CHAT_URL = re.compile(r"^https://www\.doubao\.com/chat/\d+$")
@@ -56,6 +59,11 @@ CommandRunner = Callable[
 ]
 PageCapture = Callable[..., Awaitable[dict[str, Any] | None] | dict[str, Any] | None]
 EndpointLease = Callable[[], AbstractAsyncContextManager[str]]
+TargetLister = Callable[[str], Awaitable[list[dict[str, Any]]]]
+
+_OPENCLI_RUNTIME_PADDING_SECONDS = 30
+_SUBPROCESS_SHUTDOWN_GRACE_SECONDS = 5
+_TARGET_STATE_VERSION = 1
 
 
 class DoubaoDriverUnavailableError(RuntimeError):
@@ -76,6 +84,8 @@ class OpenCLIDoubaoEvidenceDriver:
         endpoint_lease: EndpointLease | None = None,
         command_runner: CommandRunner | None = None,
         page_capture: PageCapture | None = None,
+        target_lister: TargetLister | None = None,
+        target_state_root: str | Path | None = None,
     ) -> None:
         root = Path(project_root).resolve()
         if not root.is_dir():
@@ -84,6 +94,11 @@ class OpenCLIDoubaoEvidenceDriver:
         self._endpoint_lease = endpoint_lease or _default_endpoint_lease
         self._command_runner = command_runner or _default_command_runner
         self._page_capture = page_capture or _capture_page_evidence
+        self._target_lister = target_lister or _list_cdp_page_targets
+        state_root = Path(target_state_root).resolve() if target_state_root else root
+        if not state_root.is_dir():
+            raise DoubaoDriverUnavailableError("target-state-root-unavailable")
+        self._target_state_root = state_root
 
     async def preflight(self) -> None:
         """Verify the logged-in Doubao session without creating or submitting."""
@@ -161,14 +176,30 @@ class OpenCLIDoubaoEvidenceDriver:
         if not question_id or not question.strip():
             raise DoubaoDriverUnavailableError("question-invalid")
         async with self._endpoint_lease() as endpoint:
+            before_targets = await self._target_lister(endpoint)
+            starting_target = _select_starting_doubao_target(before_targets)
             new_code, _new_rows, _new_stderr = await self._command_runner(
-                _new_command(), endpoint
+                _new_command(), _target_websocket_url(starting_target)
             )
             if new_code:
                 raise DoubaoDriverUnavailableError("doubao-new-failed")
 
+            after_targets = await self._target_lister(endpoint)
+            owned_target = _resolve_owned_doubao_target(
+                before_targets=before_targets,
+                after_targets=after_targets,
+                starting_target=starting_target,
+            )
+            target_endpoint = _target_websocket_url(owned_target)
+            _write_target_state(
+                self._target_state_root,
+                question_id=question_id,
+                question=question,
+                target_id=_target_id(owned_target),
+            )
+
             ask_code, _ask_rows, _ask_stderr = await self._command_runner(
-                _ask_command(question), endpoint
+                _ask_command(question), target_endpoint
             )
             if ask_code:
                 # Never retry here: the browser may have accepted the question
@@ -178,7 +209,7 @@ class OpenCLIDoubaoEvidenceDriver:
                 # it as an unexplained reconciliation failure.
                 if _verification_challenge(_ask_stderr):
                     status_code, status_rows, _status_stderr = (
-                        await self._command_runner(_status_command(), endpoint)
+                        await self._command_runner(_status_command(), target_endpoint)
                     )
                     challenge_url = (
                         _chat_url(status_rows, allow_non_chat=True)
@@ -213,7 +244,7 @@ class OpenCLIDoubaoEvidenceDriver:
             status_code = 1
             for _attempt in range(4):
                 status_code, status_rows, _status_stderr = await self._command_runner(
-                    _status_command(), endpoint
+                    _status_command(), target_endpoint
                 )
                 if not status_code:
                     chat_url = _chat_url(status_rows)
@@ -249,8 +280,20 @@ class OpenCLIDoubaoEvidenceDriver:
         """Read the current conversation; never create a chat or submit a question."""
 
         async with self._endpoint_lease() as endpoint:
+            target_id = _read_target_state(
+                self._target_state_root,
+                question_id=question_id,
+                question=question,
+            )
+            if target_id is None:
+                return None
+            targets = await self._target_lister(endpoint)
+            matches = [row for row in targets if _target_id(row) == target_id]
+            if len(matches) != 1:
+                return None
+            target_endpoint = _target_websocket_url(matches[0])
             status_code, status_rows, _stderr = await self._command_runner(
-                _status_command(), endpoint
+                _status_command(), target_endpoint
             )
             if status_code:
                 return None
@@ -271,11 +314,14 @@ class OpenCLIDoubaoEvidenceDriver:
 
 
 def build_opencli_doubao_evidence_driver(
-    *, project_root: str | Path
+    *, project_root: str | Path, target_state_root: str | Path | None = None
 ) -> OpenCLIDoubaoEvidenceDriver:
     """Compose the production driver used by local and Celery workers."""
 
-    return OpenCLIDoubaoEvidenceDriver(project_root=project_root)
+    return OpenCLIDoubaoEvidenceDriver(
+        project_root=project_root,
+        target_state_root=target_state_root,
+    )
 
 
 def _new_command() -> list[str]:
@@ -343,7 +389,10 @@ async def _default_command_runner(
             start_new_session=True,
         )
         stdout_bytes, stderr_bytes = await asyncio.wait_for(
-            process.communicate(), timeout=get_settings().opencli_timeout
+            process.communicate(),
+            timeout=_command_deadline_seconds(
+                command, configured_timeout=get_settings().opencli_timeout
+            ),
         )
     except FileNotFoundError as exc:
         raise DoubaoDriverUnavailableError("opencli-runtime-unavailable") from exc
@@ -371,6 +420,173 @@ async def _default_command_runner(
         except (ValueError, TypeError, json.JSONDecodeError):
             raise DoubaoDriverUnavailableError("opencli-json-invalid")
     return code, rows, stderr
+
+
+def _command_deadline_seconds(
+    command: list[str], *, configured_timeout: int | float
+) -> float:
+    """Keep the parent deadline beyond OpenCLI's own command timeout and padding."""
+
+    command_timeout = 0.0
+    try:
+        timeout_index = command.index("--timeout")
+        command_timeout = float(command[timeout_index + 1])
+    except (ValueError, IndexError, TypeError):
+        pass
+    return max(
+        float(configured_timeout),
+        command_timeout
+        + _OPENCLI_RUNTIME_PADDING_SECONDS
+        + _SUBPROCESS_SHUTDOWN_GRACE_SECONDS,
+    )
+
+
+async def _list_cdp_page_targets(endpoint: str) -> list[dict[str, Any]]:
+    """Read page targets from the leased HTTP CDP endpoint."""
+
+    if not endpoint.startswith(("http://", "https://")):
+        raise DoubaoDriverUnavailableError("cdp-http-endpoint-required")
+
+    def read() -> list[dict[str, Any]]:
+        request = urllib.request.Request(
+            f"{endpoint.rstrip('/')}/json",
+            headers={"Accept": "application/json"},
+        )
+        with urllib.request.urlopen(request, timeout=5) as response:
+            payload = json.load(response)
+        if not isinstance(payload, list):
+            raise ValueError("CDP target response is not a list")
+        return [row for row in payload if isinstance(row, dict)]
+
+    try:
+        return await asyncio.to_thread(read)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        raise DoubaoDriverUnavailableError("cdp-targets-unavailable") from exc
+
+
+def _doubao_page_targets(targets: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    candidates = []
+    for row in targets:
+        url = str(row.get("url") or "").strip()
+        parsed_url = urlsplit(url)
+        if (
+            row.get("type") != "page"
+            or parsed_url.scheme != "https"
+            or parsed_url.hostname != "www.doubao.com"
+        ):
+            continue
+        if not _target_id(row) or not str(row.get("webSocketDebuggerUrl") or "").startswith(
+            ("ws://", "wss://")
+        ):
+            continue
+        candidates.append(row)
+    return candidates
+
+
+def _select_starting_doubao_target(
+    targets: list[dict[str, Any]],
+) -> dict[str, Any]:
+    candidates = _doubao_page_targets(targets)
+    if not candidates:
+        raise DoubaoDriverUnavailableError("doubao-target-missing")
+
+    def score(row: dict[str, Any]) -> int:
+        url = str(row.get("url") or "")
+        if "/chat/local_" in url or url.rstrip("/").endswith("/chat"):
+            return 2
+        return 1
+
+    best_score = max(score(row) for row in candidates)
+    best = [row for row in candidates if score(row) == best_score]
+    # Preserve the CDP target order OpenCLI would have used, then pin that one
+    # exact page for every command. Multiple existing tabs are safe once the
+    # chosen target cannot drift between subprocesses.
+    return best[0]
+
+
+def _resolve_owned_doubao_target(
+    *,
+    before_targets: list[dict[str, Any]],
+    after_targets: list[dict[str, Any]],
+    starting_target: dict[str, Any],
+) -> dict[str, Any]:
+    """Identify only the page causally owned by this exact ``doubao new`` call."""
+
+    before_ids = {_target_id(row) for row in _doubao_page_targets(before_targets)}
+    after = _doubao_page_targets(after_targets)
+    created = [row for row in after if _target_id(row) not in before_ids]
+    if created:
+        # The lease serializes managed work on this browser. A single new
+        # Doubao page appearing across the exact-page ``new`` call is the only
+        # target transition we can causally own. Any second candidate is
+        # ambiguous and must stop before the question is submitted.
+        if len(created) != 1:
+            raise DoubaoDriverUnavailableError("doubao-target-ambiguous")
+        return created[0]
+
+    starting_id = _target_id(starting_target)
+    retained = [row for row in after if _target_id(row) == starting_id]
+    if len(retained) != 1:
+        raise DoubaoDriverUnavailableError("doubao-target-lost")
+    return retained[0]
+
+
+def _target_id(target: dict[str, Any]) -> str:
+    return str(target.get("id") or "").strip()
+
+
+def _target_websocket_url(target: dict[str, Any]) -> str:
+    value = str(target.get("webSocketDebuggerUrl") or "").strip()
+    parsed = urlsplit(value)
+    if (
+        parsed.scheme not in {"ws", "wss"}
+        or not parsed.netloc
+        or not parsed.path.endswith(f"/{_target_id(target)}")
+    ):
+        raise DoubaoDriverUnavailableError("doubao-target-websocket-missing")
+    return value
+
+
+def _target_state_path(root: Path, question_id: str) -> Path:
+    key = hashlib.sha256(question_id.encode("utf-8")).hexdigest()
+    return root / "logs" / "doubao-targets" / f"{key}.json"
+
+
+def _write_target_state(
+    root: Path, *, question_id: str, question: str, target_id: str
+) -> None:
+    state_path = _target_state_path(root, question_id)
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path = state_path.with_suffix(f".{uuid4().hex}.tmp")
+    payload = {
+        "version": _TARGET_STATE_VERSION,
+        "questionId": question_id,
+        "questionSha256": hashlib.sha256(question.encode("utf-8")).hexdigest(),
+        "targetId": target_id,
+    }
+    temporary_path.write_text(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")),
+        encoding="utf-8",
+    )
+    os.replace(temporary_path, state_path)
+
+
+def _read_target_state(root: Path, *, question_id: str, question: str) -> str | None:
+    state_path = _target_state_path(root, question_id)
+    try:
+        payload = json.loads(state_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, json.JSONDecodeError):
+        return None
+    expected_hash = hashlib.sha256(question.encode("utf-8")).hexdigest()
+    if (
+        not isinstance(payload, dict)
+        or payload.get("version") != _TARGET_STATE_VERSION
+        or payload.get("questionId") != question_id
+        or payload.get("questionSha256") != expected_hash
+    ):
+        return None
+    target_id = str(payload.get("targetId") or "").strip()
+    return target_id or None
 
 
 def _chat_url(

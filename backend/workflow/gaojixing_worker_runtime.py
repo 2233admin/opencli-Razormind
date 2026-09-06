@@ -18,6 +18,21 @@ logger = logging.getLogger(__name__)
 _local_tasks: dict[str, asyncio.Task[Any]] = {}
 
 
+def _build_managed_doubao_driver(attempt_root: Path):
+    from backend.workflow.gaojixing_doubao_driver import (
+        build_opencli_doubao_evidence_driver,
+    )
+
+    # The attempt root is deleted after each worker pass. Keep only the
+    # non-secret CDP target identity in this managed Run's durable root so a
+    # recovery can inspect the same page without searching browser history.
+    run_root = attempt_root.parent.parent
+    return build_opencli_doubao_evidence_driver(
+        project_root=attempt_root,
+        target_state_root=run_root,
+    )
+
+
 def dispatch_collection_job(job_id: str) -> None:
     """Dispatch on the configured durable mode; Hermes claims queued jobs itself."""
 
@@ -67,20 +82,15 @@ async def _run_local_until_stable(job_id: str) -> str:
 async def execute_collection_job(job_id: str, *, driver_factory: Any = None) -> str:
     """Compose DB, production driver and same-run HDA resume."""
 
+    from backend.config import get_settings
     from backend.database import AsyncSessionLocal
     from backend.workflow.gaojixing_collection_runner import run_collection_job
-    from backend.config import get_settings
     from backend.workflow.plugin_registry import build_workflow_plugin_registry
 
     plugins = build_workflow_plugin_registry(get_settings())
 
     if driver_factory is None:
-        from backend.workflow.gaojixing_doubao_driver import (
-            build_opencli_doubao_evidence_driver,
-        )
-
-        def driver_factory(attempt_root: Path):
-            return build_opencli_doubao_evidence_driver(project_root=attempt_root)
+        driver_factory = _build_managed_doubao_driver
 
     async def resume(run_id: str) -> None:
         from backend.workflow.opencli_hda_tracer import resume_gaojixing_workflow_run

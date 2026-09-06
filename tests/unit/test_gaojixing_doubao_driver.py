@@ -24,8 +24,10 @@ from backend.workflow.gaojixing_doubao_driver import (
     OpenCLIDoubaoEvidenceDriver,
     _answers_match,
     _brand_observation,
+    _command_deadline_seconds,
     _default_endpoint_lease,
     _page_modules,
+    _write_target_state,
 )
 
 
@@ -45,13 +47,14 @@ class _CommandProbe:
         status_url: str = "https://www.doubao.com/chat/1234567890",
     ) -> None:
         self.commands: list[tuple[str, ...]] = []
+        self.endpoints: list[str] = []
         self.ask_code = ask_code
         self.ask_stderr = ask_stderr
         self.status_url = status_url
 
     async def __call__(self, command: list[str], endpoint: str):
-        del endpoint
         self.commands.append(tuple(command))
+        self.endpoints.append(endpoint)
         action = command[1]
         if action == "new":
             return 0, [], ""
@@ -65,6 +68,29 @@ class _CommandProbe:
 @asynccontextmanager
 async def _endpoint_lease():
     yield "http://agent-1:19222"
+
+
+def _target(
+    target_id: str = "owned-page",
+    url: str = "https://www.doubao.com/chat/1234567890",
+) -> dict:
+    return {
+        "id": target_id,
+        "type": "page",
+        "url": url,
+        "webSocketDebuggerUrl": f"ws://agent-1:19222/devtools/page/{target_id}",
+    }
+
+
+class _TargetProbe:
+    def __init__(self, *responses: list[dict]) -> None:
+        self.responses = list(responses) or [[_target()]]
+        self.calls: list[str] = []
+
+    async def __call__(self, endpoint: str) -> list[dict]:
+        self.calls.append(endpoint)
+        index = min(len(self.calls) - 1, len(self.responses) - 1)
+        return self.responses[index]
 
 
 @pytest.mark.asyncio
@@ -184,6 +210,7 @@ async def test_preflight_is_read_only_and_only_calls_status(tmp_path):
 @pytest.mark.asyncio
 async def test_collect_uses_the_matched_page_answer_not_opencli_command_output(tmp_path):
     commands = _CommandProbe()
+    targets = _TargetProbe()
     page_calls = []
 
     async def capture(**kwargs):
@@ -197,6 +224,7 @@ async def test_collect_uses_the_matched_page_answer_not_opencli_command_output(t
         endpoint_lease=_endpoint_lease,
         command_runner=commands,
         page_capture=capture,
+        target_lister=targets,
     )
 
     result = await driver.collect(question_id="G0001", question="第一道新题")
@@ -208,6 +236,12 @@ async def test_collect_uses_the_matched_page_answer_not_opencli_command_output(t
     assert result["answer"] == "页面中核验过的完整回答。"
     assert page_calls[0]["answer"] == ""
     assert page_calls[0]["allow_submit"] is False
+    assert commands.endpoints == [
+        "ws://agent-1:19222/devtools/page/owned-page",
+        "ws://agent-1:19222/devtools/page/owned-page",
+        "ws://agent-1:19222/devtools/page/owned-page",
+    ]
+    assert page_calls[0]["endpoint"] == "http://agent-1:19222"
 
 
 @pytest.mark.asyncio
@@ -318,6 +352,7 @@ async def test_collect_captures_followups_that_render_only_after_scrolling_to_bo
         project_root=tmp_path,
         endpoint_lease=_endpoint_lease,
         command_runner=_CommandProbe(),
+        target_lister=_TargetProbe(),
     )
 
     result = await driver.collect(question_id="G0001", question="第一道新题")
@@ -338,6 +373,7 @@ async def test_failed_ask_is_never_retried(tmp_path):
         endpoint_lease=_endpoint_lease,
         command_runner=commands,
         page_capture=lambda **_kwargs: None,
+        target_lister=_TargetProbe(),
     )
 
     with pytest.raises(DoubaoDriverUnavailableError, match="doubao-ask-failed"):
@@ -374,6 +410,7 @@ async def test_captcha_during_ask_returns_verification_evidence_without_retry(tm
         endpoint_lease=_endpoint_lease,
         command_runner=commands,
         page_capture=capture,
+        target_lister=_TargetProbe(),
     )
 
     result = await driver.collect(question_id="B001", question="第一道品牌题")
@@ -388,6 +425,12 @@ async def test_captcha_during_ask_returns_verification_evidence_without_retry(tm
 @pytest.mark.asyncio
 async def test_inspect_current_never_submits_and_returns_none_on_question_mismatch(tmp_path):
     commands = _CommandProbe()
+    _write_target_state(
+        tmp_path,
+        question_id="G0001",
+        question="另一道历史题",
+        target_id="historic-page",
+    )
 
     async def mismatch(**_kwargs):
         return None
@@ -402,7 +445,154 @@ async def test_inspect_current_never_submits_and_returns_none_on_question_mismat
     result = await driver.inspect_current(question_id="G0001", question="第一道新题")
 
     assert result is None
-    assert [command[1] for command in commands.commands] == ["status"]
+    assert commands.commands == []
+
+
+@pytest.mark.asyncio
+async def test_collect_follows_one_uniquely_created_target_after_new(tmp_path):
+    old = _target("old-page", "https://www.doubao.com/chat/1234567890")
+    created_url = "https://www.doubao.com/chat/local_owned"
+    created = _target("created-page", created_url)
+    commands = _CommandProbe()
+    targets = _TargetProbe([old], [old, created])
+
+    async def capture(**kwargs):
+        return _canonical_capture(kwargs["question_id"], kwargs["question"], "完整回答")
+
+    driver = OpenCLIDoubaoEvidenceDriver(
+        project_root=tmp_path,
+        endpoint_lease=_endpoint_lease,
+        command_runner=commands,
+        page_capture=capture,
+        target_lister=targets,
+    )
+
+    await driver.collect(question_id="G0001", question="第一道新题")
+
+    assert commands.endpoints == [
+        "ws://agent-1:19222/devtools/page/old-page",
+        "ws://agent-1:19222/devtools/page/created-page",
+        "ws://agent-1:19222/devtools/page/created-page",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_collect_fails_closed_when_new_target_cannot_be_uniquely_owned(tmp_path):
+    old = _target("old-page", "https://www.doubao.com/chat/1234567890")
+    created_url = "https://www.doubao.com/chat/local_owned"
+    targets = _TargetProbe(
+        [old],
+        [old, _target("created-a", created_url), _target("created-b", created_url)],
+    )
+    commands = _CommandProbe()
+    driver = OpenCLIDoubaoEvidenceDriver(
+        project_root=tmp_path,
+        endpoint_lease=_endpoint_lease,
+        command_runner=commands,
+        page_capture=lambda **_kwargs: None,
+        target_lister=targets,
+    )
+
+    with pytest.raises(DoubaoDriverUnavailableError, match="doubao-target-ambiguous"):
+        await driver.collect(question_id="G0001", question="第一道新题")
+
+    assert [command[1] for command in commands.commands] == ["new"]
+
+
+@pytest.mark.asyncio
+async def test_collect_pins_one_equal_priority_starting_tab_without_crossing(tmp_path):
+    commands = _CommandProbe()
+    targets = _TargetProbe(
+        [
+            _target("history-a", "https://www.doubao.com/chat/1111111111"),
+            _target("history-b", "https://www.doubao.com/chat/2222222222"),
+        ]
+    )
+    driver = OpenCLIDoubaoEvidenceDriver(
+        project_root=tmp_path,
+        endpoint_lease=_endpoint_lease,
+        command_runner=commands,
+        page_capture=lambda **kwargs: _canonical_capture(
+            kwargs["question_id"], kwargs["question"], "完整回答"
+        ),
+        target_lister=targets,
+    )
+
+    await driver.collect(question_id="G0001", question="第一道新题")
+
+    assert commands.endpoints == [
+        "ws://agent-1:19222/devtools/page/history-a",
+        "ws://agent-1:19222/devtools/page/history-a",
+        "ws://agent-1:19222/devtools/page/history-a",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_inspect_current_uses_only_the_durable_question_target(tmp_path):
+    question = "第一道新题"
+    _write_target_state(
+        tmp_path,
+        question_id="G0001",
+        question=question,
+        target_id="owned-page",
+    )
+    commands = _CommandProbe()
+    page_calls = []
+
+    async def capture(**kwargs):
+        page_calls.append(kwargs)
+        return None
+
+    driver = OpenCLIDoubaoEvidenceDriver(
+        project_root=tmp_path,
+        endpoint_lease=_endpoint_lease,
+        command_runner=commands,
+        page_capture=capture,
+        target_lister=_TargetProbe(
+            [
+                _target("historic-page", "https://www.doubao.com/chat/9999999999"),
+                _target("owned-page"),
+            ]
+        ),
+    )
+
+    assert await driver.inspect_current(question_id="G0001", question=question) is None
+    assert commands.endpoints == ["ws://agent-1:19222/devtools/page/owned-page"]
+    assert page_calls[0]["endpoint"] == "http://agent-1:19222"
+
+
+@pytest.mark.asyncio
+async def test_inspect_current_does_not_fall_back_to_a_historic_question_page(tmp_path):
+    question = "第一道新题"
+    _write_target_state(
+        tmp_path,
+        question_id="G0001",
+        question=question,
+        target_id="owned-page-that-closed",
+    )
+    commands = _CommandProbe()
+    driver = OpenCLIDoubaoEvidenceDriver(
+        project_root=tmp_path,
+        endpoint_lease=_endpoint_lease,
+        command_runner=commands,
+        page_capture=lambda **_kwargs: pytest.fail("historic page must not be captured"),
+        target_lister=_TargetProbe(
+            [_target("historic-page", "https://www.doubao.com/chat/9999999999")]
+        ),
+    )
+
+    assert await driver.inspect_current(question_id="G0001", question=question) is None
+    assert commands.commands == []
+
+
+def test_ask_parent_deadline_covers_cli_timeout_and_runtime_padding():
+    assert _command_deadline_seconds(
+        ["doubao", "ask", "question", "--timeout", "150"],
+        configured_timeout=120,
+    ) == 185
+    assert _command_deadline_seconds(
+        ["doubao", "status"], configured_timeout=120
+    ) == 120
 
 
 def test_driver_rejects_a_project_root_that_is_not_a_directory(tmp_path):
@@ -522,7 +712,7 @@ def test_collect_retries_transient_status_read_after_successful_ask():
 
     source = inspect.getsource(_driver_module.OpenCLIDoubaoEvidenceDriver.collect)
     assert "for _attempt in range(4)" in source
-    assert "_status_command(), endpoint" in source
+    assert "_status_command(), target_endpoint" in source
     assert "asyncio.sleep(1.5)" in source
     assert "doubao-status-failed" in source
     assert "formal-chat-url-missing" in source
