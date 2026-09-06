@@ -15,7 +15,11 @@ from backend.api.v1 import chat
 from backend.api.v1.connector_replies import router as connector_replies_router
 from backend.auth.crypto import encrypt
 from backend.database import Base, get_db
-from backend.models.agent_conversation import AgentConversation, AgentConversationTurn
+from backend.models.agent_conversation import (
+    AgentConversation,
+    AgentConversationStatus,
+    AgentConversationTurn,
+)
 from backend.models.connector_reply import (
     ConnectorArtifactGrant,
     ConnectorInboundReceipt,
@@ -128,7 +132,55 @@ async def p2_scope(tmp_path, monkeypatch):
 
 
 def _identity() -> RequestIdentity:
+    return RequestIdentity(
+        subject="p2-subject",
+        is_platform_admin=True,
+        auth_method="local",
+    )
+
+
+def _oidc_identity() -> RequestIdentity:
     return RequestIdentity(subject="p2-subject", auth_method="oidc")
+
+
+def _other_identity() -> RequestIdentity:
+    return RequestIdentity(
+        subject="p2-other-subject",
+        is_platform_admin=True,
+        auth_method="local",
+    )
+
+
+async def _seed_other_access(factory) -> None:
+    async with factory() as db:
+        other = User(id="p2-other-user", subject="p2-other-subject", disabled=False)
+        foreign_workspace = Workspace(
+            id="p2-foreign-governed",
+            name="Foreign governed",
+            slug="p2-foreign-governed",
+        )
+        db.add_all(
+            [
+                other,
+                foreign_workspace,
+                WorkspaceMembership(
+                    workspace_id="p2-governed",
+                    user_id=other.id,
+                    role=WorkspaceRole.OPERATOR,
+                ),
+                WorkspaceMembership(
+                    workspace_id=foreign_workspace.id,
+                    user_id="p2-user",
+                    role=WorkspaceRole.OPERATOR,
+                ),
+                WorkspaceMembership(
+                    workspace_id=foreign_workspace.id,
+                    user_id=other.id,
+                    role=WorkspaceRole.OPERATOR,
+                ),
+            ]
+        )
+        await db.commit()
 
 
 def _create(request_id: str = "grant-1") -> ConnectorReplyGrantCreate:
@@ -248,6 +300,192 @@ async def test_reply_grant_idempotency_active_slot_and_rebuild(p2_scope):
     async with factory() as db:
         rows = list(await db.scalars(select(ConnectorReplyGrant)))
         assert sorted(row.status for row in rows) == ["active", "revoked"]
+
+
+@pytest.mark.asyncio
+async def test_oidc_identity_cannot_create_reply_grant_for_studio_conversation(p2_scope):
+    factory = p2_scope
+    async with factory() as db:
+        with pytest.raises(HTTPException) as raised:
+            await grants.create_reply_grant(
+                db,
+                "p2-governed",
+                "p2-project",
+                _oidc_identity(),
+                _create("oidc-studio-denied"),
+            )
+        assert raised.value.status_code == 403
+        await db.rollback()
+        assert await db.scalar(select(func.count()).select_from(ConnectorReplyGrant)) == 0
+        assert await db.scalar(select(func.count()).select_from(ConnectorOutboundDelivery)) == 0
+
+
+@pytest.mark.asyncio
+async def test_local_admin_can_create_reply_grant_for_studio_conversation(p2_scope):
+    factory = p2_scope
+    reply, activation = await _grant(factory)
+    assert reply.created_by_user_id == "p2-user"
+    assert reply.studio_workspace_id == "p2-studio"
+    assert activation.purpose == "activation"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "boundary",
+    (
+        "cross_user",
+        "wrong_governed_workspace",
+        "wrong_project",
+        "wrong_conversation",
+        "closed_conversation",
+        "missing_membership",
+        "missing_export",
+    ),
+)
+async def test_reply_grant_create_rejects_scope_and_permission_boundaries(p2_scope, boundary):
+    factory = p2_scope
+    identity = _identity()
+    workspace_id = "p2-governed"
+    project_id = "p2-project"
+    body = _create(f"deny-{boundary}")
+    async with factory() as db:
+        if boundary == "cross_user":
+            other = User(
+                id="p2-other-user",
+                subject="p2-other-subject",
+                disabled=False,
+            )
+            db.add_all(
+                [
+                    other,
+                    WorkspaceMembership(
+                        workspace_id="p2-governed",
+                        user_id=other.id,
+                        role=WorkspaceRole.OPERATOR,
+                    ),
+                ]
+            )
+            identity = _other_identity()
+        elif boundary == "wrong_governed_workspace":
+            foreign_workspace = Workspace(
+                id="p2-foreign-governed",
+                name="Foreign governed",
+                slug="p2-foreign-governed",
+            )
+            db.add_all(
+                [
+                    foreign_workspace,
+                    WorkspaceMembership(
+                        workspace_id=foreign_workspace.id,
+                        user_id="p2-user",
+                        role=WorkspaceRole.OPERATOR,
+                    ),
+                ]
+            )
+            workspace_id = foreign_workspace.id
+        elif boundary == "wrong_project":
+            db.add(
+                StudioProject(
+                    id="p2-other-project",
+                    workspace_id="p2-studio",
+                    name="Other project",
+                    slug="p2-other-project",
+                    created_by_user_id="p2-user",
+                )
+            )
+            project_id = "p2-other-project"
+        elif boundary == "wrong_conversation":
+            body = body.model_copy(update={"conversation_id": "missing-conversation"})
+        elif boundary == "closed_conversation":
+            conversation = await db.get(AgentConversation, "p2-conversation")
+            assert conversation is not None
+            conversation.status = AgentConversationStatus.CLOSED.value
+        elif boundary == "missing_membership":
+            identity = RequestIdentity(
+                subject="no-membership",
+                is_platform_admin=True,
+                auth_method="local",
+            )
+        else:
+            membership = await db.scalar(
+                select(WorkspaceMembership).where(
+                    WorkspaceMembership.workspace_id == "p2-governed",
+                    WorkspaceMembership.user_id == "p2-user",
+                )
+            )
+            assert membership is not None
+            membership.role = WorkspaceRole.VIEWER
+        await db.commit()
+
+    async with factory() as db:
+        with pytest.raises(HTTPException) as raised:
+            await grants.create_reply_grant(
+                db,
+                workspace_id,
+                project_id,
+                identity,
+                body,
+            )
+        assert raised.value.status_code in {403, 404, 409}
+        await db.rollback()
+        assert await db.scalar(select(func.count()).select_from(ConnectorReplyGrant)) == 0
+        assert await db.scalar(select(func.count()).select_from(ConnectorOutboundDelivery)) == 0
+
+
+@pytest.mark.asyncio
+async def test_reply_and_artifact_reads_and_revokes_hide_cross_scope_rows(p2_scope, monkeypatch):
+    factory = p2_scope
+    reply, _ = await _grant(factory)
+    _install_artifact_detail(monkeypatch, _artifact_detail())
+    async with factory() as db:
+        created = await artifacts.create_artifact_grant(
+            db,
+            "p2-governed",
+            "p2-project",
+            reply.public_id,
+            _identity(),
+            ConnectorArtifactGrantCreate(
+                request_id="cross-scope-artifact",
+                artifact_public_id="session:artifact",
+                workflow_id="p2-workflow",
+                run_id="p2-run",
+            ),
+        )
+        artifact_public_id = created.artifact_grant_public_id
+    await _seed_other_access(factory)
+    reply_calls = (grants.get_reply_grant, grants.revoke_reply_grant)
+    artifact_calls = (artifacts.get_artifact_grant, artifacts.revoke_artifact_grant)
+    scopes = (
+        ("p2-governed", "p2-project", _other_identity()),
+        ("p2-governed", "p2-other-project", _identity()),
+        ("p2-foreign-governed", "p2-project", _identity()),
+    )
+    for workspace_id, project_id, identity in scopes:
+        for call in reply_calls:
+            async with factory() as db:
+                with pytest.raises(HTTPException) as raised:
+                    await call(db, workspace_id, project_id, reply.public_id, identity)
+                assert raised.value.status_code == 404
+        for call in artifact_calls:
+            async with factory() as db:
+                with pytest.raises(HTTPException) as raised:
+                    await call(
+                        db,
+                        workspace_id,
+                        project_id,
+                        reply.public_id,
+                        artifact_public_id,
+                        identity,
+                    )
+                assert raised.value.status_code == 404
+    async with factory() as db:
+        stored_reply = await db.get(ConnectorReplyGrant, reply.id)
+        stored_artifact = await db.scalar(select(ConnectorArtifactGrant))
+        assert stored_reply is not None and stored_reply.status == "active"
+        assert stored_artifact is not None and stored_artifact.status == "active"
+        assert await db.scalar(select(func.count()).select_from(ConnectorReplyGrant)) == 1
+        assert await db.scalar(select(func.count()).select_from(ConnectorArtifactGrant)) == 1
+        assert await db.scalar(select(func.count()).select_from(ConnectorOutboundDelivery)) == 2
 
 
 @pytest.mark.asyncio
@@ -701,6 +939,151 @@ async def test_artifact_grant_requires_trusted_conversation_origin(p2_scope, mon
             )
         await db.rollback()
         assert await db.scalar(select(func.count()).select_from(ConnectorArtifactGrant)) == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("detail_update", "body_update"),
+    (
+        ({"project_id": "other-project"}, {}),
+        ({"workflow_id": "other-workflow"}, {}),
+        ({"run_id": "other-run"}, {}),
+        ({"conversation_id": "other-conversation"}, {}),
+        ({"content_hash": ""}, {}),
+        ({}, {"workflow_id": "other-workflow"}),
+        ({}, {"run_id": "other-run"}),
+    ),
+)
+async def test_artifact_grant_rejects_scope_origin_and_hash_mismatches_without_side_effects(
+    p2_scope, monkeypatch, detail_update, body_update
+):
+    factory = p2_scope
+    reply, _ = await _grant(factory)
+    _install_artifact_detail(
+        monkeypatch,
+        _artifact_detail().model_copy(update=detail_update),
+    )
+    body = ConnectorArtifactGrantCreate(
+        request_id="artifact-scope-mismatch",
+        artifact_public_id="session:artifact",
+        workflow_id="p2-workflow",
+        run_id="p2-run",
+    ).model_copy(update=body_update)
+    async with factory() as db:
+        with pytest.raises(HTTPException) as raised:
+            await artifacts.create_artifact_grant(
+                db,
+                "p2-governed",
+                "p2-project",
+                reply.public_id,
+                _identity(),
+                body,
+            )
+        assert raised.value.status_code in {404, 409}
+        await db.rollback()
+        assert await db.scalar(select(func.count()).select_from(ConnectorArtifactGrant)) == 0
+        deliveries = list(await db.scalars(select(ConnectorOutboundDelivery)))
+        assert len(deliveries) == 1 and deliveries[0].purpose == "activation"
+
+
+@pytest.mark.asyncio
+async def test_artifact_hash_drift_after_grant_fails_before_delivery(p2_scope, monkeypatch):
+    factory = p2_scope
+    reply, _ = await _grant(factory)
+    _install_artifact_detail(monkeypatch, _artifact_detail())
+    async with factory() as db:
+        created = await artifacts.create_artifact_grant(
+            db,
+            "p2-governed",
+            "p2-project",
+            reply.public_id,
+            _identity(),
+            ConnectorArtifactGrantCreate(
+                request_id="artifact-hash-drift",
+                artifact_public_id="session:artifact",
+                workflow_id="p2-workflow",
+                run_id="p2-run",
+            ),
+        )
+        assert created.claim_text is not None
+        receipt = await persist_verified_message(
+            db,
+            "p2-installation-id",
+            _message(created.claim_text, message_id="artifact-hash-drift-claim"),
+        )
+        await db.commit()
+        receipt_id = receipt.id
+    _install_artifact_detail(
+        monkeypatch,
+        _artifact_detail().model_copy(update={"content_hash": "changed-content-hash"}),
+    )
+    await worker.process_connector_receipt(factory, receipt_id)
+    async with factory() as db:
+        receipt = await db.get(ConnectorInboundReceipt, receipt_id)
+        assert receipt is not None and receipt.status == "permanent_failed"
+        assert receipt.stable_error_code == "artifact_scope_or_hash_changed"
+        assert receipt.outbound_delivery_id is None
+        assert await db.scalar(select(func.count()).select_from(AgentConversationTurn)) == 0
+        assert (
+            await db.scalar(
+                select(func.count())
+                .select_from(ConnectorOutboundDelivery)
+                .where(ConnectorOutboundDelivery.purpose == "artifact_delivery")
+            )
+            == 0
+        )
+
+
+@pytest.mark.asyncio
+async def test_expired_artifact_claim_is_rejected_without_execution_or_delivery(
+    p2_scope, monkeypatch
+):
+    factory = p2_scope
+    reply, _ = await _grant(factory)
+    _install_artifact_detail(monkeypatch, _artifact_detail())
+    async with factory() as db:
+        created = await artifacts.create_artifact_grant(
+            db,
+            "p2-governed",
+            "p2-project",
+            reply.public_id,
+            _identity(),
+            ConnectorArtifactGrantCreate(
+                request_id="expired-artifact-claim",
+                artifact_public_id="session:artifact",
+                workflow_id="p2-workflow",
+                run_id="p2-run",
+            ),
+        )
+        assert created.claim_text is not None
+        grant = await db.scalar(select(ConnectorArtifactGrant))
+        assert grant is not None
+        grant.expires_at = datetime.now(UTC) - timedelta(seconds=1)
+        await db.commit()
+        claim_text = created.claim_text
+    async with factory() as db:
+        receipt = await persist_verified_message(
+            db,
+            "p2-installation-id",
+            _message(claim_text, message_id="expired-artifact-claim-message"),
+        )
+        await db.commit()
+        assert receipt.status == "rejected"
+        assert receipt.stable_error_code == "artifact_claim_invalid"
+        assert receipt.safe_content_text == "[artifact claim]"
+        assert receipt.artifact_grant_id is None
+    async with factory() as db:
+        assert await db.scalar(select(func.count()).select_from(AgentConversationTurn)) == 0
+        assert (
+            await db.scalar(
+                select(func.count())
+                .select_from(ConnectorOutboundDelivery)
+                .where(ConnectorOutboundDelivery.purpose == "artifact_delivery")
+            )
+            == 0
+        )
+        rows = list(await db.scalars(select(ConnectorInboundReceipt)))
+        assert all(claim_text not in row.safe_content_text for row in rows)
 
 
 @pytest.mark.asyncio
@@ -1466,6 +1849,124 @@ async def test_connector_http_reads_and_errors_do_not_expose_sensitive_values(
     assert claim_text not in safe_http
     for value in (*sensitive.values(), *internal_values):
         assert value not in safe_http
+
+
+@pytest.mark.asyncio
+async def test_typed_http_bodies_reject_scope_and_identity_injection(p2_scope, monkeypatch):
+    factory = p2_scope
+    _install_artifact_detail(monkeypatch, _artifact_detail())
+    app = FastAPI()
+    app.include_router(connector_replies_router)
+
+    async def override_db():
+        async with factory() as db:
+            yield db
+
+    app.dependency_overrides[get_db] = override_db
+    app.dependency_overrides[get_request_identity] = _identity
+    reply_path = "/workspaces/p2-governed/projects/p2-project/connector-reply-grants"
+    injected_reply = _create("injected-reply").model_dump()
+    injected_reply.update(
+        {
+            "user_id": "forged-user",
+            "chat_id": "forged-chat",
+            "context": {"project_id": "forged-project"},
+            "create_request_hash": "forged-hash",
+            "conversation_revision": 999,
+        }
+    )
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        rejected_reply = await client.post(reply_path, json=injected_reply)
+        assert rejected_reply.status_code == 422
+        valid_reply = await client.post(
+            reply_path, json=_create("valid-before-artifact-injection").model_dump()
+        )
+        assert valid_reply.status_code == 201
+        reply_public_id = valid_reply.json()["data"]["reply_grant_public_id"]
+        artifact_path = f"{reply_path}/{reply_public_id}/artifact-grants"
+        injected_artifact = ConnectorArtifactGrantCreate(
+            request_id="injected-artifact",
+            artifact_public_id="session:artifact",
+            workflow_id="p2-workflow",
+            run_id="p2-run",
+        ).model_dump()
+        injected_artifact.update(
+            {
+                "conversation_id": "forged-conversation",
+                "content_hash": "forged-hash",
+                "claim_text": "forged-claim",
+                "created_by_user_id": "forged-user",
+            }
+        )
+        rejected_artifact = await client.post(artifact_path, json=injected_artifact)
+        assert rejected_artifact.status_code == 422
+    async with factory() as db:
+        assert await db.scalar(select(func.count()).select_from(ConnectorReplyGrant)) == 1
+        assert await db.scalar(select(func.count()).select_from(ConnectorArtifactGrant)) == 0
+        deliveries = list(await db.scalars(select(ConnectorOutboundDelivery)))
+        assert len(deliveries) == 1 and deliveries[0].purpose == "activation"
+
+
+@pytest.mark.asyncio
+async def test_reused_request_id_with_changed_body_has_no_extra_operation(p2_scope, monkeypatch):
+    factory = p2_scope
+    _install_artifact_detail(monkeypatch, _artifact_detail())
+    async with factory() as db:
+        reply_created = await grants.create_reply_grant(
+            db,
+            "p2-governed",
+            "p2-project",
+            _identity(),
+            _create("reply-key-conflict"),
+        )
+    async with factory() as db:
+        with pytest.raises(HTTPException, match="idempotency_key_reused") as raised:
+            await grants.create_reply_grant(
+                db,
+                "p2-governed",
+                "p2-project",
+                _identity(),
+                _create("reply-key-conflict").model_copy(update={"expires_in_seconds": 600}),
+            )
+        assert raised.value.status_code == 409
+        await db.rollback()
+        assert await db.scalar(select(func.count()).select_from(ConnectorReplyGrant)) == 1
+        assert await db.scalar(select(func.count()).select_from(ConnectorOutboundDelivery)) == 1
+
+    artifact_body = ConnectorArtifactGrantCreate(
+        request_id="artifact-key-conflict",
+        artifact_public_id="session:artifact",
+        workflow_id="p2-workflow",
+        run_id="p2-run",
+    )
+    async with factory() as db:
+        await artifacts.create_artifact_grant(
+            db,
+            "p2-governed",
+            "p2-project",
+            reply_created.reply_grant_public_id,
+            _identity(),
+            artifact_body,
+        )
+    async with factory() as db:
+        with pytest.raises(HTTPException, match="idempotency_key_reused") as raised:
+            await artifacts.create_artifact_grant(
+                db,
+                "p2-governed",
+                "p2-project",
+                reply_created.reply_grant_public_id,
+                _identity(),
+                artifact_body.model_copy(update={"expires_in_seconds": 900}),
+            )
+        assert raised.value.status_code == 409
+        await db.rollback()
+        assert await db.scalar(select(func.count()).select_from(ConnectorReplyGrant)) == 1
+        assert await db.scalar(select(func.count()).select_from(ConnectorArtifactGrant)) == 1
+        deliveries = list(await db.scalars(select(ConnectorOutboundDelivery)))
+        assert sorted(delivery.purpose for delivery in deliveries) == [
+            "activation",
+            "artifact_offer",
+        ]
 
 
 @pytest.mark.asyncio
