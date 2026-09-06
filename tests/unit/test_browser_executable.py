@@ -223,6 +223,7 @@ def test_agent_image_marker_starts_cloak_without_stock_chromium(tmp_path):
         event.startswith("cloak ") and "--remote-debugging-port=9222" in event for event in events
     )
     assert any(event.startswith("server ") for event in events)
+    assert "startup-test-private-license" not in result.stdout + result.stderr
 
 
 def test_agent_host_mode_does_not_resolve_browser_engine(tmp_path):
