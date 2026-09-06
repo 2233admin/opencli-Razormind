@@ -26,8 +26,6 @@ from backend.models.gaojixing_collection import (
     GaojixingQuestionStatus,
     GaojixingRuntimeLease,
 )
-logger = logging.getLogger(__name__)
-
 from backend.workflow.gaojixing_archive import (
     finalize_archive,
     promote_capture_artifacts,
@@ -40,8 +38,31 @@ from backend.workflow.managed_gaojixing_question_batches import (
     resolve_managed_question_batch,
 )
 
+logger = logging.getLogger(__name__)
+
 LEASE_DURATION = timedelta(seconds=30)
 HEARTBEAT_INTERVAL_SECONDS = 5.0
+_PUBLIC_CAPTURE_FAILURE_CODES = frozenset({
+    "doubao-new-failed", "doubao-ask-failed", "doubao-status-failed",
+    "formal-chat-url-missing", "page-question-not-proven",
+    "opencli-json-invalid", "opencli-runtime-unavailable", "opencli-runtime-timeout",
+    "doubao-local-runtime-required", "playwright-unavailable",
+    "doubao-browser-context-missing", "full-answer-missing",
+    "opencli-page-answer-mismatch", "answer-changed-during-capture",
+})
+
+
+def _capture_failure_code(exc: Exception) -> str:
+    # Never persist raw exception text: subprocess/browser errors can contain
+    # account details, page content, or credentials. Only our fixed codes cross
+    # the durable diagnostic boundary.
+    from backend.workflow.gaojixing_doubao_driver import DoubaoDriverUnavailableError
+
+    if isinstance(exc, DoubaoDriverUnavailableError) and exc.code in _PUBLIC_CAPTURE_FAILURE_CODES:
+        return exc.code
+    return "doubao-capture-failed"
+
+
 WorkerOutcome = Literal[
     "workflow_resume_scheduled",
     "resume_pending",
@@ -94,7 +115,10 @@ async def run_collection_job(
                     if isawaitable(result):
                         await result
                 except Exception:
-                    logger.exception("failed to resume Gaojixing workflow run", extra={"run_id": job.workflow_run_id})
+                    logger.exception(
+                        "failed to resume Gaojixing workflow run",
+                        extra={"run_id": job.workflow_run_id},
+                    )
                     return "resume_pending"
                 return "workflow_resume_scheduled"
             return "busy"
@@ -199,7 +223,10 @@ async def run_collection_job(
                     if isawaitable(result):
                         await result
                 except Exception:
-                    logger.exception("failed to resume Gaojixing workflow run", extra={"run_id": workflow_run_id})
+                    logger.exception(
+                        "failed to resume Gaojixing workflow run",
+                        extra={"run_id": workflow_run_id},
+                    )
                     return "resume_pending"
                 return "workflow_resume_scheduled"
             if pending.phase == "phase2":
@@ -323,7 +350,7 @@ async def _advance_question(
         )
     except _LeaseLostError:
         return "lease_lost"
-    except Exception:
+    except Exception as exc:
         waiting_saved = await _mark_waiting(
             session_factory,
             job_id,
@@ -332,6 +359,7 @@ async def _advance_question(
             fencing_token,
             kind="reconciliation",
             artifact_ref=None,
+            failure={"code": _capture_failure_code(exc)},
         )
         return "waiting_reconciliation" if waiting_saved else "lease_lost"
     if capture is None:
@@ -343,6 +371,7 @@ async def _advance_question(
             fencing_token,
             kind="reconciliation",
             artifact_ref=None,
+            failure={"code": "doubao-answer-not-proven"},
         )
         return "waiting_reconciliation" if waiting_saved else "lease_lost"
     if capture.get("status") == "verification_required":
@@ -614,6 +643,7 @@ async def _mark_waiting(
     *,
     kind,
     artifact_ref,
+    failure=None,
 ) -> bool:
     checkpoint_status = (
         GaojixingQuestionStatus.WAITING_RECONCILIATION.value
@@ -636,6 +666,7 @@ async def _mark_waiting(
                 status=run_status,
                 waiting_kind=kind,
                 waiting_artifact_ref=artifact_ref,
+                failure=failure,
                 lease_owner=None,
                 lease_fencing_token=None,
                 heartbeat_at=None,
@@ -651,6 +682,7 @@ async def _mark_waiting(
             .values(
                 status=checkpoint_status,
                 artifact_refs=[artifact_ref] if artifact_ref else [],
+                failure=failure,
             )
         )
         await session.commit()
