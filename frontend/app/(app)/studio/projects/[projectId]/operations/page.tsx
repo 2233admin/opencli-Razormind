@@ -95,7 +95,18 @@ export default function ProjectOperationsPage({
   const traceTotalEvents = traceQuery.data?.trace.projection.eventCount ?? selectedLog?.event_count ?? 0
   const traceHasNextPage = traceNextCursor > traceCursor && traceNextCursor < traceTotalEvents
   const traceStatus = traceQuery.data?.trace.projection.status ?? selectedLog?.status ?? null
-  const collectionRecovery = traceStatus === 'waiting' ? extractGaojixingRecoveryCase(traceEvents) : null
+  // Current recovery must not depend on the page of historical events being viewed.
+  const recoveryTraceQuery = useProjectRuntimeTrace(
+    workspaceId,
+    projectId,
+    traceStatus === 'waiting' ? selectedRun?.workflowId ?? null : null,
+    traceStatus === 'waiting' ? selectedRun?.runId ?? null : null,
+    { afterSequence: Math.max(0, traceTotalEvents - TRACE_PAGE_SIZE), limit: TRACE_PAGE_SIZE },
+  )
+  const recoveryTrace = recoveryTraceQuery.data?.trace
+  const collectionRecovery = traceStatus === 'waiting' && recoveryTrace?.projection.status === 'waiting'
+    && recoveryTrace.nextAfterSequence >= recoveryTrace.projection.eventCount
+    ? extractGaojixingRecoveryCase(recoveryTrace.events) : null
   const traceNodeTasks = buildOperationsNodeTasks(
     traceQuery.data?.trace.projection.nodeStates ?? [],
   )
@@ -128,6 +139,7 @@ export default function ProjectOperationsPage({
       workflow: log.workflow_id,
       run: log.run_id,
       trace: log.trace_id,
+      conversation: log.workflow_id === navigationContext.workflow ? navigationContext.conversation : undefined,
     })
     if (href) {
       traceHistoryRef.current = { sourceHref: currentHref, targetHref: href }
