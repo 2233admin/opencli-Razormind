@@ -1,17 +1,20 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import UTC, datetime, timedelta
 
 import pytest
 from cryptography.fernet import Fernet
-from fastapi import HTTPException
+from fastapi import FastAPI, HTTPException
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from backend.api.v1 import chat
+from backend.api.v1.connector_replies import router as connector_replies_router
 from backend.auth.crypto import encrypt
-from backend.database import Base
+from backend.database import Base, get_db
 from backend.models.agent_conversation import AgentConversation, AgentConversationTurn
 from backend.models.connector_reply import (
     ConnectorArtifactGrant,
@@ -25,7 +28,7 @@ from backend.models.identity import User, Workspace, WorkspaceMembership, Worksp
 from backend.models.studio import StudioProject, StudioWorkflow, StudioWorkspace
 from backend.schemas.connector_reply import ConnectorArtifactGrantCreate, ConnectorReplyGrantCreate
 from backend.schemas.project_artifact import ProjectArtifactDetail
-from backend.security.identity import RequestIdentity
+from backend.security.identity import RequestIdentity, get_request_identity
 from backend.services import agent_conversation_service as conversations
 from backend.services import connector_artifact_grant_service as artifacts
 from backend.services import connector_outbound_service as outbound
@@ -33,6 +36,7 @@ from backend.services import connector_reply_grant_service as grants
 from backend.services import connector_reply_worker as worker
 from backend.services.connector_outbound_service import (
     create_artifact_offer_delivery,
+    create_file_delivery,
     create_text_delivery,
     deliver_outbound,
 )
@@ -527,6 +531,155 @@ async def test_native_markdown_content_field_creates_text_delivery(p2_scope, mon
 
 
 @pytest.mark.asyncio
+async def test_json_artifact_uses_canonical_in_memory_payload(p2_scope, monkeypatch):
+    factory = p2_scope
+    reply, _ = await _grant(factory)
+    content = {
+        "url": "https://example.invalid/must-not-be-fetched",
+        "path": "C:/must-not-be-read.json",
+        "body": {"verified": True},
+        "label": "界面预览",
+    }
+    _install_artifact_detail(
+        monkeypatch,
+        _artifact_detail(media_type="application/json", content=content),
+    )
+    async with factory() as db:
+        created = await artifacts.create_artifact_grant(
+            db,
+            "p2-governed",
+            "p2-project",
+            reply.public_id,
+            _identity(),
+            ConnectorArtifactGrantCreate(
+                request_id="native-json",
+                artifact_public_id="session:artifact",
+                workflow_id="p2-workflow",
+                run_id="p2-run",
+            ),
+        )
+        assert created.claim_text is not None
+        receipt = await persist_verified_message(
+            db,
+            "p2-installation-id",
+            _message(created.claim_text, message_id="native-json-claim"),
+        )
+        await db.commit()
+        receipt_id = receipt.id
+    await worker.process_connector_receipt(factory, receipt_id)
+    expected = json.dumps(
+        content, ensure_ascii=False, allow_nan=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    async with factory() as db:
+        receipt = await db.get(ConnectorInboundReceipt, receipt_id)
+        assert receipt is not None and receipt.status == "completed"
+        delivery = await db.get(ConnectorOutboundDelivery, receipt.outbound_delivery_id)
+        assert delivery is not None and delivery.payload_kind == "file"
+        assert delivery.payload_bytes == expected
+        assert delivery.media_type == "application/json"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("media_type", "content"),
+    (
+        ("image/png", {"body": "not an allowed file type"}),
+        ("text/markdown", {"content": {"nested": "not text"}}),
+    ),
+)
+async def test_artifact_rejects_unknown_media_and_non_string_text(
+    p2_scope, monkeypatch, media_type, content
+):
+    factory = p2_scope
+    reply, _ = await _grant(factory)
+    _install_artifact_detail(
+        monkeypatch,
+        _artifact_detail(media_type=media_type, content=content),
+    )
+    async with factory() as db:
+        created = await artifacts.create_artifact_grant(
+            db,
+            "p2-governed",
+            "p2-project",
+            reply.public_id,
+            _identity(),
+            ConnectorArtifactGrantCreate(
+                request_id="unsupported-media",
+                artifact_public_id="session:artifact",
+                workflow_id="p2-workflow",
+                run_id="p2-run",
+            ),
+        )
+        assert created.claim_text is not None
+        receipt = await persist_verified_message(
+            db,
+            "p2-installation-id",
+            _message(created.claim_text, message_id="unsupported-media-claim"),
+        )
+        await db.commit()
+        receipt_id = receipt.id
+    await worker.process_connector_receipt(factory, receipt_id)
+    async with factory() as db:
+        receipt = await db.get(ConnectorInboundReceipt, receipt_id)
+        assert receipt is not None and receipt.status == "permanent_failed"
+        assert receipt.stable_error_code == "artifact_media_unsupported"
+        assert receipt.outbound_delivery_id is None
+
+
+@pytest.mark.asyncio
+async def test_outbound_payload_size_limits_count_encoded_bytes(p2_scope):
+    factory = p2_scope
+    reply, _ = await _grant(factory)
+    async with factory() as db:
+        exact_file = create_file_delivery(
+            db,
+            installation_id="p2-installation-id",
+            reply_grant_id=reply.id,
+            artifact_grant_id="artifact-size-boundary",
+            chat_id="oc-bound",
+            reply_to_message_id="size-request",
+            payload=b"x" * 1_048_576,
+            file_name="boundary.json",
+            media_type="application/json",
+            dedupe_owner_id="file-size-boundary",
+        )
+        assert len(exact_file.payload_bytes or b"") == 1_048_576
+        with pytest.raises(ValueError, match="file size is invalid"):
+            create_file_delivery(
+                db,
+                installation_id="p2-installation-id",
+                reply_grant_id=reply.id,
+                artifact_grant_id="artifact-too-large",
+                chat_id="oc-bound",
+                reply_to_message_id="size-request",
+                payload=b"x" * 1_048_577,
+                file_name="too-large.json",
+                media_type="application/json",
+                dedupe_owner_id="file-too-large",
+            )
+        exact_text = create_text_delivery(
+            db,
+            installation_id="p2-installation-id",
+            reply_grant_id=reply.id,
+            purpose="agent_reply",
+            chat_id="oc-bound",
+            text="x" * outbound.MAX_TEXT_BYTES,
+            dedupe_owner_id="text-size-boundary",
+        )
+        assert len((exact_text.safe_text or "").encode("utf-8")) == outbound.MAX_TEXT_BYTES
+        with pytest.raises(ValueError, match="text size is invalid"):
+            create_text_delivery(
+                db,
+                installation_id="p2-installation-id",
+                reply_grant_id=reply.id,
+                purpose="agent_reply",
+                chat_id="oc-bound",
+                text=("x" * (outbound.MAX_TEXT_BYTES - 2)) + "界",
+                dedupe_owner_id="utf8-text-too-large",
+            )
+
+
+@pytest.mark.asyncio
 async def test_artifact_grant_requires_trusted_conversation_origin(p2_scope, monkeypatch):
     factory = p2_scope
     reply, _ = await _grant(factory)
@@ -719,6 +872,50 @@ async def test_completed_turn_recovery_does_not_call_model_twice(p2_scope):
 
 
 @pytest.mark.asyncio
+async def test_failed_turn_is_terminal_and_recovery_does_not_call_model_twice(p2_scope):
+    factory = p2_scope
+    _, activation = await _grant(factory)
+    async with factory() as db:
+        activation.status = "sent"
+        activation.provider_message_id = "activation-message"
+        await db.merge(activation)
+        receipt = await persist_verified_message(
+            db,
+            "p2-installation-id",
+            _message(
+                "fail once",
+                message_id="failed-turn-is-terminal",
+                reply_to="activation-message",
+            ),
+        )
+        await db.commit()
+        receipt_id = receipt.id
+    calls = 0
+
+    async def failing_runner(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        raise RuntimeError("model failed with a private diagnostic")
+
+    await worker.process_connector_receipt(factory, receipt_id, chat_runner=failing_runner)
+    await worker.recover_connector_receipts()
+    await worker.process_connector_receipt(factory, receipt_id, chat_runner=failing_runner)
+    assert calls == 1
+    async with factory() as db:
+        receipt = await db.get(ConnectorInboundReceipt, receipt_id)
+        turn = await db.scalar(
+            select(AgentConversationTurn).where(
+                AgentConversationTurn.request_id
+                == worker._turn_request_id("p2-installation-id", "failed-turn-is-terminal")
+            )
+        )
+        assert receipt is not None and receipt.status == "permanent_failed"
+        assert receipt.stable_error_code == "connector_processing_failed"
+        assert receipt.outbound_delivery_id is None
+        assert turn is not None and turn.status == "failed"
+
+
+@pytest.mark.asyncio
 async def test_connector_proposal_uses_existing_turn_and_notice_path(p2_scope):
     factory = p2_scope
     _, activation = await _grant(factory)
@@ -766,6 +963,94 @@ async def test_connector_proposal_uses_existing_turn_and_notice_path(p2_scope):
         assert receipt is not None and receipt.status == "proposal"
         assert turn is not None and turn.status == "proposal"
         assert delivery is not None and delivery.safe_text == "Enable source"
+
+
+@pytest.mark.asyncio
+async def test_proposal_recovery_reuses_committed_turn_without_model_rerun(p2_scope):
+    factory = p2_scope
+    reply, activation = await _grant(factory)
+    async with factory() as db:
+        activation.status = "sent"
+        activation.provider_message_id = "activation-message"
+        await db.merge(activation)
+        receipt = await persist_verified_message(
+            db,
+            "p2-installation-id",
+            _message(
+                "prepare recoverable change",
+                message_id="proposal-before-receipt-finalize",
+                reply_to="activation-message",
+            ),
+        )
+        await db.commit()
+        receipt_id = receipt.id
+    claim = await worker._claim_receipt(factory, receipt_id)
+    assert claim is not None
+    owner, receipt_generation, grant_generation = claim
+    calls = 0
+
+    async def proposal_runner(_db, _body, _identity, **_kwargs):
+        nonlocal calls
+        calls += 1
+        return chat.ChatReply(
+            type="proposal",
+            proposal=chat.Proposal(
+                tool="toggle_source",
+                args={"source_id": "source", "enabled": True},
+                summary="Recover proposal",
+                diff="enabled: false -> true",
+                work_item_id="recover-work-item",
+                workspace_id="p2-governed",
+                proposal_version="v1",
+            ),
+        )
+
+    async with factory() as db:
+        access = await grants.authorize_receipt_for_agent(
+            db,
+            receipt_id=receipt_id,
+            lease_owner=owner,
+            receipt_lease_generation=receipt_generation,
+            grant_lease_generation=grant_generation,
+        )
+        _, turn = await conversations.send_connector_message(
+            db,
+            access,
+            request_id=worker._turn_request_id(
+                "p2-installation-id", "proposal-before-receipt-finalize"
+            ),
+            content="prepare recoverable change",
+            chat_runner=proposal_runner,
+        )
+        assert turn.status == "proposal"
+    async with factory() as db:
+        receipt = await db.get(ConnectorInboundReceipt, receipt_id)
+        current_grant = await db.get(ConnectorReplyGrant, reply.id)
+        assert receipt is not None and current_grant is not None
+        receipt.lease_expires_at = datetime.now(UTC) - timedelta(seconds=1)
+        current_grant.execution_lease_expires_at = datetime.now(UTC) - timedelta(seconds=1)
+        await db.commit()
+
+    async def forbidden_runner(*_args, **_kwargs):
+        raise AssertionError("committed proposal must not call the model again")
+
+    await worker.process_connector_receipt(factory, receipt_id, chat_runner=forbidden_runner)
+    assert calls == 1
+    async with factory() as db:
+        receipt = await db.get(ConnectorInboundReceipt, receipt_id)
+        assert receipt is not None and receipt.status == "proposal"
+        assert receipt.outbound_delivery_id is not None
+        delivery = await db.get(ConnectorOutboundDelivery, receipt.outbound_delivery_id)
+        assert delivery is not None and delivery.purpose == "proposal_notice"
+        assert delivery.safe_text == "Recover proposal"
+        assert (
+            await db.scalar(
+                select(func.count())
+                .select_from(AgentConversationTurn)
+                .where(AgentConversationTurn.conversation_id == "p2-conversation")
+            )
+            == 1
+        )
 
 
 @pytest.mark.asyncio
@@ -1001,6 +1286,186 @@ async def test_send_timeout_is_indeterminate_and_disconnect_is_awaited(p2_scope)
         assert row.status == "indeterminate"
         assert row.error_code == "send_result_unknown"
     assert await worker.recover_connector_receipts() == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("success", "message_id", "error_code", "expected"),
+    (
+        (True, None, None, "indeterminate"),
+        (False, None, "permission_denied", "failed"),
+        (False, None, "rate_limited", "indeterminate"),
+    ),
+)
+async def test_outbound_result_classification(p2_scope, success, message_id, error_code, expected):
+    factory = p2_scope
+    _, delivery = await _grant(factory)
+
+    class Channel:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def connect_until_ready(self, *, timeout):
+            assert timeout > 0
+
+        async def send(self, _chat_id, _message, opts):
+            assert len(opts["uuid"]) <= 50
+            assert opts["reply_target_gone"] == "fail"
+            error = None
+            if error_code is not None:
+                error = type("Error", (), {"code": type("Code", (), {"value": error_code})()})()
+            return type(
+                "Result",
+                (),
+                {"success": success, "message_id": message_id, "error": error},
+            )()
+
+        async def disconnect(self):
+            pass
+
+    assert await deliver_outbound(factory, delivery.id, channel_factory=Channel) == expected
+    async with factory() as db:
+        row = await db.get(ConnectorOutboundDelivery, delivery.id)
+        assert row is not None and row.status == expected
+        if expected == "indeterminate":
+            assert row.error_code == "send_result_unknown"
+        else:
+            assert row.error_code == error_code
+
+
+@pytest.mark.asyncio
+async def test_outbound_sdk_failures_do_not_log_sensitive_values(p2_scope, caplog):
+    factory = p2_scope
+    _, delivery = await _grant(factory)
+    sensitive = {
+        "safe_text": "sensitive-agent-response",
+        "open_id": "ou-bound",
+        "chat_id": "oc-bound",
+        "app_secret": "secret",
+        "encrypt_key": "encrypt",
+        "verification_token": "verify",
+        "provider_error": "provider-private-diagnostic",
+    }
+    async with factory() as db:
+        row = await db.get(ConnectorOutboundDelivery, delivery.id)
+        assert row is not None
+        row.safe_text = sensitive["safe_text"]
+        await db.commit()
+
+    class Channel:
+        def __init__(self, **kwargs):
+            assert kwargs["app_secret"] == sensitive["app_secret"]
+            assert kwargs["encrypt_key"] == sensitive["encrypt_key"]
+            assert kwargs["verification_token"] == sensitive["verification_token"]
+
+        async def connect_until_ready(self, *, timeout):
+            assert timeout > 0
+
+        async def send(self, chat_id, message, _opts):
+            assert chat_id == sensitive["chat_id"]
+            assert message.text == sensitive["safe_text"]
+            raise RuntimeError(
+                " ".join(
+                    (
+                        sensitive["provider_error"],
+                        sensitive["safe_text"],
+                        sensitive["open_id"],
+                        sensitive["chat_id"],
+                    )
+                )
+            )
+
+        async def disconnect(self):
+            raise RuntimeError(sensitive["provider_error"])
+
+    caplog.set_level("WARNING")
+    assert await deliver_outbound(factory, delivery.id, channel_factory=Channel) == "indeterminate"
+    rendered = "\n".join(record.getMessage() for record in caplog.records)
+    assert "connector outbound disconnect failed" in rendered
+    for value in sensitive.values():
+        assert value not in rendered
+
+
+@pytest.mark.asyncio
+async def test_connector_http_reads_and_errors_do_not_expose_sensitive_values(
+    p2_scope, monkeypatch
+):
+    factory = p2_scope
+    _install_artifact_detail(monkeypatch, _artifact_detail())
+    sensitive = {
+        "app_secret": "http-app-secret-marker",
+        "encrypt_key": "http-encrypt-key-marker",
+        "verification_token": "http-verification-token-marker",
+        "open_id": "ou-bound",
+        "chat_id": "oc-bound",
+    }
+    async with factory() as db:
+        installation = await db.get(ConnectorInstallation, "p2-installation-id")
+        assert installation is not None
+        installation.app_secret = sensitive["app_secret"]
+        installation.encrypt_key = sensitive["encrypt_key"]
+        installation.verification_token = sensitive["verification_token"]
+        await db.commit()
+
+    app = FastAPI()
+    app.include_router(connector_replies_router)
+
+    async def override_db():
+        async with factory() as db:
+            yield db
+
+    app.dependency_overrides[get_db] = override_db
+    app.dependency_overrides[get_request_identity] = _identity
+    reply_path = "/workspaces/p2-governed/projects/p2-project/connector-reply-grants"
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        reply_created = await client.post(reply_path, json=_create("http-reply").model_dump())
+        assert reply_created.status_code == 201
+        reply_public_id = reply_created.json()["data"]["reply_grant_public_id"]
+        artifact_path = f"{reply_path}/{reply_public_id}/artifact-grants"
+        artifact_body = ConnectorArtifactGrantCreate(
+            request_id="http-artifact",
+            artifact_public_id="session:artifact",
+            workflow_id="p2-workflow",
+            run_id="p2-run",
+        ).model_dump()
+        artifact_created = await client.post(artifact_path, json=artifact_body)
+        assert artifact_created.status_code == 201
+        created_data = artifact_created.json()["data"]
+        claim_text = created_data["claim_text"]
+        assert isinstance(claim_text, str) and claim_text
+        artifact_public_id = created_data["artifact_grant_public_id"]
+
+        replay = await client.post(artifact_path, json=artifact_body)
+        reply_list = await client.get(reply_path, params={"conversation_id": "p2-conversation"})
+        reply_detail = await client.get(f"{reply_path}/{reply_public_id}")
+        artifact_list = await client.get(artifact_path)
+        artifact_detail = await client.get(f"{artifact_path}/{artifact_public_id}")
+        missing = await client.get(f"{artifact_path}/missing-artifact-grant")
+    assert replay.status_code == 201 and replay.json()["data"]["claim_text"] is None
+    assert all(
+        response.status_code < 400
+        for response in (reply_list, reply_detail, artifact_list, artifact_detail)
+    )
+    assert missing.status_code == 404
+    safe_http = "\n".join(
+        response.text
+        for response in (
+            reply_created,
+            replay,
+            reply_list,
+            reply_detail,
+            artifact_list,
+            artifact_detail,
+            missing,
+        )
+    )
+    async with factory() as db:
+        artifact = await db.scalar(select(ConnectorArtifactGrant))
+        assert artifact is not None
+        internal_values = (artifact.claim_ciphertext, artifact.claim_digest)
+    assert claim_text not in safe_http
+    for value in (*sensitive.values(), *internal_values):
+        assert value not in safe_http
 
 
 @pytest.mark.asyncio
