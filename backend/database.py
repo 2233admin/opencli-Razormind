@@ -25,6 +25,7 @@ connect_args = {"check_same_thread": False, "timeout": 30} if settings.is_sqlite
 engine = create_async_engine(
     settings.database_url,
     echo=settings.debug,
+    hide_parameters=True,
     connect_args=connect_args,
     **_pool_kwargs,
 )
