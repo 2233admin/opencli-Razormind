@@ -5,12 +5,14 @@ import { useQueries, useQueryClient } from '@tanstack/react-query'
 import { CheckCircle2, Clipboard, Link2, LoaderCircle, RefreshCw, ShieldAlert, Unlink } from 'lucide-react'
 import { toast } from 'sonner'
 
+import { useAuth } from '@/components/auth/auth-provider'
 import { useAgentConversation } from '@/lib/api/hooks'
 import {
   connectorInstallationHealthQueryKey,
   connectorMyBindingQueryKey,
   getConnectorInstallationHealth,
   getMyConnectorBinding,
+  useConnectorWorkspaceMemberRole,
   useConnectorInstallations,
   type ConnectorBinding,
   type ConnectorInstallation,
@@ -62,6 +64,7 @@ const GRANT_LABELS: Record<string, string> = {
   revoked: '已撤销',
   expired: '已过期',
   redeemed: '已领取',
+  failed: '发送失败',
 }
 
 function statusLabel(status: string | null | undefined, labels: Record<string, string> = DELIVERY_LABELS) {
@@ -93,7 +96,7 @@ function requestId() {
 function safeErrorMessage(error: unknown, action: 'reply' | 'artifact' | 'revoke') {
   const reason = error as SafeError | null
   const code = reason?.code ?? reason?.message
-  if (reason?.status === 403) return '当前账号没有完成此操作所需的 Workspace 或报告权限。'
+  if (reason?.status === 403) return '当前账号没有完成此操作所需的工作区或报告权限。'
   if (reason?.status === 404) return '授权对象已不可用，可能已被撤销或不属于当前报告范围。请刷新后重试。'
   if (reason?.status === 503) return '当前连接回复能力暂不可用，请稍后刷新状态。'
   if (reason?.status === 409) {
@@ -109,12 +112,12 @@ function safeErrorMessage(error: unknown, action: 'reply' | 'artifact' | 'revoke
 
 function validateConversationScope(artifact: ProjectArtifactDetail, conversation: ReturnType<typeof useAgentConversation>['data']) {
   if (!conversation) return null
-  if (!conversation.workspace_id) return '原会话没有可验证的 governed Workspace。'
+  if (!conversation.workspace_id) return '原会话没有可验证的工作区。'
   const context = conversation.context_binding ?? {}
-  if (context.studio_workspace_id !== artifact.workspace_id) return '原会话与当前报告的 Studio Workspace 不一致。'
+  if (context.studio_workspace_id !== artifact.workspace_id) return '原会话与当前报告所在工作区不一致。'
   if (context.project_id !== artifact.project_id) return '原会话与当前报告项目不一致。'
   if (context.workflow_id !== artifact.workflow_id) return '原会话与当前报告工作流不一致。'
-  if (context.run_id !== artifact.run_id) return '原会话与当前报告运行不一致。'
+  if (context.run_id !== undefined && context.run_id !== null && context.run_id !== artifact.run_id) return '原会话与当前报告运行不一致。'
   return null
 }
 
@@ -178,8 +181,9 @@ function ArtifactGrantAction({
   const requestKey = `${governedWorkspaceId}:${artifact.project_id}:${grant.reply_grant_public_id}:${artifact.id}`
   const currentId = current?.artifact_grant_public_id ?? null
   const currentStatus = current?.status ?? null
+  const deliveryStatus = current?.delivery_status ?? current?.offer_delivery_status ?? null
   const offerReady = grant.activation_delivery_status === 'sent' && canCreate
-  const canCreateArtifact = offerReady && (!current || current.status === 'expired' || current.status === 'revoked' || current.status === 'redeemed')
+  const canCreateArtifact = offerReady && (!current || current.status === 'expired' || current.status === 'revoked' || current.status === 'redeemed' || current.status === 'failed')
 
   useEffect(() => {
     setClaimText(null)
@@ -252,7 +256,6 @@ function ArtifactGrantAction({
     )
   }
 
-  const status = current?.delivery_status ?? current?.offer_delivery_status
   return (
     <div className="mt-3 rounded-md border bg-background p-3" data-testid={`connector-artifact-grant-${grant.reply_grant_public_id}`}>
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -264,7 +267,7 @@ function ArtifactGrantAction({
       </div>
       {current ? (
         <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-          <span>投递：{statusLabel(status)}</span>
+          <span>投递：{statusLabel(deliveryStatus)}</span>
           {current.error_code ? <span className="text-destructive">原因：{current.error_code}</span> : null}
           <span>{formatExpiry(current.expires_at)}</span>
         </div>
@@ -282,13 +285,13 @@ function ArtifactGrantAction({
       <div className="mt-2 flex flex-wrap gap-2">
         <Button type="button" size="sm" onClick={() => void createArtifactGrant()} disabled={!canCreateArtifact || pending} title={!canCreateArtifact ? '需先完成激活投递，且当前绑定和产物能力可用' : undefined}>
           {pending ? <LoaderCircle className="size-3.5 animate-spin" /> : <Link2 className="size-3.5" />}
-          {pending ? '授权中…' : current?.status === 'redeemed' || current?.status === 'expired' || current?.status === 'revoked' ? '重新授权领取' : '授权并发送领取指令'}
+          {pending ? '授权中…' : current?.status === 'redeemed' || current?.status === 'expired' || current?.status === 'revoked' || current?.status === 'failed' ? '重新授权领取' : '授权并发送领取指令'}
         </Button>
         {current?.status === 'active' ? <Button type="button" size="sm" variant="outline" onClick={revokeArtifactGrant} disabled={revoke.isPending}><Unlink className="size-3.5" />{revoke.isPending ? '撤销中…' : '撤销领取授权'}</Button> : null}
       </div>
       {!grant.activation_delivery_status || grant.activation_delivery_status !== 'sent' ? <p className="mt-2 text-[11px] text-muted-foreground">激活消息送达后，才能发送当前报告的领取指令。</p> : null}
-      {current?.delivery_status === 'indeterminate' ? <p className="mt-2 text-[11px] text-destructive">投递结果未知，系统不会自动重发；请先在飞书中核对结果。</p> : null}
-      {current && current.status === 'active' && (current.delivery_status === 'failed' || current.delivery_status === 'retryable_failed') ? <p className="mt-2 text-[11px] text-destructive">投递没有成功；页面不会自动重发，请撤销后重新授权。</p> : null}
+      {current && current.status === 'active' && deliveryStatus === 'indeterminate' ? <p className="mt-2 text-[11px] text-destructive">投递结果未知，系统不会自动重发；请先在飞书中核对结果。</p> : null}
+      {current && current.status === 'active' && (deliveryStatus === 'failed' || deliveryStatus === 'retryable_failed') ? <p className="mt-2 text-[11px] text-destructive">投递没有成功；页面不会自动重发，请撤销后重新授权。</p> : null}
     </div>
   )
 }
@@ -297,6 +300,7 @@ function ReplyGrantCard({
   governedWorkspaceId,
   grant,
   candidate,
+  canExport,
   installationName,
   open,
   revokePending,
@@ -306,6 +310,7 @@ function ReplyGrantCard({
   governedWorkspaceId: string
   grant: ConnectorReplyGrant
   candidate: Candidate | undefined
+  canExport: boolean
   installationName: string | undefined
   open: boolean
   revokePending: boolean
@@ -319,7 +324,7 @@ function ReplyGrantCard({
     open,
   )
   const current = detail.data ?? grant
-  const canCreateArtifact = Boolean(candidate?.binding?.active && candidate.health?.artifact_delivery_ready === true)
+  const canCreateArtifact = canExport && Boolean(candidate?.binding?.active && candidate.health?.artifact_delivery_ready === true)
 
   return (
     <div className="rounded-md border bg-muted/15 p-3">
@@ -334,11 +339,14 @@ function ReplyGrantCard({
 }
 
 export function ConnectorReplyGrantPanel({ artifact, open }: ConnectorReplyGrantPanelProps) {
+  const { identity } = useAuth()
   const conversation = useAgentConversation(artifact.conversation_id, Boolean(artifact.conversation_id))
   const queryClient = useQueryClient()
   const conversationScopeError = validateConversationScope(artifact, conversation.data)
   const governedWorkspaceId = conversationScopeError ? null : conversation.data?.workspace_id ?? null
   const scopeReady = Boolean(governedWorkspaceId && conversation.data?.status === 'active' && !conversationScopeError)
+  const workspaceAccess = useConnectorWorkspaceMemberRole(governedWorkspaceId, identity?.subject ?? null)
+  const canExport = workspaceAccess.isSuccess && ['admin', 'maintainer', 'operator'].includes(workspaceAccess.member?.role ?? '')
   const candidatesQuery = useConnectorCandidates(governedWorkspaceId)
   const replyGrants = useConnectorReplyGrants(governedWorkspaceId, artifact.project_id, artifact.conversation_id, scopeReady)
   const createReply = useCreateConnectorReplyGrant()
@@ -374,6 +382,8 @@ export function ConnectorReplyGrantPanel({ artifact, open }: ConnectorReplyGrant
       await Promise.all([
         replyGrants.refetch(),
         queryClient.refetchQueries({ queryKey: ['connector-reply-grant', governedWorkspaceId, artifact.project_id] }),
+        queryClient.refetchQueries({ queryKey: ['connector-artifact-grants', governedWorkspaceId, artifact.project_id] }),
+        queryClient.refetchQueries({ queryKey: ['connector-artifact-grant', governedWorkspaceId, artifact.project_id] }),
         candidatesQuery.installations.refetch(),
         ...candidatesQuery.bindings.map((query) => query.refetch()),
         ...candidatesQuery.health.map((query) => query.refetch()),
@@ -384,7 +394,7 @@ export function ConnectorReplyGrantPanel({ artifact, open }: ConnectorReplyGrant
   }
 
   function createReplyGrant() {
-    if (!governedWorkspaceId || !currentCandidate || !confirmation || !scopeReady || createReply.isPending) return
+    if (!governedWorkspaceId || !currentCandidate || !confirmation || !scopeReady || !canExport || createReply.isPending) return
     if (currentCandidate.installation.status !== 'active' || !currentCandidate.binding?.active || currentCandidate.health?.reply_execution_ready !== true || currentCandidate.health.artifact_delivery_ready !== true) return
     setReplyError(null)
     const requestKey = `${scopeKey}:${selectedInstallationId}:${currentCandidate.binding?.binding_public_id ?? ''}`
@@ -439,7 +449,7 @@ export function ConnectorReplyGrantPanel({ artifact, open }: ConnectorReplyGrant
     return <UnavailablePanel message="原 Agent 会话已关闭，不能创建新的飞书回复授权。" />
   }
   if (!governedWorkspaceId) {
-    return <UnavailablePanel message="原 Agent 会话没有可用的 governed Workspace，无法读取飞书连接。" />
+    return <UnavailablePanel message="原 Agent 会话没有可用的工作区，无法读取飞书连接。" />
   }
 
   return (
@@ -454,12 +464,15 @@ export function ConnectorReplyGrantPanel({ artifact, open }: ConnectorReplyGrant
 
       {candidatesQuery.installations.isLoading ? <p role="status" className="mt-3 text-xs text-muted-foreground">正在读取已绑定的飞书连接…</p> : null}
       {candidatesQuery.installations.isError ? <p role="alert" className="mt-3 text-xs text-destructive">飞书连接暂时无法读取，请稍后重试。</p> : null}
+      {workspaceAccess.isLoading ? <p role="status" className="mt-3 text-xs text-muted-foreground">正在读取当前工作区的报告权限…</p> : null}
+      {workspaceAccess.isError ? <p role="alert" className="mt-3 text-xs text-destructive">当前工作区权限暂时无法确认，已禁用新的回复和领取授权。</p> : null}
+      {workspaceAccess.isSuccess && !canExport ? <p className="mt-3 rounded-md border border-dashed p-3 text-xs text-muted-foreground">当前账号只能查看已有授权，暂不能创建新的回复或报告领取授权。</p> : null}
       {replyGrants.isLoading ? <p role="status" className="mt-3 text-xs text-muted-foreground">正在恢复当前原会话授权…</p> : null}
       {replyGrants.isError ? <p role="alert" className="mt-3 text-xs text-destructive">原会话授权状态暂时无法读取，请刷新后重试。</p> : null}
 
       {grants.length ? (
         <div className="mt-3 space-y-2">
-          {grants.map((grant) => <ReplyGrantCard key={grant.reply_grant_public_id} artifact={artifact} governedWorkspaceId={governedWorkspaceId} grant={grant} candidate={candidates.find((item) => item.installation.installation_public_id === grant.installation_public_id)} installationName={installationNames.get(grant.installation_public_id)} open={open} revokePending={revokeReply.isPending} onRevoke={revokeReplyGrant} />)}
+          {grants.map((grant) => <ReplyGrantCard key={grant.reply_grant_public_id} artifact={artifact} governedWorkspaceId={governedWorkspaceId} grant={grant} candidate={candidates.find((item) => item.installation.installation_public_id === grant.installation_public_id)} canExport={canExport} installationName={installationNames.get(grant.installation_public_id)} open={open} revokePending={revokeReply.isPending} onRevoke={revokeReplyGrant} />)}
         </div>
       ) : null}
 
@@ -469,21 +482,21 @@ export function ConnectorReplyGrantPanel({ artifact, open }: ConnectorReplyGrant
           <select id={`connector-reply-installation-${artifact.id}`} value={selectedInstallationId} onChange={(event) => { setSelectedInstallationId(event.target.value); setConfirmation(false); setReplyError(null) }} className="mt-2 h-9 w-full rounded-md border bg-background px-2 text-xs">
             <option value="">请选择连接</option>
             {candidates.map((candidate) => {
-              const ready = candidate.installation.status === 'active' && candidate.binding?.active === true && candidate.health?.reply_execution_ready === true && candidate.health?.artifact_delivery_ready === true
+              const ready = canExport && candidate.installation.status === 'active' && candidate.binding?.active === true && candidate.health?.reply_execution_ready === true && candidate.health?.artifact_delivery_ready === true
               return <option key={candidate.installation.installation_public_id} value={candidate.installation.installation_public_id} disabled={!ready}>{candidate.installation.name}{ready ? '' : '（当前不可用）'}</option>
             })}
           </select>
           {currentCandidate ? <p className="mt-2 text-[11px] text-muted-foreground">绑定状态：{currentCandidate.binding?.active ? '当前用户已绑定' : '当前用户未绑定'}；回复能力：{currentCandidate.health?.reply_execution_ready ? '可用' : '不可用'}；领取能力：{currentCandidate.health?.artifact_delivery_ready ? '可用' : '不可用'}。</p> : null}
           <label className="mt-3 flex items-start gap-2 text-xs"><input type="checkbox" checked={confirmation} onChange={(event) => setConfirmation(event.target.checked)} disabled={!currentCandidate} className="mt-0.5 size-4 accent-primary" /><span>我确认授权这个已绑定连接回复当前报告对应的同一原 Agent 会话。</span></label>
           {replyError ? <p role="alert" className="mt-2 text-xs text-destructive">{replyError}</p> : null}
-          <Button type="button" size="sm" className="mt-3" onClick={createReplyGrant} disabled={!currentCandidate || selectedHasActiveGrant || !confirmation || createReply.isPending || currentCandidate.health?.reply_execution_ready !== true || currentCandidate.health?.artifact_delivery_ready !== true}>
+          <Button type="button" size="sm" className="mt-3" onClick={createReplyGrant} disabled={!canExport || !currentCandidate || selectedHasActiveGrant || !confirmation || createReply.isPending || currentCandidate.health?.reply_execution_ready !== true || currentCandidate.health?.artifact_delivery_ready !== true}>
             {createReply.isPending ? <LoaderCircle className="size-3.5 animate-spin" /> : <CheckCircle2 className="size-3.5" />}
             {createReply.isPending ? '授权中…' : selectedHasActiveGrant ? '已有原会话授权' : createReply.isError ? '重试同一授权' : '授权原会话并发送激活'}
           </Button>
         </div>
-      ) : !candidatesQuery.installations.isLoading && !candidatesQuery.installations.isError ? <p className="mt-3 rounded-md border border-dashed p-3 text-xs text-muted-foreground">当前 Workspace 没有可用的本人绑定飞书连接。</p> : null}
+      ) : !candidatesQuery.installations.isLoading && !candidatesQuery.installations.isError ? <p className="mt-3 rounded-md border border-dashed p-3 text-xs text-muted-foreground">当前工作区没有可用的本人绑定飞书连接。</p> : null}
 
-      {activeGrants.length === 0 && !candidates.length ? null : <p className="mt-3 text-[11px] leading-4 text-muted-foreground">连接、绑定和报告来源会在服务端再次校验；页面不会创建新会话，也不会把 Studio Workspace 当作 connector Workspace。</p>}
+      {activeGrants.length === 0 && !candidates.length ? null : <p className="mt-3 text-[11px] leading-4 text-muted-foreground">连接、绑定、原会话和报告范围会在服务端再次校验；页面不会创建新会话。</p>}
     </PanelShell>
   )
 }

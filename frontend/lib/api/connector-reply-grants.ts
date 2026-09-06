@@ -272,8 +272,11 @@ export function useConnectorArtifactGrant(
     queryFn: () => getConnectorArtifactGrant(workspaceId as string, projectId as string, replyGrantId as string, artifactGrantId as string),
     enabled: enabled && Boolean(workspaceId && projectId && replyGrantId && artifactGrantId),
     refetchInterval: (query) => {
-      const status = query.state.data?.offer_delivery_status
-      if (query.state.data?.status !== 'active' || (status && terminalDeliveryStatuses.has(status))) return false
+      const offerStatus = query.state.data?.offer_delivery_status
+      const deliveryStatus = query.state.data?.delivery_status
+      if (query.state.data?.status !== 'active') return false
+      if (deliveryStatus && terminalDeliveryStatuses.has(deliveryStatus)) return false
+      if (offerStatus && offerStatus !== 'sent' && terminalDeliveryStatuses.has(offerStatus)) return false
       return 4_000
     },
   })
@@ -319,8 +322,9 @@ export function useRevokeConnectorArtifactGrant() {
   return useMutation({
     mutationFn: ({ workspaceId, projectId, replyGrantId, artifactGrantId }: { workspaceId: string; projectId: string; replyGrantId: string; artifactGrantId: string }) =>
       revokeConnectorArtifactGrant(workspaceId, projectId, replyGrantId, artifactGrantId),
-    onSuccess: (_result, { workspaceId, projectId, replyGrantId }) => {
+    onSuccess: (_result, { workspaceId, projectId, replyGrantId, artifactGrantId }) => {
       void queryClient.invalidateQueries({ queryKey: connectorArtifactGrantsQueryKey(workspaceId, projectId, replyGrantId) })
+      void queryClient.invalidateQueries({ queryKey: connectorArtifactGrantQueryKey(workspaceId, projectId, replyGrantId, artifactGrantId) })
     },
   })
 }
