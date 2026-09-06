@@ -29,6 +29,7 @@ from backend.api.v1.studio_helpers import (
 from backend.api.v1.studio_schemas import (
     DraftRead,
     DraftUpdate,
+    GaojixingResumeRequest,
     ProjectRuntimeLogRead,
     ProjectRuntimeSummaryRead,
     ProjectRuntimeTraceRead,
@@ -56,11 +57,14 @@ from backend.schemas import workflow as workflow_schemas
 from backend.schemas.common import ApiResponse, PaginationMeta
 from backend.schemas.workflow_runtime import WorkflowRunStatus, WorkflowRunTraceResponse
 from backend.security.identity import RequestIdentity, get_request_identity
+from backend.security.workspace_rbac import WorkspacePermission, require_permission
 from backend.services.agent_project_service import update_workflow_draft
 from backend.services.gaojixing_collection_service import (
     GaojixingCollectionConflictError,
+    GaojixingReconciliationAuthorization,
     resume_collection,
 )
+from backend.services.studio_agent_session_access import resolve_agent_session_workspace
 from backend.services.studio_workflow_runtime import (
     get_published_workflow_version,
     published_run_id,
@@ -892,6 +896,8 @@ async def resume_published_gaojixing_run(
     project_id: str,
     workflow_id: str,
     run_id: str,
+    body: GaojixingResumeRequest | None = None,
+    identity: RequestIdentity | None = Depends(_optional_request_identity),
     db: AsyncSession = Depends(get_db),
 ) -> ApiResponse[workflow_schemas.WorkflowRunProjection]:
     """Resume only a run owned by the requested Studio workflow scope."""
@@ -905,8 +911,40 @@ async def resume_published_gaojixing_run(
     )
     if job is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Gaojixing collection not found")
+    reconciliation = None
+    if body is not None and body.expected_chat_url is not None:
+        if identity is None:
+            raise HTTPException(
+                status.HTTP_401_UNAUTHORIZED,
+                "Bearer token required for explicit Gaojixing reconciliation",
+            )
+        scope = await resolve_agent_session_workspace(
+            db,
+            identity,
+            workspace_id,
+            context={
+                "project_id": project_id,
+                "workflow_id": workflow_id,
+                "run_id": run_id,
+            },
+        )
+        require_permission(scope.access, WorkspacePermission.APPROVE_ACTIONS)
+        reconciliation = GaojixingReconciliationAuthorization(
+            expected_chat_url=body.expected_chat_url,
+            governed_workspace_id=scope.workspace_id,
+            studio_workspace_id=scope.studio_workspace_id or workspace_id,
+            project_id=project_id,
+            workflow_id=workflow_id,
+            actor_user_id=scope.access.user_id,
+            actor_subject=identity.subject,
+            actor_auth_method=identity.auth_method,
+        )
     try:
-        await resume_collection(db, job_id=job.id)
+        await resume_collection(
+            db,
+            job_id=job.id,
+            reconciliation=reconciliation,
+        )
     except GaojixingCollectionConflictError as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
     projection = await get_workflow_run_projection(run_id, session=db)

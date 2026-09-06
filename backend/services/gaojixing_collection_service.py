@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
+from dataclasses import dataclass
 from inspect import isawaitable
 from pathlib import Path
 from typing import Any
@@ -21,7 +22,16 @@ from backend.models.gaojixing_collection import (
     GaojixingQuestionStatus,
     GaojixingRuntimeLease,
 )
+from backend.models.studio import StudioProject, StudioWorkflow
+from backend.models.workflow_run import WorkflowRun
+from backend.services.gaojixing_reconciliation import (
+    FORMAL_CHAT_URL,
+    append_server_reconciliation,
+    build_reconciliation_record,
+    read_managed_target_binding,
+)
 from backend.workflow.managed_gaojixing_question_batches import (
+    ManagedQuestionBatchError,
     resolve_managed_question_batch,
 )
 
@@ -30,6 +40,18 @@ DispatchCallback = Callable[[str], Any]
 
 class GaojixingCollectionConflictError(ValueError):
     """A workflow Run is already bound to different collection intent."""
+
+
+@dataclass(frozen=True)
+class GaojixingReconciliationAuthorization:
+    expected_chat_url: str
+    governed_workspace_id: str
+    studio_workspace_id: str
+    project_id: str
+    workflow_id: str
+    actor_user_id: str
+    actor_subject: str
+    actor_auth_method: str
 
 
 async def ensure_collection(
@@ -154,6 +176,7 @@ async def resume_collection(
     *,
     job_id: str,
     dispatch: DispatchCallback | None = None,
+    reconciliation: GaojixingReconciliationAuthorization | None = None,
 ) -> GaojixingCollectionRun | None:
     """Explicitly requeue a human-cleared checkpoint without permitting a new ask."""
 
@@ -184,6 +207,13 @@ async def resume_collection(
         raise GaojixingCollectionConflictError(
             "Waiting collection has no matching resumable checkpoint"
         )
+    if reconciliation is not None:
+        await _record_explicit_reconciliation(
+            session,
+            job=job,
+            checkpoint=checkpoint,
+            authorization=reconciliation,
+        )
     checkpoint.status = GaojixingQuestionStatus.IN_PROGRESS.value
     job.status = GaojixingCollectionRunStatus.QUEUED.value
     job.waiting_kind = None
@@ -203,6 +233,99 @@ async def resume_collection(
 
     queue_after_commit(session, publish)
     return job
+
+
+async def _record_explicit_reconciliation(
+    session: AsyncSession,
+    *,
+    job: GaojixingCollectionRun,
+    checkpoint: GaojixingQuestionCheckpoint,
+    authorization: GaojixingReconciliationAuthorization,
+) -> None:
+    expected_chat_url = authorization.expected_chat_url.strip()
+    if not FORMAL_CHAT_URL.fullmatch(expected_chat_url):
+        raise GaojixingCollectionConflictError("Expected Doubao chat URL is invalid")
+    workflow_run = await session.get(WorkflowRun, job.workflow_run_id)
+    if workflow_run is None or workflow_run.id != job.workflow_run_id:
+        raise GaojixingCollectionConflictError("Workflow Run is not available")
+    workflow = await session.scalar(
+        select(StudioWorkflow)
+        .join(StudioProject, StudioProject.id == StudioWorkflow.project_id)
+        .where(
+            StudioWorkflow.id == authorization.workflow_id,
+            StudioWorkflow.project_id == authorization.project_id,
+            StudioProject.workspace_id == authorization.studio_workspace_id,
+        )
+    )
+    if workflow is None or workflow_run.workflow_id != workflow.id:
+        raise GaojixingCollectionConflictError(
+            "Workflow Run is not owned by the requested Studio scope"
+        )
+    request_payload = (
+        workflow_run.request.get("input", {}).get("payload", {})
+        if isinstance(workflow_run.request, dict)
+        else {}
+    )
+    if not isinstance(request_payload, dict) or (
+        request_payload.get("questionBatchRef") != job.question_batch_ref
+    ):
+        raise GaojixingCollectionConflictError(
+            "Workflow Run question package does not match the collection"
+        )
+    try:
+        resolved = resolve_managed_question_batch(
+            job.question_batch_ref,
+            expected_run_id=workflow_run.id,
+        )
+        question_bank = json.loads(resolved.question_bank_path.read_text(encoding="utf-8"))
+    except (ManagedQuestionBatchError, OSError, ValueError, json.JSONDecodeError) as exc:
+        raise GaojixingCollectionConflictError("Managed question package is unavailable") from exc
+    if not isinstance(question_bank, dict):
+        raise GaojixingCollectionConflictError("Managed question package is unavailable")
+    matching_questions = [
+        row
+        for phase in ("phase1", "phase2")
+        for row in question_bank.get(phase, [])
+        if isinstance(row, dict) and row.get("id") == checkpoint.question_id
+    ]
+    if len(matching_questions) != 1 or matching_questions[0].get("question") != checkpoint.question:
+        raise GaojixingCollectionConflictError(
+            "Current checkpoint does not match the managed question package"
+        )
+    target = read_managed_target_binding(
+        resolved.project_root,
+        question_id=checkpoint.question_id,
+        question=checkpoint.question,
+    )
+    if target is None:
+        raise GaojixingCollectionConflictError(
+            "Current checkpoint has no valid managed target journal"
+        )
+    existing_url = target.get("conversation_url")
+    if existing_url is not None and existing_url != expected_chat_url:
+        raise GaojixingCollectionConflictError(
+            "Expected Doubao chat URL conflicts with the managed target journal"
+        )
+    record = build_reconciliation_record(
+        governed_workspace_id=authorization.governed_workspace_id,
+        studio_workspace_id=authorization.studio_workspace_id,
+        project_id=authorization.project_id,
+        workflow_id=authorization.workflow_id,
+        run_id=workflow_run.id,
+        collection_run_id=job.id,
+        question_id=checkpoint.question_id,
+        question=checkpoint.question,
+        target_id=str(target["target_id"]),
+        expected_chat_url=expected_chat_url,
+        actor_user_id=authorization.actor_user_id,
+        actor_subject=authorization.actor_subject,
+        actor_auth_method=authorization.actor_auth_method,
+    )
+    try:
+        workflow_run.request = append_server_reconciliation(workflow_run.request, record)
+    except ValueError as exc:
+        raise GaojixingCollectionConflictError(str(exc)) from exc
+    await session.flush()
 
 
 async def mark_collection_succeeded(
@@ -265,6 +388,7 @@ async def _dispatch_collection(job_id: str) -> None:
 
 __all__ = [
     "GaojixingCollectionConflictError",
+    "GaojixingReconciliationAuthorization",
     "ensure_collection",
     "mark_collection_succeeded",
     "mark_collection_review_failed",

@@ -26,6 +26,8 @@ from backend.models.gaojixing_collection import (
     GaojixingQuestionStatus,
     GaojixingRuntimeLease,
 )
+from backend.models.workflow_run import WorkflowRun
+from backend.services.gaojixing_reconciliation import validated_driver_reconciliation
 from backend.workflow.gaojixing_archive import (
     finalize_archive,
     promote_capture_artifacts,
@@ -85,7 +87,11 @@ class DriverPort(Protocol):
     async def collect(self, *, question_id: str, question: str) -> dict[str, Any]: ...
 
     async def inspect_current(
-        self, *, question_id: str, question: str
+        self,
+        *,
+        question_id: str,
+        question: str,
+        reconciliation: dict[str, str] | None = None,
     ) -> dict[str, Any] | None: ...
 
 
@@ -181,6 +187,7 @@ async def run_collection_job(
         }
         while True:
             async with session_factory() as session:
+                workflow_run = await session.get(WorkflowRun, workflow_run_id)
                 checkpoints = list(
                     (
                         await session.execute(
@@ -232,6 +239,13 @@ async def run_collection_job(
                     )
                     return "resume_pending"
                 return "workflow_resume_scheduled"
+            reconciliation = validated_driver_reconciliation(
+                workflow_run.request if workflow_run is not None else None,
+                workflow_run_id=workflow_run_id,
+                collection_run_id=job_id,
+                question_id=pending.question_id,
+                question=pending.question,
+            )
             if pending.phase == "phase2":
                 passed_phase1 = {
                     row.question_id
@@ -281,6 +295,7 @@ async def run_collection_job(
                 owner,
                 fencing_token,
                 lease_lost,
+                reconciliation,
             )
             if outcome is not None:
                 return outcome
@@ -301,6 +316,7 @@ async def _advance_question(
     owner: str,
     fencing_token: int,
     lease_lost: asyncio.Event,
+    reconciliation: dict[str, str] | None,
 ) -> WorkerOutcome | None:
     if checkpoint.status in {
         GaojixingQuestionStatus.WAITING_VERIFICATION.value,
@@ -337,20 +353,28 @@ async def _advance_question(
             )
 
     try:
-        capture = await _await_driver(
-            (
+        if recover_only:
+            inspection = (
                 driver.inspect_current(
                     question_id=checkpoint.question_id,
                     question=checkpoint.question,
+                    reconciliation=reconciliation,
                 )
-                if recover_only
-                else driver.collect(
+                if reconciliation is not None
+                else driver.inspect_current(
                     question_id=checkpoint.question_id,
                     question=checkpoint.question,
                 )
-            ),
-            lease_lost,
-        )
+            )
+            capture = await _await_driver(inspection, lease_lost)
+        else:
+            capture = await _await_driver(
+                driver.collect(
+                    question_id=checkpoint.question_id,
+                    question=checkpoint.question,
+                ),
+                lease_lost,
+            )
     except _LeaseLostError:
         return "lease_lost"
     except Exception as exc:

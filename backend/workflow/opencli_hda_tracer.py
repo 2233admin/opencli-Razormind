@@ -2653,7 +2653,14 @@ async def _store_workflow_run(
         row.package_node_id = projection.packageNodeId
         row.workflow_version_id = workflow_version_id
         row.studio_workflow_version_id = studio_workflow_version_id
-        stored_request = request.model_dump(mode="json")
+        from backend.services.gaojixing_reconciliation import (
+            preserve_server_reconciliations,
+        )
+
+        stored_request = preserve_server_reconciliations(
+            row.request,
+            request.model_dump(mode="json"),
+        )
         if conversation_origin is not None:
             stored_request[_SERVER_CONVERSATION_ORIGIN_KEY] = conversation_origin.model_dump(
                 mode="json"

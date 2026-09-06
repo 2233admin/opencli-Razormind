@@ -126,6 +126,16 @@ class ValidationRunRead(WorkflowRunProjection):
     warnings: list[WorkflowCompileError] = Field(default_factory=list)
 
 
+class GaojixingResumeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    expected_chat_url: str | None = Field(
+        default=None,
+        alias="expectedChatUrl",
+        pattern=r"^https://www\.doubao\.com/chat/\d+$",
+    )
+
+
 class ProjectRuntimeLogRead(UTCModel):
     run_id: str
     workflow_id: str
