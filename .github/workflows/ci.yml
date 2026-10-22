@@ -11,7 +11,7 @@ on:
 
 jobs:
   extension:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_5070X_ENABLED == 'true' && (((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && startsWith(github.ref, 'refs/heads/')) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'ci-5070x-linux' || 'ubuntu-latest' }}
     name: Browser Extension
     defaults:
       run:
@@ -44,7 +44,7 @@ jobs:
           path: chrome/extension-src/dist
 
   backend:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_5070X_ENABLED == 'true' && (((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && startsWith(github.ref, 'refs/heads/')) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'ci-5070x-linux' || 'ubuntu-latest' }}
     name: Backend Quality
     steps:
       - name: Checkout
@@ -76,7 +76,7 @@ jobs:
         run: pytest tests/unit -m "not live" --cov=backend --cov-report=term-missing --cov-fail-under=0
 
   migrations:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_5070X_ENABLED == 'true' && (((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && startsWith(github.ref, 'refs/heads/')) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'ci-5070x-docker' || 'ubuntu-latest' }}
     name: Alembic Migrations
     services:
       postgres:
@@ -137,7 +137,7 @@ jobs:
         run: pytest tests/unit/pipeline/test_db_cursor_store.py -k postgres --no-cov -p no:cacheprovider
 
   cargo:
-    runs-on: ubuntu-latest
+    runs-on: ${{ vars.CI_5070X_ENABLED == 'true' && (((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && startsWith(github.ref, 'refs/heads/')) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && 'ci-5070x-linux' || 'ubuntu-latest' }}
     name: ODP Rust (odp-rs)
     defaults:
       run:
